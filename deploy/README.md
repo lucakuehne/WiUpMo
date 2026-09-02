@@ -93,15 +93,19 @@ Passwortfeld, nicht in die URL.
 Darunter unter **Environment variables** setzen:
 
 ```
-BACKEND_IMAGE=wiupmo-backend:0.1.0
-DB_USER=wiupmo
-DB_NAME=wiupmo
 DB_PASSWORD=<erzeugter Wert>
 AGENT_ENROLLMENT_TOKEN=<erzeugter Wert>
-PORT=3000
-BIND_ADDRESS=0.0.0.0
-CORS_ORIGINS=
 ```
+
+Mehr ist nicht nötig — alles Übrige hat brauchbare Standardwerte, `BACKEND_IMAGE`
+eingeschlossen. Nach Bedarf zusätzlich:
+
+| Variable | Wann |
+|---|---|
+| `HOST_PORT` | Auf dem Host liegt schon etwas auf 3000. Im Container bleibt es 3000, nur die Veröffentlichung wandert. |
+| `BIND_ADDRESS` | `127.0.0.1`, sobald ein Reverse Proxy davorsteht. |
+| `BACKEND_IMAGE` | Eine feste Version statt `:main` (produktiv). |
+| `DB_USER`, `DB_NAME` | Abweichend von `wiupmo`. Nur beim allerersten Start wirksam — danach steckt es im Volume. |
 
 > **„Re-pull image"** nur ankreuzen, wenn `BACKEND_IMAGE` auf die Registry
 > zeigt. Bei einem lokal auf dem Host gebauten Image ginge der Pull-Versuch an
@@ -120,7 +124,9 @@ curl http://<host>:3000/health
 # {"status":"ok","database":"ok","uptimeSeconds":…}
 ```
 
-Die API-Dokumentation liegt unter `http://<host>:3000/api/docs`.
+Die API-Dokumentation liegt unter `http://<host>:3000/api/docs`. Ist `HOST_PORT`
+gesetzt, gilt überall dieser Port statt 3000 — auch für die Backend-Adresse des
+Agents.
 
 ### 5. Ersten Agent melden lassen
 

@@ -74,9 +74,14 @@ services:
         condition: service_completed_successfully
     environment: *backend-env
     ports:
+      # Nur die linke Seite ist verstellbar: im Container hoert das Backend
+      # immer auf 3000 (siehe PORT oben), nach aussen veroeffentlicht wird
+      # HOST_PORT. Das ist die Stellschraube, wenn auf dem Host schon etwas
+      # anderes auf 3000 liegt.
+      #
       # Das Backend gehoert ins Firmennetz bzw. hinter den VPN-Zugang, nicht ins
       # Internet. Steht ein Reverse Proxy davor, gehoert in BIND_ADDRESS 127.0.0.1.
-      - '${BIND_ADDRESS:-0.0.0.0}:${PORT:-3000}:3000'
+      - '${BIND_ADDRESS:-0.0.0.0}:${HOST_PORT:-3000}:3000'
     volumes:
       # Ablage der Agent-Binaries. Wird ab Phase 6 beschrieben; das Volume steht
       # schon hier, damit es beim ersten Release nicht neu angelegt werden muss.
