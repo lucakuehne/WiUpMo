@@ -27,6 +27,9 @@ import { DevicesController } from '../dist/src/devices/devices.controller.js';
 import { DevicesService } from '../dist/src/devices/devices.service.js';
 import { UpdatesController } from '../dist/src/updates/updates.controller.js';
 import { UpdatesService } from '../dist/src/updates/updates.service.js';
+import { AdController } from '../dist/src/ad/ad.controller.js';
+import { AdSyncService } from '../dist/src/ad/ad-sync.service.js';
+import { AdConfigService } from '../dist/src/ad/ad-config.js';
 import { HealthController } from '../dist/src/health/health.controller.js';
 import { Device, DeviceSecret } from '../dist/src/database/entities/index.js';
 import { getDataSourceToken } from '@nestjs/typeorm';
@@ -40,6 +43,7 @@ const moduleRef = await Test.createTestingModule({
     AuthController,
     DevicesController,
     UpdatesController,
+    AdController,
     HealthController,
   ],
   providers: [
@@ -48,6 +52,8 @@ const moduleRef = await Test.createTestingModule({
     { provide: AuthService, useValue: stub },
     { provide: DevicesService, useValue: stub },
     { provide: UpdatesService, useValue: stub },
+    { provide: AdSyncService, useValue: stub },
+    { provide: AdConfigService, useValue: stub },
     // Guards werden von Nest ueber den Container erzeugt; ohne Attrappe
     // scheiterte schon das Zusammenbauen des Moduls.
     { provide: SessionGuard, useValue: { canActivate: () => true } },

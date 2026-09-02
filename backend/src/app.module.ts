@@ -4,6 +4,7 @@ import { ServeStaticModule } from '@nestjs/serve-static';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { AdModule } from './ad/ad.module.js';
 import { AgentApiModule } from './agent-api/agent-api.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { validateEnv } from './config/env.validation.js';
@@ -35,6 +36,7 @@ const frontendAvailable = existsSync(frontendRoot);
     AuthModule,
     DevicesModule,
     UpdatesModule,
+    AdModule,
     ...(frontendAvailable
       ? [
           ServeStaticModule.forRoot({

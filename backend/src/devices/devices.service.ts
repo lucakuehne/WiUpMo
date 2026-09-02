@@ -301,6 +301,34 @@ export class DevicesService {
     }));
   }
 
+  /**
+   * Archiviert bzw. reaktiviert von Hand.
+   *
+   * Geloescht wird nie — auch hier nicht. Ein ausgemustertes Geraet behaelt
+   * seine Historie, damit Auswertungen ueber vergangene Zeitraeume stimmen.
+   *
+   * Zu beachten: Steht das Geraet weiterhin im AD, holt der naechste Abgleich
+   * es wieder zurueck. Das ist gewollt — das AD ist die fuehrende Quelle.
+   */
+  async setArchived(id: string, archived: boolean, reason: string | null): Promise<DeviceDetailDto> {
+    const result: Array<{ id: string }> = await this.dataSource.query(
+      `UPDATE devices SET
+         status          = $2,
+         archived_at     = CASE WHEN $2 = 'archived' THEN now() ELSE NULL END,
+         archived_reason = CASE WHEN $2 = 'archived' THEN $3 ELSE NULL END,
+         updated_at      = now()
+       WHERE id = $1
+       RETURNING id`,
+      [id, archived ? DeviceStatus.Archived : DeviceStatus.Active, reason],
+    );
+
+    if (result.length === 0) {
+      throw new NotFoundException('Geraet nicht gefunden.');
+    }
+
+    return this.detail(id);
+  }
+
   async timeline(deviceId: string, query: TimelineQueryDto): Promise<TimelineDto> {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT e.id::text AS id, e.event_type, e.occurred_at, e.reported_at, e.details,

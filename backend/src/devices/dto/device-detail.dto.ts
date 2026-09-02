@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { DeviceStatus, UpdateEventType, UpdateSource, UpdateState } from '../../database/enums.js';
 
 export class DeviceUpdateDto {
@@ -52,6 +52,13 @@ export class DeviceDetailDto {
 
   /** Die letzten Check-ins, neueste zuerst. */
   checkins: DeviceCheckinDto[];
+}
+
+export class ArchiveDeviceDto {
+  @IsString()
+  @MaxLength(512)
+  @IsOptional()
+  reason?: string;
 }
 
 export class TimelineQueryDto {

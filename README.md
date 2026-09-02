@@ -23,7 +23,7 @@ die Technologieentscheide, das Datenmodell und die Umsetzungsphasen.
 |---|---|---|
 | 1 | Schema, Backend-Grundgerüst, Enrollment, Check-in, minimaler Agent | fertig |
 | 2 | Agent als Windows-Dienst, Offline-Warteschlange, `--install` | fertig |
-| 3 | AD-Sync | offen |
+| 3 | AD-Sync: LDAP, Scheduler, Archivierung, Sync-Protokoll | fertig |
 | 4 | Frontend-Basis: Login, Geräteliste, Gerätedetail, Update-Katalog | fertig |
 | 5 | Auswertungen | offen |
 | 6 | Agent-Auto-Update | offen |
@@ -55,6 +55,21 @@ agent\publish\wiupmo-agent.exe --install --backend-url http://<host>:3000 --enro
 Das richtet den Dienst `WiUpMoAgent` ein und startet ihn. Zum Prüfen ohne
 Installation genügt `--once`. Details zu Betriebsarten, Konfiguration und Ablage
 stehen in [`agent/README.md`](agent/README.md).
+
+## Active Directory
+
+Optional. Ohne `AD_URL` und `AD_BASE_DN` bleibt der Abgleich aus und das System
+kennt nur Geräte, die sich über ihren Agent registriert haben.
+
+Ist er konfiguriert, liest er in einstellbarem Intervall alle Computerkonten
+unterhalb der Suchwurzel. Die Zuordnung läuft über die `objectGUID` — sie
+überlebt Umbenennungen und Verschiebungen. Geräte, die im AD verschwinden,
+werden **archiviert, nie gelöscht**; tauchen sie wieder auf, werden sie
+reaktiviert. Der Abgleich lässt sich unter *AD-Abgleich* auch von Hand
+auslösen, jeder Lauf ist dort protokolliert.
+
+Das Dienstkonto braucht ausschliesslich Leserecht auf die Computerobjekte. Die
+Variablen stehen in [`deploy/.env.example`](deploy/.env.example).
 
 ## Entwicklung ohne Docker
 

@@ -63,6 +63,15 @@ services:
       # Optional. Fehlt es, erzeugt das Backend einmalig ein Geheimnis und legt
       # es in den Einstellungen ab.
       JWT_SECRET: ${JWT_SECRET:-}
+      # Active Directory. Ohne AD_URL und AD_BASE_DN bleibt der Abgleich aus.
+      AD_URL: ${AD_URL:-}
+      AD_BASE_DN: ${AD_BASE_DN:-}
+      AD_BIND_DN: ${AD_BIND_DN:-}
+      AD_BIND_PASSWORD: ${AD_BIND_PASSWORD:-}
+      AD_FILTER: ${AD_FILTER:-(objectClass=computer)}
+      AD_SYNC_INTERVAL_MINUTES: ${AD_SYNC_INTERVAL_MINUTES:-360}
+      AD_STARTUP_DELAY_SECONDS: ${AD_STARTUP_DELAY_SECONDS:-60}
+      AD_TLS_REJECT_UNAUTHORIZED: ${AD_TLS_REJECT_UNAUTHORIZED:-true}
     command:
       - node
       - node_modules/typeorm/cli.js

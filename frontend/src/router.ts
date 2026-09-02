@@ -15,6 +15,7 @@ const router = createRouter({
       props: true,
     },
     { path: '/updates', name: 'updates', component: () => import('@/views/UpdatesView.vue') },
+    { path: '/ad', name: 'ad', component: () => import('@/views/AdSyncView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/devices' },
   ],
 });

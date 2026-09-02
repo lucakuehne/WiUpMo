@@ -18,6 +18,7 @@ const showNavigation = computed(
 const items = [
   { label: 'Geräte', icon: 'pi pi-desktop', route: '/devices' },
   { label: 'Updates', icon: 'pi pi-download', route: '/updates' },
+  { label: 'AD-Abgleich', icon: 'pi pi-sync', route: '/ad' },
 ];
 
 async function onLogout(): Promise<void> {

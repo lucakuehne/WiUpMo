@@ -146,3 +146,41 @@ export interface UpdateDevices {
   items: UpdateDevice[];
   unaffected: number;
 }
+
+export type AdSyncTrigger = 'scheduled' | 'manual';
+
+export type AdSyncStatus = 'running' | 'success' | 'failed';
+
+export interface AdSyncRun {
+  id: string;
+  startedAt: string;
+  finishedAt: string | null;
+  trigger: AdSyncTrigger;
+  devicesFound: number;
+  devicesCreated: number;
+  devicesArchived: number;
+  status: AdSyncStatus;
+  error: string | null;
+}
+
+export interface AdSyncResult {
+  id: string;
+  status: AdSyncStatus;
+  devicesFound: number;
+  devicesCreated: number;
+  devicesArchived: number;
+  devicesReactivated: number;
+  error: string | null;
+}
+
+export interface AdStatus {
+  enabled: boolean;
+  url: string;
+  baseDn: string;
+  bindDn: string;
+  bindPasswordSet: boolean;
+  filter: string;
+  intervalMinutes: number;
+  running: boolean;
+  lastRun: AdSyncRun | null;
+}
