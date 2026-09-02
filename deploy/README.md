@@ -36,14 +36,28 @@ sichtbar, welcher Stand läuft, und ein Rücksprung ist der vorherige Tag.
 Voraussetzung: SSH-Zugang zum Docker-Host und ein GitHub-Repository mit diesem
 Stand.
 
-### 1. Image auf dem Host bauen
+### 1. Image besorgen
+
+**Der kurze Weg:** Ist der Workflow für den gewünschten Stand gelaufen, liegt
+das Image bereits in der Registry und dieser Schritt entfällt vollständig —
+weiter bei Schritt 2, mit `BACKEND_IMAGE` aus [Teil 2](#ci-baut-portainer-zieht).
+
+**Auf dem Host bauen** braucht es nur, wenn ein Stand getestet werden soll, den
+die CI nicht gebaut hat:
 
 ```bash
 git clone https://github.com/<org>/WiUpMo.git
-cd WiUpMo/deploy
-docker compose -f docker-compose.yml -f docker-compose.build.yml build
+cd WiUpMo
+docker build -f deploy/Dockerfile -t wiupmo-backend:0.1.0 .
 docker images wiupmo-backend        # sollte 0.1.0 zeigen
 ```
+
+> Bewusst `docker build` statt `docker compose build`: Compose wertet beim
+> Parsen die ganze Datei aus, also auch die Pflichtprüfungen auf `DB_PASSWORD`
+> und `AGENT_ENROLLMENT_TOKEN`. Zum Bauen braucht es beides nicht, und ein
+> `.env` mit Geheimnissen soll auf dem Host gar nicht erst nötig sein — die
+> Werte gehören in Portainer. `docker-compose.build.yml` ist für den Fall
+> gedacht, dass der ganze Stack ohne Portainer läuft, siehe unten.
 
 Der Build lädt die Abhängigkeiten aus dem Netz — der Host braucht dafür einmalig
 Zugriff auf `registry.npmjs.org` und `ghcr.io`/Docker Hub.
@@ -89,8 +103,9 @@ BIND_ADDRESS=0.0.0.0
 CORS_ORIGINS=
 ```
 
-> **Nicht ankreuzen:** „Re-pull image". Das Image liegt in dieser Phase nur
-> lokal auf dem Host; ein Pull-Versuch ginge an Docker Hub und schlüge fehl.
+> **„Re-pull image"** nur ankreuzen, wenn `BACKEND_IMAGE` auf die Registry
+> zeigt. Bei einem lokal auf dem Host gebauten Image ginge der Pull-Versuch an
+> Docker Hub und schlüge fehl.
 
 Dann **Deploy the stack**.
 
@@ -138,12 +153,21 @@ baut bei jedem Commit an `backend/` ein Image und legt es unter
 das Image-Tag `0.2.0`. Die Registry gehört zum GitHub-Konto — es braucht keine
 zusätzliche Infrastruktur.
 
-Einmalig in Portainer unter **Registries** eine Registry `ghcr.io` mit einem
-GitHub-Token (Berechtigung `read:packages`) hinterlegen. Danach genügt im Stack:
+Solange das Repository öffentlich ist, ist es auch das Paket — Portainer zieht
+das Image dann ohne Zugangsdaten. Im Stack genügt:
 
 ```
-BACKEND_IMAGE=ghcr.io/<org>/wiupmo/backend:0.2.0
+BACKEND_IMAGE=ghcr.io/lucakuehne/wiupmo/backend:0.2.0
 ```
+
+Wird das Repository später privat, ist einmalig in Portainer unter
+**Registries** eine Registry `ghcr.io` mit einem GitHub-Token (Berechtigung
+`read:packages`) zu hinterlegen.
+
+**Immer einen festen Tag eintragen, nie `main`.** Der Branch-Tag wandert; welcher
+Stand tatsächlich läuft, wäre danach nicht mehr feststellbar, und ein „Re-pull"
+tauschte das Image unbemerkt aus. Für einen Zwischenstand ohne Version eignet
+sich der `sha-…`-Tag, den derselbe Workflow mitschreibt.
 
 ### Aktualisieren
 

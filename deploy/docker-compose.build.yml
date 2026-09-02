@@ -1,8 +1,14 @@
-# Ergaenzung zum Bauen des Backend-Images von Hand — auf dem Docker-Host oder
-# auf einem Entwicklungsrechner:
+# Ergaenzung zum Bauen des Backend-Images, gedacht fuer den Fall, dass der ganze
+# Stack ohne Portainer laeuft:
 #
 #   cd deploy
 #   docker compose -f docker-compose.yml -f docker-compose.build.yml build
+#
+# Das setzt ein ausgefuelltes .env voraus — Compose wertet beim Parsen die ganze
+# Datei aus, einschliesslich der Pflichtpruefungen auf DB_PASSWORD und
+# AGENT_ENROLLMENT_TOKEN. Wer nur das Image will, nimmt deshalb besser:
+#
+#   docker build -f deploy/Dockerfile -t wiupmo-backend:0.1.0 .   (aus der Wurzel)
 #
 # Das Ergebnis wird unter dem Namen aus BACKEND_IMAGE abgelegt und ist damit
 # genau das Image, das docker-compose.yml startet.
