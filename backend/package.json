@@ -20,6 +20,8 @@
     "migration:run": "pnpm build && typeorm -d dist/src/database/data-source.js migration:run",
     "migration:revert": "pnpm build && typeorm -d dist/src/database/data-source.js migration:revert",
     "migration:show": "pnpm build && typeorm -d dist/src/database/data-source.js migration:show",
+    "//check:openapi": "Faengt DTOs ab, an denen SwaggerModule.createDocument beim Start scheitern wuerde. Braucht keine Datenbank.",
+    "check:openapi": "node scripts/check-openapi.mjs",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:e2e": "jest --config test/jest-e2e.json"
