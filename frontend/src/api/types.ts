@@ -173,6 +173,38 @@ export interface AdSyncResult {
   error: string | null;
 }
 
+export interface AdSettingsView {
+  url: string;
+  baseDn: string;
+  bindDn: string;
+  /** Das Passwort selbst wird nie ausgeliefert. */
+  bindPasswordSet: boolean;
+  filter: string;
+  pageSize: number;
+  intervalMinutes: number;
+  startupDelaySeconds: number;
+  tlsRejectUnauthorized: boolean;
+  timeoutSeconds: number;
+  configured: boolean;
+}
+
+export interface ThresholdSettings {
+  staleAgentDays: number;
+  criticalOpenDays: number;
+  pendingRebootDays: number;
+}
+
+export interface RetentionSettings {
+  eventDays: number;
+  checkinDays: number;
+}
+
+export interface SettingsView {
+  ad: AdSettingsView;
+  thresholds: ThresholdSettings;
+  retention: RetentionSettings;
+}
+
 export interface AdStatus {
   enabled: boolean;
   url: string;

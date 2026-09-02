@@ -19,6 +19,7 @@ const items = [
   { label: 'Geräte', icon: 'pi pi-desktop', route: '/devices' },
   { label: 'Updates', icon: 'pi pi-download', route: '/updates' },
   { label: 'AD-Abgleich', icon: 'pi pi-sync', route: '/ad' },
+  { label: 'Einstellungen', icon: 'pi pi-cog', route: '/settings' },
 ];
 
 async function onLogout(): Promise<void> {

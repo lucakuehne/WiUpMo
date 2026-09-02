@@ -2,7 +2,8 @@ import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { AdSyncStatus, AdSyncTrigger, DeviceStatus } from '../database/enums.js';
-import { AdConfigService } from './ad-config.js';
+import { SettingsService } from '../settings/settings.service.js';
+import { isAdConfigured } from '../settings/settings.types.js';
 import { AdComputer, LdapClient } from './ldap.client.js';
 
 export interface AdSyncResult {
@@ -31,7 +32,7 @@ export class AdSyncService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly ldap: LdapClient,
-    private readonly configService: AdConfigService,
+    private readonly settings: SettingsService,
   ) {}
 
   get isRunning(): boolean {
@@ -39,9 +40,11 @@ export class AdSyncService {
   }
 
   async sync(trigger: AdSyncTrigger): Promise<AdSyncResult> {
-    if (!this.configService.config.enabled) {
+    const config = await this.settings.getAd();
+
+    if (!isAdConfigured(config)) {
       throw new ConflictException(
-        'Die AD-Anbindung ist nicht konfiguriert (AD_URL und AD_BASE_DN fehlen).',
+        'Die AD-Anbindung ist nicht konfiguriert. Server und Suchwurzel fehlen (Einstellungen).',
       );
     }
 
@@ -53,7 +56,7 @@ export class AdSyncService {
     const runId = await this.startRun(trigger);
 
     try {
-      const computers = await this.ldap.fetchComputers();
+      const computers = await this.ldap.fetchComputers(config);
 
       // Kein einziger Treffer ist kein leeres Verzeichnis, sondern fast immer
       // eine falsche Suchwurzel oder ein zu enger Filter. Wuerde der Abgleich

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Client, type Entry } from 'ldapts';
-import { AdConfigService } from './ad-config.js';
+import { AdSettings } from '../settings/settings.types.js';
 
 /** Ein Computerkonto, auf das Noetigste eingedampft. */
 export interface AdComputer {
@@ -16,8 +16,6 @@ export interface AdComputer {
 export class LdapClient {
   private readonly logger = new Logger(LdapClient.name);
 
-  constructor(private readonly configService: AdConfigService) {}
-
   /**
    * Liest alle Computerkonten unterhalb der Suchwurzel.
    *
@@ -26,9 +24,7 @@ export class LdapClient {
    * weglaesst — bei einer groesseren Flotte waere die Folge, dass die fehlenden
    * Geraete als "im AD verschwunden" archiviert wuerden.
    */
-  async fetchComputers(): Promise<AdComputer[]> {
-    const config = this.configService.config;
-
+  async fetchComputers(config: AdSettings): Promise<AdComputer[]> {
     const client = new Client({
       url: config.url,
       timeout: config.timeoutSeconds * 1000,

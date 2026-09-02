@@ -11,6 +11,7 @@ import { validateEnv } from './config/env.validation.js';
 import { dataSourceOptions } from './database/data-source.js';
 import { DevicesModule } from './devices/devices.module.js';
 import { HealthController } from './health/health.controller.js';
+import { SettingsModule } from './settings/settings.module.js';
 import { UpdatesModule } from './updates/updates.module.js';
 
 /**
@@ -36,6 +37,7 @@ const frontendAvailable = existsSync(frontendRoot);
     AuthModule,
     DevicesModule,
     UpdatesModule,
+    SettingsModule,
     AdModule,
     ...(frontendAvailable
       ? [

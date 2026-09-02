@@ -2,7 +2,8 @@ import { Controller, Get, HttpCode, HttpStatus, Post, Query, UseGuards } from '@
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SessionGuard } from '../auth/session.guard.js';
 import { AdSyncStatus, AdSyncTrigger } from '../database/enums.js';
-import { AdConfigService } from './ad-config.js';
+import { SettingsService } from '../settings/settings.service.js';
+import { isAdConfigured } from '../settings/settings.types.js';
 import { AdSyncService } from './ad-sync.service.js';
 import { AdStatusDto, AdSyncResultDto, AdSyncRunDto, SyncRunsQueryDto } from './dto/ad.dto.js';
 
@@ -12,23 +13,23 @@ import { AdStatusDto, AdSyncResultDto, AdSyncRunDto, SyncRunsQueryDto } from './
 export class AdController {
   constructor(
     private readonly sync: AdSyncService,
-    private readonly configService: AdConfigService,
+    private readonly settings: SettingsService,
   ) {}
 
   @Get('status')
   @ApiOperation({ summary: 'Konfiguration und letzter Abgleich.' })
   async status(): Promise<AdStatusDto> {
-    const summary = this.configService.summary;
+    const config = await this.settings.getAd();
     const runs = await this.sync.recentRuns(1);
 
     return {
-      enabled: summary.enabled,
-      url: summary.url,
-      baseDn: summary.baseDn,
-      bindDn: summary.bindDn,
-      bindPasswordSet: summary.bindPasswordSet,
-      filter: summary.filter,
-      intervalMinutes: summary.intervalMinutes,
+      enabled: isAdConfigured(config),
+      url: config.url,
+      baseDn: config.baseDn,
+      bindDn: config.bindDn,
+      bindPasswordSet: config.bindPassword !== '',
+      filter: config.filter,
+      intervalMinutes: config.intervalMinutes,
       running: this.sync.isRunning,
       lastRun: runs[0] ? toRunDto(runs[0]) : null,
     };
