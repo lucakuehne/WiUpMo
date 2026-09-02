@@ -11,6 +11,10 @@
 # Lockfile aendern.
 FROM node:24-alpine AS deps
 WORKDIR /app
+# Ohne diese Variable fragt corepack beim ersten Herunterladen von pnpm
+# interaktiv nach — im Build gibt es niemanden, der antwortet, und der Schritt
+# bleibt haengen bzw. bricht ab.
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 COPY backend/package.json backend/pnpm-lock.yaml backend/pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
@@ -32,6 +36,10 @@ RUN pnpm build
 FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+# Ohne diese Variable fragt corepack beim ersten Herunterladen von pnpm
+# interaktiv nach — im Build gibt es niemanden, der antwortet, und der Schritt
+# bleibt haengen bzw. bricht ab.
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 
 COPY backend/package.json backend/pnpm-lock.yaml backend/pnpm-workspace.yaml ./

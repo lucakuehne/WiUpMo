@@ -1,0 +1,18 @@
+# Ergaenzung zum Bauen des Backend-Images von Hand — auf dem Docker-Host oder
+# auf einem Entwicklungsrechner:
+#
+#   cd deploy
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml build
+#
+# Das Ergebnis wird unter dem Namen aus BACKEND_IMAGE abgelegt und ist damit
+# genau das Image, das docker-compose.yml startet.
+#
+# Nur `backend` traegt den Bauabschnitt: `migrate` benutzt dasselbe Image, und
+# ein zweiter Bauauftrag darauf waere reine Doppelarbeit.
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: ${BACKEND_IMAGE:-wiupmo-backend:0.1.0}

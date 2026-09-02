@@ -14,7 +14,7 @@ die Technologieentscheide, das Datenmodell und die Umsetzungsphasen.
 | [`agent/`](agent/) | .NET 10, Windows | Liest lokal den Update-Status und meldet ihn |
 | [`backend/`](backend/) | NestJS + PostgreSQL | Nimmt Meldungen entgegen, stellt die REST-API bereit |
 | [`shared/`](shared/) | OpenAPI | Vertrag zwischen Agent, Backend und Frontend |
-| [`deploy/`](deploy/) | Docker Compose | Backend und Datenbank |
+| [`deploy/`](deploy/) | Docker Compose | Backend und Datenbank, [Betriebsanleitung](deploy/README.md) |
 | `frontend/` | Vue 3 + PrimeVue | Folgt in Phase 4 |
 
 ## Stand
@@ -34,9 +34,14 @@ die Technologieentscheide, das Datenmodell und die Umsetzungsphasen.
 ```bash
 cd deploy
 cp .env.example .env        # DB_PASSWORD und AGENT_ENROLLMENT_TOKEN setzen
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.build.yml build
+docker compose up -d
 curl http://localhost:3000/health
 ```
+
+Der Stack startet ein fertig getaggtes Image und baut es nicht selbst — der
+Bauschritt ist deshalb ein eigener Aufruf. Der Grund und der Weg über Portainer
+stehen in [`deploy/README.md`](deploy/README.md).
 
 Die API-Dokumentation liegt danach unter `http://localhost:3000/api/docs`.
 

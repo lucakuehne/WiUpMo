@@ -1,29 +1,30 @@
-# Start:
-#   cp .env.example .env   und Werte setzen
-#   docker compose up -d --build
+# Stack fuer Backend und Datenbank.
+#
+# Diese Datei baut bewusst nichts: sie startet ein fertig getaggtes Image. Der
+# Grund ist Portainer — dort ist das Bauen aus einem Git-Stack der unzuverlaessige
+# Weg (der noetige Relative Path Support gibt es nur in der Business Edition).
+# Gebaut wird deshalb ausserhalb, siehe docker-compose.build.yml und README.md.
 #
 # Die Migrationen laufen als eigener, einmaliger Dienst vor dem Backend. Sie im
 # Anwendungsstart mitlaufen zu lassen (`migrationsRun`) waere bequemer, ist aber
 # falsch, sobald mehr als eine Instanz startet: dann wenden zwei Prozesse
 # gleichzeitig dieselbe Migration an.
 
-name: wium
-
 services:
   postgres:
     image: postgres:18-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${DB_USER:-wium}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD muss in .env gesetzt sein}
-      POSTGRES_DB: ${DB_NAME:-wium}
+      POSTGRES_USER: ${DB_USER:-wiupmo}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD muss gesetzt sein}
+      POSTGRES_DB: ${DB_NAME:-wiupmo}
       # Ohne feste Locale legt das Image die Datenbank mit der des Hosts an —
-      # damit haenge die Sortierreihenfolge davon ab, wo der Container gebaut wurde.
+      # damit haenge die Sortierreihenfolge davon ab, wo der Container lief.
       POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C'
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-wium} -d ${DB_NAME:-wium}']
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-wiupmo} -d ${DB_NAME:-wiupmo}']
       interval: 10s
       timeout: 5s
       retries: 10
@@ -34,9 +35,7 @@ services:
       - '5432'
 
   migrate:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    image: ${BACKEND_IMAGE:-wiupmo-backend:0.1.0}
     restart: 'no'
     depends_on:
       postgres:
@@ -46,11 +45,11 @@ services:
       PORT: '3000'
       DB_HOST: postgres
       DB_PORT: '5432'
-      DB_USER: ${DB_USER:-wium}
+      DB_USER: ${DB_USER:-wiupmo}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_NAME: ${DB_NAME:-wium}
+      DB_NAME: ${DB_NAME:-wiupmo}
       DB_SSL: 'false'
-      AGENT_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:?AGENT_ENROLLMENT_TOKEN muss in .env gesetzt sein}
+      AGENT_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:?AGENT_ENROLLMENT_TOKEN muss gesetzt sein}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
     command:
       - node
@@ -60,9 +59,7 @@ services:
       - 'migration:run'
 
   backend:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    image: ${BACKEND_IMAGE:-wiupmo-backend:0.1.0}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -71,8 +68,8 @@ services:
         condition: service_completed_successfully
     environment: *backend-env
     ports:
-      # Nur an die interne Adresse binden. Das Backend gehoert ins Firmennetz
-      # bzw. hinter den VPN-Zugang, nicht ins Internet.
+      # Das Backend gehoert ins Firmennetz bzw. hinter den VPN-Zugang, nicht ins
+      # Internet. Steht ein Reverse Proxy davor, gehoert in BIND_ADDRESS 127.0.0.1.
       - '${BIND_ADDRESS:-0.0.0.0}:${PORT:-3000}:3000'
     volumes:
       # Ablage der Agent-Binaries. Wird ab Phase 6 beschrieben; das Volume steht
