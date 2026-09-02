@@ -7,6 +7,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import type { Relation } from 'typeorm';
 import { DeviceStatus, PG_ENUM } from '../enums.js';
 import { DeviceSecret } from './device-secret.entity.js';
 import { DeviceCheckin } from './device-checkin.entity.js';
@@ -75,11 +76,11 @@ export class Device {
   updatedAt: Date;
 
   @OneToMany(() => DeviceSecret, (secret) => secret.device)
-  secrets: DeviceSecret[];
+  secrets: Relation<DeviceSecret[]>;
 
   @OneToMany(() => DeviceCheckin, (checkin) => checkin.device)
-  checkins: DeviceCheckin[];
+  checkins: Relation<DeviceCheckin[]>;
 
   @OneToMany(() => DeviceUpdateState, (state) => state.device)
-  updateStates: DeviceUpdateState[];
+  updateStates: Relation<DeviceUpdateState[]>;
 }

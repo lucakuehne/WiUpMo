@@ -1,4 +1,5 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryColumn } from 'typeorm';
+import type { Relation } from 'typeorm';
 import { PG_ENUM, UpdateState } from '../enums.js';
 import { Device } from './device.entity.js';
 import { Update } from './update.entity.js';
@@ -21,11 +22,11 @@ export class DeviceUpdateState {
 
   @ManyToOne(() => Device, (device) => device.updateStates, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'device_id' })
-  device: Device;
+  device: Relation<Device>;
 
   @ManyToOne(() => Update, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'update_id' })
-  update: Update;
+  update: Relation<Update>;
 
   @Column({ type: 'enum', enum: UpdateState, enumName: PG_ENUM.updateState })
   state: UpdateState;

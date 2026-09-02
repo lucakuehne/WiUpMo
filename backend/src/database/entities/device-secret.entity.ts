@@ -7,6 +7,7 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
+import type { Relation } from 'typeorm';
 import { Device } from './device.entity.js';
 
 /**
@@ -29,7 +30,7 @@ export class DeviceSecret {
 
   @ManyToOne(() => Device, (device) => device.secrets, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'device_id' })
-  device: Device;
+  device: Relation<Device>;
 
   @Column({ type: 'text', name: 'secret_hash' })
   secretHash: string;

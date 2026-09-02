@@ -6,6 +6,7 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
+import type { Relation } from 'typeorm';
 import { PG_ENUM, UpdateEventType } from '../enums.js';
 import { Device } from './device.entity.js';
 import { Update } from './update.entity.js';
@@ -31,14 +32,14 @@ export class DeviceUpdateEvent {
 
   @ManyToOne(() => Device, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'device_id' })
-  device: Device;
+  device: Relation<Device>;
 
   @Column({ type: 'uuid', name: 'update_id' })
   updateId: string;
 
   @ManyToOne(() => Update, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'update_id' })
-  update: Update;
+  update: Relation<Update>;
 
   @Column({
     type: 'enum',

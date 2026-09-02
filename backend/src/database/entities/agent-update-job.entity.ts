@@ -6,6 +6,7 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
+import type { Relation } from 'typeorm';
 import { AgentUpdateJobState, PG_ENUM } from '../enums.js';
 import { Device } from './device.entity.js';
 
@@ -21,7 +22,7 @@ export class AgentUpdateJob {
 
   @ManyToOne(() => Device, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'device_id' })
-  device: Device;
+  device: Relation<Device>;
 
   @Column({ type: 'text', name: 'target_version' })
   targetVersion: string;

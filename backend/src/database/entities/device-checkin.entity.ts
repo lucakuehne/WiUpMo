@@ -6,6 +6,7 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
+import type { Relation } from 'typeorm';
 import { PG_ENUM, UpdateSource } from '../enums.js';
 import { Device } from './device.entity.js';
 
@@ -20,7 +21,7 @@ export class DeviceCheckin {
 
   @ManyToOne(() => Device, (device) => device.checkins, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'device_id' })
-  device: Device;
+  device: Relation<Device>;
 
   /**
    * Vom Agent erzeugte GUID. Die Eindeutigkeitsbedingung darauf ist der
