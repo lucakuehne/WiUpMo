@@ -1,0 +1,90 @@
+# Start:
+#   cp .env.example .env   und Werte setzen
+#   docker compose up -d --build
+#
+# Die Migrationen laufen als eigener, einmaliger Dienst vor dem Backend. Sie im
+# Anwendungsstart mitlaufen zu lassen (`migrationsRun`) waere bequemer, ist aber
+# falsch, sobald mehr als eine Instanz startet: dann wenden zwei Prozesse
+# gleichzeitig dieselbe Migration an.
+
+name: wium
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-wium}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD muss in .env gesetzt sein}
+      POSTGRES_DB: ${DB_NAME:-wium}
+      # Ohne feste Locale legt das Image die Datenbank mit der des Hosts an —
+      # damit haenge die Sortierreihenfolge davon ab, wo der Container gebaut wurde.
+      POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-wium} -d ${DB_NAME:-wium}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    # Kein Port nach aussen: nur das Backend spricht mit der Datenbank. Zum
+    # Debuggen bei Bedarf voruebergehend "127.0.0.1:5432:5432" ergaenzen.
+    expose:
+      - '5432'
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &backend-env
+      NODE_ENV: production
+      PORT: '3000'
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      DB_USER: ${DB_USER:-wium}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-wium}
+      DB_SSL: 'false'
+      AGENT_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:?AGENT_ENROLLMENT_TOKEN muss in .env gesetzt sein}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    command:
+      - node
+      - node_modules/typeorm/cli.js
+      - '-d'
+      - dist/src/database/data-source.js
+      - 'migration:run'
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment: *backend-env
+    ports:
+      # Nur an die interne Adresse binden. Das Backend gehoert ins Firmennetz
+      # bzw. hinter den VPN-Zugang, nicht ins Internet.
+      - '${BIND_ADDRESS:-0.0.0.0}:${PORT:-3000}:3000'
+    volumes:
+      # Ablage der Agent-Binaries. Wird ab Phase 6 beschrieben; das Volume steht
+      # schon hier, damit es beim ersten Release nicht neu angelegt werden muss.
+      - agent-releases:/app/agent-releases
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3000/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  postgres-data:
+  agent-releases:

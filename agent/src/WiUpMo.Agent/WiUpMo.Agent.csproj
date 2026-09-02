@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>WiUpMo.Agent</RootNamespace>
+    <AssemblyName>wiupmo-agent</AssemblyName>
+    <Version>0.1.0</Version>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!--
+      Der Zugriff auf WUApi laeuft ueber spaete Bindung (IDispatch). Der
+      typisierte Weg ueber <COMReference> scheidet aus: die MSBuild-Aufgabe
+      ResolveComReference gibt es nur im .NET-Framework-MSBuild aus Visual
+      Studio, nicht unter `dotnet build` — das waere eine VS-Abhaengigkeit
+      fuer jeden Build und jede CI.
+    -->
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+
+    <!--
+      Wird beim Publish zu einer einzelnen EXE mit mitgelieferter Runtime.
+      Kein PublishTrimmed: Trimming wuerde die fuer die spaete Bindung
+      benoetigten Metadaten entfernen.
+    -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <PublishTrimmed>false</PublishTrimmed>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.CommandLine" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.11" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
+  </ItemGroup>
+
+</Project>

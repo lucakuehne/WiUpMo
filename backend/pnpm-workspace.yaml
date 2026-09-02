@@ -1,0 +1,17 @@
+# pnpm 11 liest seine Einstellungen aus dieser Datei, nicht mehr aus .npmrc.
+
+# Freigabe von Install-Skripten. pnpm blockiert sie seit Version 10
+# standardmaessig, weil ein postinstall-Skript beliebigen Code ausfuehrt.
+allowBuilds:
+  # Native Datei-Ueberwachung fuer `nest start --watch`.
+  '@parcel/watcher': true
+  # Native Bindings des Modul-Resolvers; ohne postinstall laedt das Paket nicht.
+  unrs-resolver: true
+  # Reine Nutzungstelemetrie einer Transitivabhaengigkeit — nicht noetig.
+  '@scarf/scarf': false
+
+# pnpm sperrt frisch veroeffentlichte Versionen (Schutz gegen kompromittierte
+# Pakete). Diese beiden wollen wir bewusst in genau dieser Version.
+minimumReleaseAgeExclude:
+  - '@types/node@26.4.1'
+  - typeorm@1.1.1

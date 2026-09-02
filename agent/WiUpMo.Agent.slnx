@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/WiUpMo.Agent/WiUpMo.Agent.csproj" />
+  </Folder>
+</Solution>

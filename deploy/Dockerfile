@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1
+#
+# Build-Kontext ist das Repository-Wurzelverzeichnis, nicht deploy/ — der Build
+# braucht backend/ und ab Phase 4 auch frontend/.
+#
+#   docker build -f deploy/Dockerfile -t wium-backend .
+
+# --- Abhaengigkeiten ---------------------------------------------------------
+# Eigene Stufe, damit ein reiner Quelltext-Commit den Installationsschritt nicht
+# ungueltig macht: die Ebene wird nur neu gebaut, wenn sich Manifest oder
+# Lockfile aendern.
+FROM node:24-alpine AS deps
+WORKDIR /app
+RUN corepack enable
+COPY backend/package.json backend/pnpm-lock.yaml backend/pnpm-workspace.yaml ./
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
+
+# --- Uebersetzen -------------------------------------------------------------
+FROM deps AS build
+WORKDIR /app
+COPY backend/ ./
+RUN pnpm build
+
+# In Phase 4 kommt hier die Frontend-Stufe dazu:
+#   FROM node:24-alpine AS frontend
+#   ... npm run build ...
+# und das Ergebnis wird unten nach /app/public kopiert.
+
+# --- Laufzeit ----------------------------------------------------------------
+# Nur Produktivabhaengigkeiten, kein Quelltext, kein pnpm-Store.
+FROM node:24-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+RUN corepack enable
+
+COPY backend/package.json backend/pnpm-lock.yaml backend/pnpm-workspace.yaml ./
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --prod
+
+COPY --from=build /app/dist ./dist
+
+# Der Container laeuft nicht als root. Das Image von node bringt den Benutzer
+# `node` bereits mit.
+USER node
+
+EXPOSE 3000
+
+# Kein Healthcheck im Image: docker-compose definiert ihn, damit er dort
+# zusammen mit depends_on sichtbar ist.
+CMD ["node", "dist/src/main.js"]

@@ -1,0 +1,109 @@
+import { plainToInstance, Transform } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  MinLength,
+  validateSync,
+} from 'class-validator';
+
+export enum NodeEnv {
+  Development = 'development',
+  Test = 'test',
+  Production = 'production',
+}
+
+/**
+ * `.env`-Werte sind immer Zeichenketten. Diese beiden Helfer wandeln sie in den
+ * erwarteten Typ um, damit die Validierung unten etwas Sinnvolles pruefen kann.
+ */
+const toInt = () =>
+  Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)));
+
+const toBool = () =>
+  Transform(({ value }) => {
+    if (typeof value === 'boolean') return value;
+    if (value === undefined || value === '') return undefined;
+    return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
+  });
+
+export class EnvironmentVariables {
+  @IsEnum(NodeEnv)
+  @IsOptional()
+  NODE_ENV: NodeEnv = NodeEnv.Development;
+
+  @toInt()
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  @IsOptional()
+  PORT: number = 3000;
+
+  @IsString()
+  DB_HOST: string;
+
+  @toInt()
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  @IsOptional()
+  DB_PORT: number = 5432;
+
+  @IsString()
+  DB_USER: string;
+
+  @IsString()
+  DB_PASSWORD: string;
+
+  @IsString()
+  DB_NAME: string;
+
+  @toBool()
+  @IsBoolean()
+  @IsOptional()
+  DB_SSL: boolean = false;
+
+  /**
+   * Gemeinsames Geheimnis, mit dem sich ein Agent einmalig registriert. Danach
+   * arbeitet er mit seinem eigenen, pro Geraet erzeugten Secret weiter.
+   * Mindestlaenge, damit hier nicht versehentlich "test" landet.
+   */
+  @IsString()
+  @MinLength(16, {
+    message: 'AGENT_ENROLLMENT_TOKEN muss mindestens 16 Zeichen lang sein.',
+  })
+  AGENT_ENROLLMENT_TOKEN: string;
+
+  /**
+   * Erlaubte Herkuenfte fuer das Frontend, kommagetrennt. Leer = keine
+   * Cross-Origin-Freigabe (Frontend wird vom selben Container ausgeliefert).
+   */
+  @IsString()
+  @IsOptional()
+  CORS_ORIGINS: string = '';
+}
+
+export function validateEnv(raw: Record<string, unknown>): EnvironmentVariables {
+  const parsed = plainToInstance(EnvironmentVariables, raw, {
+    enableImplicitConversion: false,
+    exposeDefaultValues: true,
+  });
+
+  const errors = validateSync(parsed, {
+    skipMissingProperties: false,
+    whitelist: false,
+  });
+
+  if (errors.length > 0) {
+    const details = errors
+      .map((e) => `  ${e.property}: ${Object.values(e.constraints ?? {}).join(', ')}`)
+      .join('\n');
+    throw new Error(`Ungueltige Umgebungskonfiguration:\n${details}`);
+  }
+
+  return parsed;
+}

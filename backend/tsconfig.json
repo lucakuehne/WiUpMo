@@ -1,0 +1,39 @@
+{
+  "compilerOptions": {
+    // node16 statt des in TypeScript 6 verworfenen node10. Da die package.json
+    // kein "type": "module" setzt, wird weiterhin CommonJS emittiert — genau
+    // das, was NestJS zur Laufzeit erwartet.
+    "module": "node16",
+    "moduleResolution": "node16",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "outDir": "./dist",
+    "rootDir": "./",
+
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+
+    "declaration": true,
+    "sourceMap": true,
+    "incremental": true,
+    "removeComments": true,
+
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+
+    "strict": true,
+    // TypeORM-Entities deklarieren ihre Spalten ohne Initialisierer; der Wert
+    // kommt beim Laden aus der Datenbank. Ohne diese Ausnahme braeuchte jede
+    // Spalte ein `!`, ohne dass das etwas ueber die Nullbarkeit aussagt.
+    "strictPropertyInitialization": false,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src/**/*", "migrations/**/*", "test/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
