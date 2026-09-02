@@ -171,9 +171,29 @@ sich der `sha-…`-Tag, den derselbe Workflow mitschreibt.
 
 ### Aktualisieren
 
-1. Änderung nach `main` pushen, Tag `backend/vX.Y.Z` setzen
-2. In Portainer `BACKEND_IMAGE` auf den neuen Tag ändern
-3. **Update the stack** mit angekreuztem „Re-pull image"
+**In der Testphase** ist `BACKEND_IMAGE` gar nicht gesetzt. Dann gilt der
+Standardwert `…/backend:main` aus der Compose-Datei, und ein Update ist:
+
+1. Änderung nach `main` pushen — die CI baut und überschreibt den Tag `main`
+2. In Portainer **Pull and redeploy**, „Re-pull image" angekreuzt
+
+Mehr nicht. Das Ankreuzen ist dabei nicht optional: ohne Re-pull benutzt Docker
+das lokal vorhandene `main` weiter, und die Änderung käme nicht an.
+
+Wer auch den Knopfdruck sparen will, aktiviert beim Stack unter *Automatic
+updates* einen Webhook und trägt ihn in den GitHub-Repository-Einstellungen ein.
+Dann redeployt Portainer nach jedem Push von selbst.
+
+**Für den produktiven Betrieb** wird stattdessen fest gepinnt:
+
+1. Version taggen: `git tag backend/v0.2.0 && git push --tags` — die CI erzeugt daraus `:0.2.0`
+2. In Portainer `BACKEND_IMAGE=ghcr.io/lucakuehne/wiupmo/backend:0.2.0` setzen
+3. **Update the stack** mit „Re-pull image"
+
+Der Unterschied ist Absicht. `main` wandert und ist deshalb bequem, solange
+schnelle Iteration zählt; sobald eine Geräteflotte daran hängt, muss aus dem
+Stack ablesbar sein, welcher Stand läuft — und ein Rücksprung ist dann der
+vorherige Versions-Tag.
 
 Geht etwas schief, ist der Rücksprung derselbe Ablauf mit dem alten Tag. Die
 Datenbank bleibt dabei unberührt — sie liegt im Volume `wiupmo_postgres-data`.
@@ -187,6 +207,40 @@ aber nur bedingt: Sie zieht Änderungen an der Compose-Datei nach, nicht an
 `BACKEND_IMAGE` — das ist eine Portainer-Variable, kein Repository-Inhalt. Der
 Versionswechsel bleibt also ein bewusster Handgriff. Genau so soll es bei einem
 System sein, an dem eine ganze Geräteflotte hängt.
+
+### Von vorn anfangen
+
+Wenn der Zustand auf dem Host unklar geworden ist — halb entfernte Container,
+ein Stack ausserhalb von Portainer, ein Image mit unbekanntem Inhalt — ist das
+Aufräumen billiger als die Fehlersuche. Solange keine Geräte gemeldet haben,
+geht dabei nichts verloren.
+
+```bash
+# Alles zum Projekt entfernen, unabhaengig davon, wer es angelegt hat
+docker ps -a --filter label=com.docker.compose.project=wiupmo -q | xargs -r docker rm -f
+docker volume rm wiupmo_postgres-data wiupmo_agent-releases
+docker network rm wiupmo_default
+
+# Lokal gebaute Images weg, damit sie nicht unbemerkt wieder greifen
+docker rmi wiupmo-backend:0.1.0
+docker rmi ghcr.io/lucakuehne/wiupmo/backend:main
+
+# Kontrolle — hier darf nichts mehr auftauchen
+docker ps -a | grep wiupmo
+docker volume ls | grep wiupmo
+ss -lptn 'sport = :3000'
+```
+
+Danach das Image ziehen und **vor** dem Deployen prüfen, was drinsteckt:
+
+```bash
+docker pull ghcr.io/lucakuehne/wiupmo/backend:main
+docker run --rm ghcr.io/lucakuehne/wiupmo/backend:main \
+  grep -n 'design:type' dist/src/database/entities/device-secret.entity.js
+```
+
+Die Ausgabe muss `Object` enthalten, nicht `Device`. Diese eine Zeile beantwortet
+die Frage „läuft der aktuelle Stand?", bevor ein Deployment sie teuer stellt.
 
 ### Von Test auf produktiv
 
@@ -217,7 +271,18 @@ Secret weiter. Betroffen sind nur Neuinstallationen.
 
 ## Ohne Portainer
 
-Derselbe Stack lässt sich direkt fahren:
+> **Nicht beides auf demselben Host.** Wird das Projekt mit `docker compose up`
+> gestartet, gehört es dem Host. Portainer erkennt es dann zwar an den
+> Compose-Labels und zeigt es an, meldet aber „This stack was created outside of
+> Portainer. Control over this stack is limited" — und lässt weder Bearbeiten
+> noch Redeploy zu. Zurück kommt man nur, indem man die Container entfernt
+> (`docker rm -f …`, das Volume behalten) und den Stack in Portainer unter
+> demselben Namen neu anlegt.
+>
+> Auf dem Docker-Host mit Portainer gilt deshalb: `docker build` ja,
+> `docker compose up` nein.
+
+Auf einem Rechner ohne Portainer lässt sich derselbe Stack direkt fahren:
 
 ```bash
 cd deploy

@@ -41,7 +41,7 @@ services:
       - '5432'
 
   migrate:
-    image: ${BACKEND_IMAGE:-wiupmo-backend:0.1.0}
+    image: ${BACKEND_IMAGE:-ghcr.io/lucakuehne/wiupmo/backend:main}
     restart: 'no'
     depends_on:
       postgres:
@@ -65,7 +65,7 @@ services:
       - 'migration:run'
 
   backend:
-    image: ${BACKEND_IMAGE:-wiupmo-backend:0.1.0}
+    image: ${BACKEND_IMAGE:-ghcr.io/lucakuehne/wiupmo/backend:main}
     restart: unless-stopped
     depends_on:
       postgres:
