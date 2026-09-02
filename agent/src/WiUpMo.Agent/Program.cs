@@ -1,182 +1,264 @@
-using System.Net;
+using System.Diagnostics;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting.WindowsServices;
+using Microsoft.Extensions.Logging;
+using Serilog;
+using Serilog.Events;
 using WiUpMo.Agent;
 using WiUpMo.Agent.Backend;
-using WiUpMo.Agent.Contracts;
+using WiUpMo.Agent.Install;
 using WiUpMo.Agent.Storage;
 using WiUpMo.Agent.Windows;
 
 /// <summary>
-/// Phase 1: ein Durchlauf pro Aufruf — sammeln, melden, beenden. Der
-/// Dienstbetrieb mit Zeitgeber, Netzwerk-Triggern und SQLite-Warteschlange
-/// kommt in Phase 2; bis dahin laesst sich der Agent von Hand oder aus der
-/// Aufgabenplanung heraus starten.
+/// Einstiegspunkt fuer alle Betriebsarten:
+///
+/// <list type="table">
+///   <item><term>(ohne)</term><description>Dienstbetrieb bzw. Dauerlauf im Vordergrund</description></item>
+///   <item><term>--once</term><description>Ein einzelner Durchlauf, dann beenden — zum Pruefen</description></item>
+///   <item><term>--install</term><description>Als Windows-Dienst einrichten und starten</description></item>
+///   <item><term>--uninstall</term><description>Dienst entfernen, Daten behalten</description></item>
+/// </list>
 /// </summary>
 internal static class Program
 {
     private const int ExitOk = 0;
     private const int ExitError = 1;
     private const int ExitConfiguration = 2;
-    private const int ExitCanceled = 130;
 
     /// <summary>
-    /// Kurzformen fuer die Aufrufzeile. Ohne sie muesste man den vollen
-    /// Konfigurationspfad schreiben (<c>--Agent:BackendUrl=...</c>).
+    /// Schalter ohne Wert. Sie muessen vor der Konfigurationsbindung heraus,
+    /// weil <c>AddCommandLine</c> jedes <c>--x</c> als Schluessel mit folgendem
+    /// Wert liest und bei einem alleinstehenden Schalter abbricht.
     /// </summary>
+    private static readonly string[] Flags = ["--install", "--uninstall", "--once", "--service"];
+
     private static readonly Dictionary<string, string> SwitchMappings = new()
     {
         ["--backend-url"] = "Agent:BackendUrl",
         ["--enrollment-token"] = "Agent:EnrollmentToken",
         ["--data-directory"] = "Agent:DataDirectory",
         ["--search-online"] = "Agent:SearchOnline",
+        ["--interval-hours"] = "Agent:CheckIntervalHours",
     };
 
     public static async Task<int> Main(string[] args)
     {
-        using var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) =>
+        AgentOptions options = LoadOptions(args);
+
+        // Einrichtung laeuft ohne Host und ohne Serilog: sie schreibt auf die
+        // Konsole, weil sie von Hand oder aus einem Startskript aufgerufen wird.
+        if (HasFlag(args, "--install"))
         {
-            e.Cancel = true;
-            cts.Cancel();
-        };
+            return ServiceInstaller.Install(options);
+        }
+
+        if (HasFlag(args, "--uninstall"))
+        {
+            return ServiceInstaller.Uninstall(options);
+        }
+
+        // Der Schalter zaehlt zuerst: er steht im binPath der Dienstregistrierung
+        // und ist damit eine ausdrueckliche Ansage. Die Erkennung ueber den
+        // Elternprozess bleibt als zweiter Weg, greift aber nicht in jeder
+        // Startkonstellation — und wo sie danebenliegt, laeuft der Host als
+        // gewoehnliche Konsolenanwendung, meldet dem Dienstmanager nie den
+        // Start und laesst ihn nach 30 s mit Fehler 1053 abbrechen.
+        bool asService = HasFlag(args, "--service") || WindowsServiceHelpers.IsWindowsService();
+        Serilog.Log.Logger = CreateLogger(options, asService);
 
         try
         {
-            return await RunAsync(args, cts.Token).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(options.BackendUrl))
+            {
+                Serilog.Log.Fatal(
+                    "Keine Backend-Adresse konfiguriert. Erwartet wird 'Agent:BackendUrl' in der " +
+                    "appsettings.json, die Umgebungsvariable WIUPMO_Agent__BackendUrl oder --backend-url.");
+                return ExitConfiguration;
+            }
+
+            using IHost host = BuildHost(options, asService);
+            PrepareStorage(host, options);
+
+            if (HasFlag(args, "--once"))
+            {
+                using var cts = new CancellationTokenSource();
+                Console.CancelKeyPress += (_, e) =>
+                {
+                    e.Cancel = true;
+                    cts.Cancel();
+                };
+
+                await host.Services.GetRequiredService<AgentCycle>()
+                    .RunAsync(cts.Token).ConfigureAwait(false);
+                return ExitOk;
+            }
+
+            await host.RunAsync().ConfigureAwait(false);
+            return ExitOk;
         }
         catch (OperationCanceledException)
         {
-            Log.Warn("Abgebrochen.");
-            return ExitCanceled;
+            return ExitOk;
         }
-        catch (Exception ex) when (ex is WindowsUpdateException or BackendException or IOException
-                                      or HttpRequestException or ArgumentException)
+        catch (InvalidOperationException ex)
         {
-            // Erwartbare Betriebsfehler: unerreichbares Backend, kaputte
-            // Update-Datenbank, fehlende Rechte. Die Meldung genuegt, ein
-            // Stacktrace hilft hier niemandem.
-            Log.Error(ex.Message);
-            return ExitError;
+            // Betriebs- statt Programmfehler: die Meldung ist die Information,
+            // ein Stacktrace hilft hier niemandem.
+            Serilog.Log.Fatal("{Fehler}", ex.Message);
+            return ExitConfiguration;
         }
         catch (Exception ex)
         {
-            // Alles Uebrige ist ein Fehler im Agent selbst — hier ist der
-            // Stacktrace die eigentliche Information.
-            Log.Error(ex.ToString());
+            Serilog.Log.Fatal(ex, "Der Agent wurde wegen eines Fehlers beendet.");
             return ExitError;
         }
+        finally
+        {
+            await Serilog.Log.CloseAndFlushAsync().ConfigureAwait(false);
+        }
     }
 
-    private static async Task<int> RunAsync(string[] args, CancellationToken ct)
+    private static IHost BuildHost(AgentOptions options, bool asService)
     {
-        AgentOptions options = LoadOptions(args);
+        // Der regulaere Builder, nicht der leere: er bringt eine
+        // Standard-Lebensdauer mit, die AddWindowsService dann ersetzt. Ohne
+        // eine solche laeuft der Host im Dienstkontext ohne Gegenueber.
+        //
+        // ContentRootPath ausdruecklich auf das Programmverzeichnis — als Dienst
+        // gestartet waere es sonst system32.
+        HostApplicationBuilder builder = Host.CreateApplicationBuilder(
+            new HostApplicationBuilderSettings
+            {
+                ContentRootPath = AppContext.BaseDirectory,
+                Args = [],
+            });
 
-        if (string.IsNullOrWhiteSpace(options.BackendUrl))
+        builder.Logging.ClearProviders();
+        builder.Logging.AddSerilog(Serilog.Log.Logger, dispose: false);
+
+        if (asService)
         {
-            Log.Error(
-                "Keine Backend-Adresse konfiguriert. Erwartet wird 'Agent:BackendUrl' in der " +
-                "appsettings.json, die Umgebungsvariable WIUPMO_Agent__BackendUrl oder --backend-url.");
-            return ExitConfiguration;
+            // Bewusst nicht ueber AddWindowsService(): die Methode prueft
+            // intern selbst noch einmal auf Dienstkontext — ueber den
+            // Elternprozess — und tut schlicht nichts, wenn diese Heuristik
+            // danebenliegt. Der Host laeuft dann mit der Konsolen-Lebensdauer
+            // weiter, meldet dem Dienstmanager nie den Start und wird nach
+            // dessen Zeitlimit mit Fehler 1053 abgeraeumt.
+            //
+            // '--service' steht im binPath der Registrierung und ist damit eine
+            // Ansage statt einer Vermutung. Die Lebensdauer wird deshalb direkt
+            // eingetragen; sie ueberschreibt die vom Builder voreingestellte.
+            builder.Services.Configure<WindowsServiceLifetimeOptions>(
+                o => o.ServiceName = ServiceInstaller.ServiceName);
+            builder.Services.AddSingleton<IHostLifetime, WindowsServiceLifetime>();
         }
 
-        Log.Info($"WiUpMo-Agent {AgentVersion.Current}, Backend {options.BackendUrl}.");
+        builder.Services.AddSingleton(options);
+        builder.Services.AddSingleton<HostInspector>();
+        builder.Services.AddSingleton<UpdateSourceInspector>();
+        builder.Services.AddSingleton<WindowsUpdateReader>();
+        builder.Services.AddSingleton<SnapshotCollector>();
+        builder.Services.AddSingleton(_ => new DeviceIdentityStore(options.DataDirectory));
+        builder.Services.AddSingleton<SnapshotQueue>();
+        builder.Services.AddSingleton<BackendClient>();
+        builder.Services.AddSingleton<CheckinTrigger>();
+        builder.Services.AddSingleton<AgentCycle>();
+        builder.Services.AddHostedService<Worker>();
 
-        var store = new DeviceIdentityStore(options.DataDirectory);
-        store.EnsureDirectory();
-        using var client = new BackendClient(options);
+        return builder.Build();
+    }
 
-        DateTimeOffset historySince = store.GetLastHistoryTimestamp()
-            ?? DateTimeOffset.UtcNow.AddDays(-options.InitialHistoryDays);
+    private static void PrepareStorage(IHost host, AgentOptions options)
+    {
+        var identityStore = host.Services.GetRequiredService<DeviceIdentityStore>();
+        var queue = host.Services.GetRequiredService<SnapshotQueue>();
 
-        Log.Info($"Erfasse Update-Zustand, Historie seit {historySince:u}.");
-        Snapshot snapshot = await new SnapshotCollector(options).CollectAsync(historySince, ct)
-            .ConfigureAwait(false);
-
-        Log.Info(
-            $"{snapshot.AvailableUpdates.Count} offene Updates, " +
-            $"{snapshot.History.Count} Historieneintraege, " +
-            $"Quelle {snapshot.UpdateSource.Source}, " +
-            $"Neustart ausstehend: {(snapshot.PendingReboot ? "ja" : "nein")}.");
-
-        DeviceIdentity identity = store.TryLoad()
-            ?? await EnrollAsync(client, store, options, snapshot.Host, ct).ConfigureAwait(false);
-
-        CheckinResponse response;
         try
         {
-            response = await client.CheckinAsync(identity, snapshot, ct).ConfigureAwait(false);
+            identityStore.EnsureDirectory();
+            queue.Open();
         }
-        catch (BackendException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
+        catch (Exception ex) when (ex is SqliteException or UnauthorizedAccessException or IOException)
         {
-            // Das Secret wurde gesperrt oder das Geraet im Backend entfernt.
-            // Einmal neu registrieren und denselben Snapshot erneut senden: die
-            // snapshotId bleibt gleich, ein doppelter Empfang ist deshalb
-            // unschaedlich.
-            Log.Warn("Das Backend hat die Geraeteidentitaet abgelehnt, neue Registrierung.");
-            identity = await EnrollAsync(client, store, options, snapshot.Host, ct).ConfigureAwait(false);
-            response = await client.CheckinAsync(identity, snapshot, ct).ConfigureAwait(false);
+            // Der haeufigste Fall ist kein Defekt, sondern eine Rechtefrage:
+            // nach --install gehoert das Datenverzeichnis SYSTEM und den
+            // Administratoren. Die rohe SQLite-Meldung "unable to open database
+            // file" fuehrt an dieser Erklaerung vorbei.
+            throw new InvalidOperationException(
+                $"Das Datenverzeichnis {options.DataDirectory} ist nicht zugaenglich: {ex.Message} " +
+                "Nach --install ist es auf SYSTEM und Administratoren beschraenkt — ein Aufruf von Hand " +
+                "braucht deshalb erhoehte Rechte, oder ein eigenes --data-directory.",
+                ex);
         }
 
-        return Report(response, store, snapshot);
+        // Beim Wechsel von Phase 1 auf Phase 2 wandert der Fortschrittsmarker
+        // aus der state.json in die Warteschlangendatenbank.
+        queue.ImportLegacyMarker(identityStore.GetLastHistoryTimestamp());
     }
 
-    private static int Report(CheckinResponse response, DeviceIdentityStore store, Snapshot snapshot)
+    private static Serilog.ILogger CreateLogger(AgentOptions options, bool asService)
     {
-        SnapshotResult? result = response.Results.FirstOrDefault();
+        const string template =
+            "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}";
 
-        switch (result?.Outcome)
+        LoggerConfiguration configuration = new LoggerConfiguration()
+            .MinimumLevel.Information()
+            .MinimumLevel.Override("Microsoft.Hosting.Lifetime", LogEventLevel.Warning)
+            .Enrich.WithProperty("AgentVersion", AgentVersion.Current)
+            .WriteTo.Console(outputTemplate: template);
+
+        // Die Datei ist der eigentliche Ablageort; die Konsole sieht im
+        // Dienstbetrieb ohnehin niemand.
+        try
         {
-            case "accepted":
-            case "duplicate":
-                // Erst jetzt den Fortschrittsmarker setzen. Bis zur Bestaetigung
-                // gilt die Historie als nicht gemeldet — lieber ein Eintrag
-                // doppelt als einer verloren; das Backend erkennt Wiederholungen
-                // an der snapshotId.
-                store.SetLastHistoryTimestamp(snapshot.CollectedAt);
-                Log.Info($"Snapshot uebermittelt ({result.Outcome}).");
-                return ExitOk;
+            string logDirectory = Path.Combine(options.DataDirectory, "logs");
+            Directory.CreateDirectory(logDirectory);
 
-            case "rejected":
-                Log.Error($"Das Backend hat den Snapshot abgelehnt: {result.Error ?? "ohne Begruendung"}.");
-                return ExitError;
-
-            default:
-                Log.Error("Das Backend hat kein Ergebnis zum Snapshot geliefert.");
-                return ExitError;
+            configuration = configuration.WriteTo.File(
+                Path.Combine(logDirectory, "agent-.log"),
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: options.LogRetentionDays,
+                outputTemplate: template,
+                shared: true);
         }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"Protokolldatei nicht verfuegbar: {ex.Message}");
+        }
+
+        // Ins Ereignisprotokoll gehen nur Warnungen und Fehler. Es ist der Ort,
+        // an dem ein Administrator nachsieht, der nichts vom Agent weiss — mit
+        // jedem Durchlauf vollgeschrieben waere es dafuer wertlos.
+        if (asService && EventSourceUsable())
+        {
+            configuration = configuration.WriteTo.EventLog(
+                source: ServiceInstaller.EventSourceName,
+                logName: "Application",
+                manageEventSource: false,
+                restrictedToMinimumLevel: LogEventLevel.Warning);
+        }
+
+        return configuration.CreateLogger();
     }
 
-    private static async Task<DeviceIdentity> EnrollAsync(
-        BackendClient client,
-        DeviceIdentityStore store,
-        AgentOptions options,
-        HostInfo host,
-        CancellationToken ct)
+    private static bool EventSourceUsable()
     {
-        if (string.IsNullOrWhiteSpace(options.EnrollmentToken))
+        try
         {
-            throw new ArgumentException(
-                "Das Geraet ist noch nicht registriert und es ist kein Enrollment-Token " +
-                "konfiguriert ('Agent:EnrollmentToken' bzw. --enrollment-token).");
+            return EventLog.SourceExists(ServiceInstaller.EventSourceName);
         }
-
-        Log.Info("Registriere Geraet beim Backend.");
-
-        DeviceIdentity identity = await client.EnrollAsync(
-            new EnrollRequest
-            {
-                EnrollmentToken = options.EnrollmentToken,
-                Host = host,
-                AgentVersion = AgentVersion.Current,
-            },
-            ct).ConfigureAwait(false);
-
-        // Sofort ablegen: das Secret wird genau einmal ausgeliefert.
-        store.Save(identity);
-        Log.Info($"Registriert als Geraet {identity.DeviceId}.");
-
-        return identity;
+        catch (Exception ex) when (ex is System.Security.SecurityException or InvalidOperationException)
+        {
+            return false;
+        }
     }
+
+    private static bool HasFlag(string[] args, string flag) =>
+        args.Contains(flag, StringComparer.OrdinalIgnoreCase);
 
     private static AgentOptions LoadOptions(string[] args)
     {
@@ -187,7 +269,7 @@ internal static class Program
             .SetBasePath(AppContext.BaseDirectory)
             .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
             .AddEnvironmentVariables("WIUPMO_")
-            .AddCommandLine(args, SwitchMappings)
+            .AddCommandLine([.. args.Where(a => !Flags.Contains(a, StringComparer.OrdinalIgnoreCase))], SwitchMappings)
             .Build();
 
         var options = new AgentOptions();

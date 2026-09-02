@@ -3,12 +3,11 @@ using WiUpMo.Agent.Windows;
 
 namespace WiUpMo.Agent;
 
-public sealed class SnapshotCollector(AgentOptions options)
+public sealed class SnapshotCollector(
+    WindowsUpdateReader updates,
+    HostInspector host,
+    UpdateSourceInspector updateSource)
 {
-    private readonly WindowsUpdateReader _updates = new(options);
-    private readonly HostInspector _host = new();
-    private readonly UpdateSourceInspector _updateSource = new();
-
     /// <summary>
     /// Erfasst den vollstaendigen Zustand des Geraets.
     ///
@@ -22,22 +21,22 @@ public sealed class SnapshotCollector(AgentOptions options)
     {
         DateTimeOffset collectedAt = DateTimeOffset.UtcNow;
 
-        HostInfo host = _host.Read();
-        UpdateSourceInfo updateSource = _updateSource.Read();
-        bool pendingReboot = _host.IsRebootPending();
+        HostInfo hostInfo = host.Read();
+        UpdateSourceInfo source = updateSource.Read();
+        bool pendingReboot = host.IsRebootPending();
 
         IReadOnlyList<AvailableUpdate> available =
-            await _updates.GetAvailableUpdatesAsync(ct).ConfigureAwait(false);
+            await updates.GetAvailableUpdatesAsync(ct).ConfigureAwait(false);
         IReadOnlyList<HistoryEntry> history =
-            await _updates.GetHistoryAsync(historySince, ct).ConfigureAwait(false);
+            await updates.GetHistoryAsync(historySince, ct).ConfigureAwait(false);
 
         return new Snapshot
         {
             SnapshotId = Guid.NewGuid(),
             CollectedAt = collectedAt,
             AgentVersion = AgentVersion.Current,
-            Host = host,
-            UpdateSource = updateSource,
+            Host = hostInfo,
+            UpdateSource = source,
             PendingReboot = pendingReboot,
             AvailableUpdates = available,
             History = history,

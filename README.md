@@ -15,16 +15,16 @@ die Technologieentscheide, das Datenmodell und die Umsetzungsphasen.
 | [`backend/`](backend/) | NestJS + PostgreSQL | Nimmt Meldungen entgegen, stellt die REST-API bereit |
 | [`shared/`](shared/) | OpenAPI | Vertrag zwischen Agent, Backend und Frontend |
 | [`deploy/`](deploy/) | Docker Compose | Backend und Datenbank, [Betriebsanleitung](deploy/README.md) |
-| `frontend/` | Vue 3 + PrimeVue | Folgt in Phase 4 |
+| [`frontend/`](frontend/) | Vue 3 + PrimeVue | Dashboards und Listen, vom Backend ausgeliefert |
 
 ## Stand
 
 | Phase | Inhalt | Stand |
 |---|---|---|
 | 1 | Schema, Backend-Grundgerüst, Enrollment, Check-in, minimaler Agent | fertig |
-| 2 | Agent als Windows-Dienst, Offline-Warteschlange, `--install` | offen |
+| 2 | Agent als Windows-Dienst, Offline-Warteschlange, `--install` | fertig |
 | 3 | AD-Sync | offen |
-| 4 | Frontend-Basis | offen |
+| 4 | Frontend-Basis: Login, Geräteliste, Gerätedetail, Update-Katalog | fertig |
 | 5 | Auswertungen | offen |
 | 6 | Agent-Auto-Update | offen |
 | 7 | Härtung | offen |
@@ -45,15 +45,16 @@ stehen in [`deploy/README.md`](deploy/README.md).
 
 Die API-Dokumentation liegt danach unter `http://localhost:3000/api/docs`.
 
-Anschliessend auf einem Windows-Rechner:
+Anschliessend auf einem Windows-Rechner, als Administrator:
 
 ```powershell
 dotnet publish agent/src/WiUpMo.Agent/WiUpMo.Agent.csproj -c Release -r win-x64 -o agent/publish
-agent\publish\wiupmo-agent.exe --backend-url http://<host>:3000 --enrollment-token <token>
+agent\publish\wiupmo-agent.exe --install --backend-url http://<host>:3000 --enrollment-token <token>
 ```
 
-Der erste Aufruf registriert das Gerät und meldet den ersten Snapshot. Details
-zu Konfiguration und Ablage stehen in [`agent/README.md`](agent/README.md).
+Das richtet den Dienst `WiUpMoAgent` ein und startet ihn. Zum Prüfen ohne
+Installation genügt `--once`. Details zu Betriebsarten, Konfiguration und Ablage
+stehen in [`agent/README.md`](agent/README.md).
 
 ## Entwicklung ohne Docker
 

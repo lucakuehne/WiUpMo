@@ -12,8 +12,8 @@ public sealed class AgentOptions
     public string EnrollmentToken { get; set; } = string.Empty;
 
     /// <summary>
-    /// Ablage fuer Identitaet, Zustand und spaeter die Offline-Warteschlange.
-    /// Standard ist <c>%ProgramData%\WiUpMo</c>.
+    /// Ablage fuer Identitaet, Warteschlange und Protokolle. Standard ist
+    /// <c>%ProgramData%\WiUpMo</c>.
     /// </summary>
     public string DataDirectory { get; set; } =
         Path.Combine(
@@ -41,4 +41,36 @@ public sealed class AgentOptions
     /// Danach zaehlt nur noch der Fortschrittsmarker.
     /// </summary>
     public int InitialHistoryDays { get; set; } = 90;
+
+    // --- Dienstbetrieb -------------------------------------------------------
+
+    /// <summary>Abstand zwischen zwei regulaeren Durchlaeufen.</summary>
+    public double CheckIntervalHours { get; set; } = 4;
+
+    /// <summary>
+    /// Wartezeit nach dem Dienststart bis zum ersten Durchlauf. Der Dienst
+    /// startet mit dem System; eine Update-Suche waehrend des Anmeldevorgangs
+    /// konkurriert mit allem anderen um Platte und Netz.
+    /// </summary>
+    public int StartupDelaySeconds { get; set; } = 120;
+
+    /// <summary>
+    /// Mindestabstand zwischen zwei durch Netzwerkwechsel ausgeloesten
+    /// Durchlaeufen. Ohne Entprellung feuert ein einzelner VPN-Aufbau
+    /// mehrfach — jede Adressaenderung erzeugt ein eigenes Ereignis.
+    /// </summary>
+    public int NetworkDebounceMinutes { get; set; } = 5;
+
+    // --- Offline-Warteschlange ----------------------------------------------
+
+    /// <summary>
+    /// Obergrenzen der Warteschlange. Ohne sie waechst die Datei bei einem
+    /// Laptop, der monatelang nicht ins Firmennetz kommt, unbegrenzt.
+    /// </summary>
+    public int QueueMaxSnapshots { get; set; } = 200;
+
+    public int QueueMaxAgeDays { get; set; } = 30;
+
+    /// <summary>Aufbewahrung der Protokolldateien in Tagen.</summary>
+    public int LogRetentionDays { get; set; } = 14;
 }

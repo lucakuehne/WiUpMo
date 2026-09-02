@@ -57,6 +57,12 @@ services:
       DB_SSL: 'false'
       AGENT_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:?AGENT_ENROLLMENT_TOKEN muss gesetzt sein}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # Auf 'true', sobald ein Reverse Proxy mit TLS davorsteht — sonst
+      # verwirft der Browser das Sitzungscookie.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      # Optional. Fehlt es, erzeugt das Backend einmalig ein Geheimnis und legt
+      # es in den Einstellungen ab.
+      JWT_SECRET: ${JWT_SECRET:-}
     command:
       - node
       - node_modules/typeorm/cli.js

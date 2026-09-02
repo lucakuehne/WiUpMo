@@ -13,6 +13,9 @@ on:
     # ausloesen. Der Agent hat seinen eigenen Release-Zyklus.
     paths:
       - 'backend/**'
+      # Das Frontend wird in dasselbe Image gebaut und vom Backend
+      # ausgeliefert — eine Aenderung dort braucht also ebenfalls ein neues Image.
+      - 'frontend/**'
       - 'deploy/Dockerfile'
       - '.github/workflows/backend-image.yml'
     tags: ['backend/v*']

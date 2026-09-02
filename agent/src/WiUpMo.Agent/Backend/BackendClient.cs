@@ -25,11 +25,7 @@ public sealed class BackendClient : IDisposable
     /// <c>ValidationPipe</c> auf <c>forbidNonWhitelisted</c> gestellt, ein
     /// unbekanntes Feld laesst also den ganzen Snapshot durchfallen.
     /// </summary>
-    private static readonly JsonSerializerOptions Json = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
+    private static readonly JsonSerializerOptions Json = AgentJson.Options;
 
     private readonly HttpClient _http;
 
@@ -74,19 +70,39 @@ public sealed class BackendClient : IDisposable
         return new DeviceIdentity(payload.DeviceId, payload.DeviceSecret);
     }
 
-    public async Task<CheckinResponse> CheckinAsync(
+    public Task<CheckinResponse> CheckinAsync(
         DeviceIdentity identity,
         Snapshot snapshot,
+        CancellationToken ct) =>
+        PostAsync<Snapshot, CheckinResponse>("api/agent/v1/checkin", identity, snapshot, ct);
+
+    /// <summary>
+    /// Nachreichung aus der Offline-Warteschlange. Auch ein einzelner Snapshot
+    /// geht diesen Weg: das Backend verarbeitet jeden in einer eigenen
+    /// Transaktion und quittiert ihn einzeln, damit ein fehlerhafter Eintrag
+    /// die uebrigen nicht mitreisst.
+    /// </summary>
+    public Task<CheckinResponse> CheckinBatchAsync(
+        DeviceIdentity identity,
+        IReadOnlyList<Snapshot> snapshots,
+        CancellationToken ct) =>
+        PostAsync<BatchCheckinRequest, CheckinResponse>(
+            "api/agent/v1/checkin/batch", identity, new BatchCheckinRequest { Snapshots = snapshots }, ct);
+
+    private async Task<TResponse> PostAsync<TRequest, TResponse>(
+        string path,
+        DeviceIdentity identity,
+        TRequest payload,
         CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "api/agent/v1/checkin")
+        using var request = new HttpRequestMessage(HttpMethod.Post, path)
         {
-            Content = JsonContent.Create(snapshot, options: Json),
+            Content = JsonContent.Create(payload, options: Json),
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", identity.Token);
 
         using HttpResponseMessage response = await _http.SendAsync(request, ct).ConfigureAwait(false);
-        return await ReadAsync<CheckinResponse>(response, ct).ConfigureAwait(false);
+        return await ReadAsync<TResponse>(response, ct).ConfigureAwait(false);
     }
 
     /// <summary>

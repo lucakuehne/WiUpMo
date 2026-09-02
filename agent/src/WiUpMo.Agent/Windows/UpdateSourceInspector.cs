@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 using WiUpMo.Agent.Contracts;
 
@@ -10,7 +11,7 @@ namespace WiUpMo.Agent.Windows;
 /// zwischen konfigurierter Richtlinie und tatsaechlich registriertem Dienst
 /// zeigt, ob eine Migration bei einem Geraet wirklich angekommen ist.
 /// </summary>
-public sealed class UpdateSourceInspector
+public sealed class UpdateSourceInspector(ILogger<UpdateSourceInspector> logger)
 {
     private const string PolicyKey = @"SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate";
     private const string PolicyAuKey = PolicyKey + @"\AU";
@@ -96,7 +97,7 @@ public sealed class UpdateSourceInspector
 
     private readonly record struct RegisteredService(string Name, Guid Id);
 
-    private static RegisteredService[] ReadRegisteredServices()
+    private RegisteredService[] ReadRegisteredServices()
     {
         object? manager = null;
 
@@ -116,7 +117,7 @@ public sealed class UpdateSourceInspector
         {
             // Kein Abbruch: die Registry-Auswertung allein reicht fuer die
             // Einordnung, die Dienstliste ist nur zusaetzlicher Kontext.
-            Log.Warn($"Registrierte Update-Dienste konnten nicht gelesen werden: {ex.Message}");
+            logger.LogWarning("Registrierte Update-Dienste nicht lesbar: {Fehler}", ex.Message);
             return [];
         }
         finally

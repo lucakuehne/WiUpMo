@@ -1,0 +1,7 @@
+# pnpm 11 liest seine Einstellungen aus dieser Datei, nicht mehr aus .npmrc.
+
+# Freigabe von Install-Skripten. pnpm blockiert sie seit Version 10
+# standardmaessig, weil ein postinstall-Skript beliebigen Code ausfuehrt.
+allowBuilds:
+  # Legt die plattformeigene Binaerdatei ab; ohne sie startet Vite nicht.
+  esbuild: true

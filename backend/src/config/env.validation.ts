@@ -85,6 +85,27 @@ export class EnvironmentVariables {
   @IsString()
   @IsOptional()
   CORS_ORIGINS: string = '';
+
+  /**
+   * Signaturgeheimnis der Anmeldesitzungen. Optional: fehlt es, erzeugt das
+   * Backend einmalig eines und legt es in `settings` ab. Setzen lohnt sich, wer
+   * mehrere Instanzen betreibt oder rotieren koennen will — dann entwertet ein
+   * Wechsel gezielt alle Sitzungen.
+   */
+  @IsString()
+  @MinLength(32, { message: 'JWT_SECRET muss mindestens 32 Zeichen lang sein.' })
+  @IsOptional()
+  JWT_SECRET?: string;
+
+  /**
+   * Setzt das `Secure`-Kennzeichen am Sitzungscookie. Gehoert auf `true`,
+   * sobald ein Reverse Proxy mit TLS davorsteht — im internen Testbetrieb ueber
+   * http wuerde der Browser das Cookie sonst verwerfen.
+   */
+  @toBool()
+  @IsBoolean()
+  @IsOptional()
+  COOKIE_SECURE: boolean = false;
 }
 
 export function validateEnv(raw: Record<string, unknown>): EnvironmentVariables {

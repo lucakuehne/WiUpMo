@@ -26,10 +26,18 @@ WORKDIR /app
 COPY backend/ ./
 RUN pnpm build
 
-# In Phase 4 kommt hier die Frontend-Stufe dazu:
-#   FROM node:24-alpine AS frontend
-#   ... npm run build ...
-# und das Ergebnis wird unten nach /app/public kopiert.
+# --- Frontend ----------------------------------------------------------------
+# Eigene Stufe mit eigenem Abhaengigkeitsbaum: ein Backend-Commit soll den
+# Frontend-Build nicht ungueltig machen und umgekehrt.
+FROM node:24-alpine AS frontend
+WORKDIR /app
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
+COPY frontend/ ./
+RUN pnpm build
 
 # --- Laufzeit ----------------------------------------------------------------
 # Nur Produktivabhaengigkeiten, kein Quelltext, kein pnpm-Store.
@@ -47,6 +55,11 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile --prod
 
 COPY --from=build /app/dist ./dist
+
+# Das Backend liefert das Frontend aus diesem Verzeichnis aus (siehe
+# ServeStaticModule in app.module.ts). Fehlt es — etwa in der Entwicklung —,
+# laeuft das Backend als reine API weiter.
+COPY --from=frontend /app/dist ./public
 
 # Der Container laeuft nicht als root. Das Image von node bringt den Benutzer
 # `node` bereits mit.

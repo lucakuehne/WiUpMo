@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 using WiUpMo.Agent.Contracts;
 
@@ -7,7 +8,7 @@ namespace WiUpMo.Agent.Windows;
 /// <summary>
 /// Stammdaten des Rechners und der Neustart-Status.
 /// </summary>
-public sealed class HostInspector
+public sealed class HostInspector(ILogger<HostInspector> logger)
 {
     private const string CurrentVersion = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
 
@@ -108,7 +109,7 @@ public sealed class HostInspector
         }
         catch (WindowsUpdateException ex)
         {
-            Log.Warn($"Neustart-Status konnte nicht ueber WUApi ermittelt werden: {ex.Message}");
+            logger.LogWarning("Neustart-Status nicht ueber WUApi ermittelbar: {Fehler}", ex.Message);
             return false;
         }
         finally

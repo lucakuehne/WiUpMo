@@ -124,6 +124,11 @@ public sealed class Snapshot
     public required IReadOnlyList<HistoryEntry> History { get; init; }
 }
 
+public sealed class BatchCheckinRequest
+{
+    public required IReadOnlyList<Snapshot> Snapshots { get; init; }
+}
+
 public sealed class EnrollRequest
 {
     public required string EnrollmentToken { get; init; }

@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AppModule } from './app.module.js';
@@ -9,6 +10,10 @@ import { AppModule } from './app.module.js';
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   const logger = new Logger('Bootstrap');
+
+  // Das Sitzungstoken kommt als HttpOnly-Cookie; ohne diesen Leser ist
+  // request.cookies undefiniert und jede Anmeldung liefe ins Leere.
+  app.use(cookieParser());
 
   app.useGlobalPipes(
     new ValidationPipe({
