@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { AgentUpdateJobDto } from '../../releases/dto/release.dto.js';
 import { ArrayMaxSize, ArrayMinSize, IsArray, ValidateNested } from 'class-validator';
 import { SnapshotDto } from './snapshot.dto.js';
 
@@ -36,22 +37,19 @@ export class CheckinResponseDto {
   results: SnapshotResultDto[];
 
   /**
-   * Platzhalter fuer den Selbst-Update-Auftrag aus Phase 6. Steht schon im
-   * Vertrag, damit aeltere Agents das Feld spaeter nicht als unbekannt
-   * behandeln muessen.
+   * Auftrag zum Selbst-Update, sofern einer offen ist.
    *
-   * Der Typ ist ausdruecklich angegeben, weil das Swagger-Plugin ihn nicht
-   * ableiten kann: aus einem `null` laesst sich kein Schema erzeugen, das Feld
-   * bliebe ohne `type`, und Swagger setzt dann ersatzweise die umgebende Klasse
-   * ein — was beim Erzeugen des Dokuments als Zirkelbezug abbricht und den
-   * Start des Backends verhindert.
+   * Der Typ ist ausdruecklich mit verzoegertem Verweis angegeben. Das Feld war
+   * bis Phase 6 ein `null`-Platzhalter, und daran ist das Backend beim Start
+   * gescheitert: Aus einem `null` kann das Swagger-Plugin kein Schema
+   * ableiten, es laesst `type` weg, und Swagger setzt ersatzweise die
+   * umgebende Klasse ein — was als Zirkelbezug abbricht.
    */
   @ApiProperty({
-    type: 'object',
+    type: () => AgentUpdateJobDto,
     nullable: true,
-    additionalProperties: true,
-    default: null,
-    description: 'Auftrag zum Selbst-Update. In dieser Version immer null.',
+    required: false,
+    description: 'Auftrag zum Selbst-Update, sonst null.',
   })
-  agentUpdate: Record<string, unknown> | null = null;
+  agentUpdate: AgentUpdateJobDto | null = null;
 }

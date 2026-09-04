@@ -5,10 +5,61 @@
  */
 
 export const SETTING_KEYS = {
+  agent: 'agent',
   ad: 'ad',
+  auth: 'auth',
   thresholds: 'thresholds',
   retention: 'retention',
 } as const;
+
+export type AuthProviderName = 'local' | 'ldap';
+
+export interface AuthSettings {
+  provider: AuthProviderName;
+
+  /**
+   * Vorlage fuer den Bind-Namen, `{username}` wird ersetzt. Fuer ein Active
+   * Directory sind zwei Formen gebraeuchlich:
+   * `{username}@firma.local` (UPN) oder `FIRMA\{username}`.
+   */
+  userDnTemplate: string;
+
+  /**
+   * Laesst lokale Benutzer auch im LDAP-Betrieb herein.
+   *
+   * Standardmaessig an, und das ist wichtig: Ohne diesen Weg sperrt ein
+   * ausgefallener Domaenencontroller oder eine falsch gesetzte Vorlage jeden
+   * aus dem System aus — ausgerechnet in dem Moment, in dem man hineinsehen
+   * moechte.
+   */
+  allowLocalFallback: boolean;
+}
+
+export const DEFAULT_AUTH: AuthSettings = {
+  provider: 'local',
+  userDnTemplate: '{username}',
+  allowLocalFallback: true,
+};
+
+export interface AgentSettings {
+  /**
+   * Gemeinsames Geheimnis, mit dem sich ein Agent einmalig registriert.
+   *
+   * Anders als das AD-Bindepasswort wird es ueber die API ausgeliefert — man
+   * braucht es bei jeder Agent-Installation, und es aus der Datenbank
+   * abzuschreiben waere der schlechtere Weg. Es oeffnet auch nichts weiter:
+   * Damit laesst sich ein Geraet anmelden, nicht auf Daten zugreifen. Jedes
+   * registrierte Geraet arbeitet danach mit einem eigenen Secret.
+   */
+  enrollmentToken: string;
+}
+
+/** Untergrenze, damit hier nicht versehentlich "test" landet. */
+export const MIN_ENROLLMENT_TOKEN_LENGTH = 16;
+
+export const DEFAULT_AGENT: AgentSettings = {
+  enrollmentToken: '',
+};
 
 export interface AdSettings {
   /** z. B. `ldaps://dc01.firma.local:636`. */

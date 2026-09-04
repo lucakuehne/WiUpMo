@@ -11,6 +11,7 @@ using WiUpMo.Agent;
 using WiUpMo.Agent.Backend;
 using WiUpMo.Agent.Install;
 using WiUpMo.Agent.Storage;
+using WiUpMo.Agent.Update;
 using WiUpMo.Agent.Windows;
 
 /// <summary>
@@ -34,7 +35,8 @@ internal static class Program
     /// weil <c>AddCommandLine</c> jedes <c>--x</c> als Schluessel mit folgendem
     /// Wert liest und bei einem alleinstehenden Schalter abbricht.
     /// </summary>
-    private static readonly string[] Flags = ["--install", "--uninstall", "--once", "--service"];
+    private static readonly string[] Flags =
+        ["--install", "--uninstall", "--once", "--service", "--updater"];
 
     private static readonly Dictionary<string, string> SwitchMappings = new()
     {
@@ -59,6 +61,14 @@ internal static class Program
         if (HasFlag(args, "--uninstall"))
         {
             return ServiceInstaller.Uninstall(options);
+        }
+
+        // Der Updater-Lauf kommt vom geplanten Task und braucht weder Host noch
+        // Serilog: Er schreibt auf die Konsole, die der Task mitprotokolliert,
+        // und beendet sich in aller Regel sofort wieder.
+        if (HasFlag(args, "--updater"))
+        {
+            return Updater.Run(new AgentPaths(options.DataDirectory));
         }
 
         // Der Schalter zaehlt zuerst: er steht im binPath der Dienstregistrierung
@@ -166,6 +176,8 @@ internal static class Program
         builder.Services.AddSingleton<SnapshotQueue>();
         builder.Services.AddSingleton<BackendClient>();
         builder.Services.AddSingleton<CheckinTrigger>();
+        builder.Services.AddSingleton(_ => new AgentPaths(options.DataDirectory));
+        builder.Services.AddSingleton<SelfUpdateService>();
         builder.Services.AddSingleton<AgentCycle>();
         builder.Services.AddHostedService<Worker>();
 

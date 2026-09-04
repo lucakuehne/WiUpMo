@@ -1,35 +1,46 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { DataSource, IsNull } from 'typeorm';
 import { Device, DeviceSecret } from '../database/entities/index.js';
 import { DeviceStatus } from '../database/enums.js';
+import { SettingsService } from '../settings/settings.service.js';
+import { MIN_ENROLLMENT_TOKEN_LENGTH } from '../settings/settings.types.js';
 import { EnrollRequestDto, EnrollResponseDto } from './dto/enroll.dto.js';
 import { buildDeviceToken, generateDeviceSecret, hashDeviceSecret } from './device-token.js';
 
 @Injectable()
 export class EnrollmentService {
   private readonly logger = new Logger(EnrollmentService.name);
-  private readonly enrollmentTokenHash: Buffer;
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    config: ConfigService,
-  ) {
-    const token = config.get<string>('AGENT_ENROLLMENT_TOKEN');
-    if (!token) {
-      // Kann nur passieren, wenn die Env-Validierung umgangen wurde.
-      throw new Error('AGENT_ENROLLMENT_TOKEN ist nicht konfiguriert.');
-    }
-    // Als Hash vorhalten, damit der Vergleich unabhaengig von der Laenge des
-    // eingehenden Werts in konstanter Zeit laufen kann.
-    this.enrollmentTokenHash = createHash('sha256').update(token, 'utf8').digest();
-  }
+    private readonly settings: SettingsService,
+  ) {}
 
-  private assertValidEnrollmentToken(candidate: string): void {
+  /**
+   * Das Token kommt aus den Einstellungen, nicht mehr aus der Umgebung: So
+   * laesst es sich im Frontend ablesen und erneuern, ohne den Stack anzufassen.
+   * Gelesen wird pro Registrierung — die kommt einmal je Geraet vor, ein
+   * Zwischenspeicher waere hier nur eine Stelle, an der ein rotiertes Token
+   * haengenbliebe.
+   */
+  private async assertValidEnrollmentToken(candidate: string): Promise<void> {
+    const { enrollmentToken } = await this.settings.getAgent();
+
+    // Ohne gesetztes Token darf sich nichts registrieren. Andernfalls waere
+    // ein leerer Wert in den Einstellungen gleichbedeutend mit "jeder darf".
+    if (enrollmentToken.length < MIN_ENROLLMENT_TOKEN_LENGTH) {
+      this.logger.error('Es ist kein gueltiges Enrollment-Token konfiguriert.');
+      throw new UnauthorizedException('Die Registrierung ist nicht konfiguriert.');
+    }
+
+    // Beide Seiten hashen, damit der Vergleich unabhaengig von der Laenge des
+    // eingehenden Werts in konstanter Zeit laeuft.
+    const expected = createHash('sha256').update(enrollmentToken, 'utf8').digest();
     const candidateHash = createHash('sha256').update(candidate, 'utf8').digest();
-    if (!timingSafeEqual(this.enrollmentTokenHash, candidateHash)) {
+
+    if (!timingSafeEqual(expected, candidateHash)) {
       throw new UnauthorizedException('Ungueltiges Enrollment-Token.');
     }
   }
@@ -42,7 +53,7 @@ export class EnrollmentService {
    * ausgegeben. Die Geraete-ID und damit die gesamte Historie bleibt erhalten.
    */
   async enroll(dto: EnrollRequestDto): Promise<EnrollResponseDto> {
-    this.assertValidEnrollmentToken(dto.enrollmentToken);
+    await this.assertValidEnrollmentToken(dto.enrollmentToken);
 
     const secret = generateDeviceSecret();
     const secretHash = hashDeviceSecret(secret);

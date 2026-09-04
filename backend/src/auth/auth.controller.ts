@@ -36,7 +36,7 @@ export class AuthController {
       setupRequired: await this.auth.isSetupRequired(),
       authenticated: session !== null,
       username: session?.username ?? null,
-      provider: this.auth.providerName,
+      provider: await this.auth.providerName(),
     };
   }
 

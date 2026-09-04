@@ -3,9 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Setting } from '../database/entities/index.js';
+import { randomBytes } from 'node:crypto';
 import {
   AdSettings,
+  AgentSettings,
+  AuthSettings,
   DEFAULT_AD,
+  DEFAULT_AGENT,
+  DEFAULT_AUTH,
   DEFAULT_RETENTION,
   DEFAULT_THRESHOLDS,
   RetentionSettings,
@@ -34,6 +39,7 @@ export class SettingsService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    await this.seedAgentToken();
     await this.seedAdFromEnvironment();
   }
 
@@ -49,8 +55,22 @@ export class SettingsService implements OnModuleInit {
 
   // --- Lesen ---------------------------------------------------------------
 
+  async getAgent(): Promise<AgentSettings> {
+    return this.read(SETTING_KEYS.agent, DEFAULT_AGENT);
+  }
+
   async getAd(): Promise<AdSettings> {
     return this.read(SETTING_KEYS.ad, DEFAULT_AD);
+  }
+
+  async getAuth(): Promise<AuthSettings> {
+    return this.read(SETTING_KEYS.auth, DEFAULT_AUTH);
+  }
+
+  async updateAuth(patch: Partial<AuthSettings>): Promise<AuthSettings> {
+    const next = { ...(await this.getAuth()), ...patch };
+    await this.write(SETTING_KEYS.auth, next, 'Anmeldeweg fuer das Frontend.');
+    return next;
   }
 
   async getThresholds(): Promise<ThresholdSettings> {
@@ -79,6 +99,23 @@ export class SettingsService implements OnModuleInit {
   }
 
   // --- Schreiben -----------------------------------------------------------
+
+  /**
+   * Setzt das Enrollment-Token, entweder auf einen vorgegebenen Wert oder auf
+   * einen neu erzeugten.
+   *
+   * Ein Wechsel betrifft ausschliesslich Neuinstallationen. Bereits
+   * registrierte Geraete arbeiten mit ihrem eigenen, serverseitig erzeugten
+   * Secret weiter und merken davon nichts — deshalb ist das Rotieren hier
+   * billig und sollte im Zweifel geschehen.
+   */
+  async setEnrollmentToken(token?: string): Promise<AgentSettings> {
+    const next: AgentSettings = {
+      enrollmentToken: token && token !== '' ? token : generateToken(),
+    };
+    await this.write(SETTING_KEYS.agent, next, 'Gemeinsames Geheimnis fuer die Agent-Registrierung.');
+    return next;
+  }
 
   async updateAd(patch: Partial<AdSettings>): Promise<AdSettings> {
     const current = await this.getAd();
@@ -109,6 +146,31 @@ export class SettingsService implements OnModuleInit {
 
   private async write(key: string, value: object, description: string): Promise<void> {
     await this.settings.save({ key, value, description });
+  }
+
+  /**
+   * Sorgt dafuer, dass beim ersten Start ein Enrollment-Token existiert.
+   *
+   * Vorrang hat `AGENT_ENROLLMENT_TOKEN` aus der Umgebung, damit eine
+   * bestehende Installation ihr eingerichtetes Token behaelt und die bereits
+   * verteilten Agents weiterhin registrieren koennen. Fehlt es, wird eines
+   * erzeugt — das ist besser, als den Betreiber eines auswaehlen zu lassen,
+   * und macht die Variable im Stack ueberfluessig.
+   */
+  private async seedAgentToken(): Promise<void> {
+    const existing = await this.settings.findOne({ where: { key: SETTING_KEYS.agent } });
+    if (existing) {
+      return;
+    }
+
+    const fromEnvironment = this.config.get<string>('AGENT_ENROLLMENT_TOKEN');
+    await this.setEnrollmentToken(fromEnvironment);
+
+    this.logger.log(
+      fromEnvironment
+        ? 'Enrollment-Token aus der Umgebungsvariable uebernommen.'
+        : 'Enrollment-Token erzeugt. Es steht im Frontend unter Einstellungen.',
+    );
   }
 
   /**
@@ -151,4 +213,9 @@ export class SettingsService implements OnModuleInit {
       this.logger.log('AD-Einstellungen aus den Umgebungsvariablen uebernommen.');
     }
   }
+}
+
+/** 32 Byte Zufall, base64url — passwortsicher und ohne Sonderzeichen, die beim Kopieren stoeren. */
+function generateToken(): string {
+  return randomBytes(32).toString('base64url');
 }

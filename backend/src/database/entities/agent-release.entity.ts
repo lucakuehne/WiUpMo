@@ -16,6 +16,10 @@ export class AgentRelease {
   @Column({ type: 'text' })
   sha256: string;
 
+  /** Als Zeichenkette, weil die Spalte bigint ist. */
+  @Column({ type: 'bigint', name: 'size_bytes', default: 0 })
+  sizeBytes: string;
+
   @Column({ type: 'timestamptz', name: 'released_at', default: () => 'now()' })
   releasedAt: Date;
 

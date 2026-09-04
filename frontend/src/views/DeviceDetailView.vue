@@ -12,8 +12,15 @@ import Tabs from 'primevue/tabs';
 import Tag from 'primevue/tag';
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { get } from '@/api/client';
-import type { DeviceCheckin, DeviceDetail, DeviceUpdate, Timeline, TimelineEntry } from '@/api/types';
+import { get, post } from '@/api/client';
+import type {
+  CreateUpdateJobsResult,
+  DeviceCheckin,
+  DeviceDetail,
+  DeviceUpdate,
+  Timeline,
+  TimelineEntry,
+} from '@/api/types';
 import {
   EVENT_TYPE_LABELS,
   UPDATE_SOURCE_LABELS,
@@ -57,12 +64,41 @@ async function load(): Promise<void> {
   }
 }
 
+const updating = ref(false);
+const notice = ref<string | null>(null);
+
+/**
+ * Legt einen Auftrag auf die als aktuell markierte Version. Ohne eine solche
+ * antwortet das Backend mit einem Konflikt — die Meldung sagt dann, was fehlt.
+ */
+async function requestUpdate(): Promise<void> {
+  updating.value = true;
+  error.value = null;
+  notice.value = null;
+
+  try {
+    const result = await post<CreateUpdateJobsResult>('/api/agent-update-jobs', {
+      deviceIds: [props.id],
+    });
+
+    notice.value =
+      result.created > 0
+        ? `Auftrag auf ${result.targetVersion} angelegt. Das Gerät holt ihn beim nächsten Check-in ab.`
+        : 'Kein Auftrag nötig — das Gerät läuft bereits auf der Zielversion oder hat einen offenen Auftrag.';
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Der Auftrag konnte nicht angelegt werden.';
+  } finally {
+    updating.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
 <template>
   <div class="page">
     <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+    <Message v-if="notice" severity="success" :closable="false">{{ notice }}</Message>
 
     <template v-if="device">
       <div class="page-header">
@@ -106,7 +142,19 @@ onMounted(load);
             </div>
             <div>
               <dt>Agent-Version</dt>
-              <dd>{{ device.agentVersion ?? '—' }}</dd>
+              <dd style="display: flex; align-items: center; gap: 0.5rem">
+                {{ device.agentVersion ?? '—' }}
+                <Button
+                  v-if="device.enrolledAt"
+                  label="Aktualisieren"
+                  icon="pi pi-arrow-circle-up"
+                  size="small"
+                  severity="secondary"
+                  outlined
+                  :loading="updating"
+                  @click="requestUpdate"
+                />
+              </dd>
             </div>
             <div>
               <dt>Registriert</dt>

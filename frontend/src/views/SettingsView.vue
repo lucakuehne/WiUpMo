@@ -5,11 +5,15 @@ import InputNumber from 'primevue/inputnumber';
 import InputText from 'primevue/inputtext';
 import Message from 'primevue/message';
 import Password from 'primevue/password';
+import Select from 'primevue/select';
 import ToggleSwitch from 'primevue/toggleswitch';
 import { onMounted, reactive, ref, type Ref } from 'vue';
-import { get, put } from '@/api/client';
+import { get, post, put } from '@/api/client';
 import type {
   AdSettingsView,
+  AgentSettingsView,
+  AuthSettings,
+  RetentionResult,
   RetentionSettings,
   SettingsView,
   ThresholdSettings,
@@ -51,15 +55,59 @@ const retention = reactive<RetentionSettings>({
   checkinDays: 90,
 });
 
+const agent = reactive<AgentSettingsView>({ enrollmentToken: '' });
+const rotating = ref(false);
+const copied = ref(false);
+
+/** Die Adresse, unter der das Frontend erreichbar ist, ist auch die des Backends. */
+const backendUrl = window.location.origin;
+
+const authSettings = reactive<AuthSettings>({
+  provider: 'local',
+  userDnTemplate: '{username}',
+  allowLocalFallback: true,
+});
+
 const savingAd = ref(false);
+const savingAuth = ref(false);
 const savingThresholds = ref(false);
 const savingRetention = ref(false);
+const cleaning = ref(false);
+
+async function copyToken(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(agent.enrollmentToken);
+    copied.value = true;
+  } catch {
+    // Die Zwischenablage ist ohne HTTPS je nach Browser gesperrt. Kein Grund
+    // fuer eine Fehlermeldung — das Feld laesst sich von Hand markieren.
+    copied.value = false;
+  }
+}
+
+async function rotateToken(): Promise<void> {
+  rotating.value = true;
+  error.value = null;
+  saved.value = null;
+
+  try {
+    const result = await put<AgentSettingsView>('/api/settings/agent/enrollment-token', {});
+    Object.assign(agent, result);
+    saved.value = 'Neues Enrollment-Token erzeugt. Bereits registrierte Geräte sind nicht betroffen.';
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Das Token konnte nicht erneuert werden.';
+  } finally {
+    rotating.value = false;
+  }
+}
 
 async function load(): Promise<void> {
   error.value = null;
   try {
     const settings = await get<SettingsView>('/api/settings');
+    Object.assign(agent, settings.agent);
     Object.assign(ad, settings.ad);
+    Object.assign(authSettings, settings.auth);
     Object.assign(thresholds, settings.thresholds);
     Object.assign(retention, settings.retention);
   } catch (e) {
@@ -73,7 +121,7 @@ async function load(): Promise<void> {
 // heraus zu uebergeben: dort werden Refs automatisch entpackt, es kaeme also
 // ein boolean statt des Ref an.
 async function save(
-  section: 'ad' | 'thresholds' | 'retention',
+  section: 'ad' | 'auth' | 'thresholds' | 'retention',
   busy: Ref<boolean>,
   payload: unknown,
 ): Promise<void> {
@@ -121,6 +169,27 @@ function saveRetention(): void {
   void save('retention', savingRetention, { ...retention });
 }
 
+function saveAuth(): void {
+  void save('auth', savingAuth, { ...authSettings });
+}
+
+async function runRetention(): Promise<void> {
+  cleaning.value = true;
+  error.value = null;
+  saved.value = null;
+
+  try {
+    const result = await post<RetentionResult>('/api/maintenance/retention');
+    saved.value =
+      `${result.eventsDeleted} Ereignisse und ${result.checkinsDeleted} Check-ins entfernt ` +
+      `(älter als ${result.eventDays} bzw. ${result.checkinDays} Tage).`;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Das Aufräumen ist fehlgeschlagen.';
+  } finally {
+    cleaning.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -137,6 +206,50 @@ onMounted(load);
     <Message v-if="saved" severity="success" :closable="false" style="margin-bottom: 1rem">
       {{ saved }}
     </Message>
+
+    <Card v-if="!loading" style="margin-bottom: 1rem">
+      <template #title>Agent-Registrierung</template>
+      <template #subtitle>
+        Dieses Token legt ein Agent beim erstmaligen Start vor. Danach arbeitet jedes Gerät mit
+        einem eigenen, serverseitig erzeugten Secret.
+      </template>
+
+      <template #content>
+        <div class="field" style="max-width: 40rem">
+          <label for="token">Enrollment-Token</label>
+          <div style="display: flex; gap: 0.5rem">
+            <InputText id="token" :value="agent.enrollmentToken" readonly fluid />
+            <Button
+              icon="pi pi-copy"
+              severity="secondary"
+              :title="copied ? 'Kopiert' : 'In die Zwischenablage kopieren'"
+              @click="copyToken"
+            />
+          </div>
+          <small class="muted">
+            Ein neues Token betrifft nur Neuinstallationen — bereits registrierte Geräte laufen
+            unverändert weiter. Rotieren ist deshalb billig.
+          </small>
+        </div>
+
+        <Message severity="secondary" :closable="false" style="margin-top: 0.5rem">
+          <div style="font-family: monospace; font-size: 0.85rem; overflow-x: auto">
+            wiupmo-agent.exe --install --backend-url {{ backendUrl }} --enrollment-token
+            {{ agent.enrollmentToken }}
+          </div>
+        </Message>
+      </template>
+
+      <template #footer>
+        <Button
+          label="Neues Token erzeugen"
+          icon="pi pi-refresh"
+          severity="secondary"
+          :loading="rotating"
+          @click="rotateToken"
+        />
+      </template>
+    </Card>
 
     <Card v-if="!loading" style="margin-bottom: 1rem">
       <template #title>Active Directory</template>
@@ -252,11 +365,69 @@ onMounted(load);
       </template>
     </Card>
 
+    <Card v-if="!loading" style="margin-bottom: 1rem">
+      <template #title>Anmeldung</template>
+      <template #subtitle>
+        Lokale Benutzer oder ein Bind gegen das Verzeichnis. Die Verbindungsdaten kommen aus der
+        AD-Konfiguration oben — gebunden wird aber mit den Zugangsdaten des jeweiligen Benutzers,
+        nicht mit dem Dienstkonto.
+      </template>
+
+      <template #content>
+        <div class="settings-grid">
+          <div class="field">
+            <label for="provider">Anmeldeweg</label>
+            <Select
+              id="provider"
+              v-model="authSettings.provider"
+              :options="[
+                { value: 'local', label: 'Lokale Benutzer' },
+                { value: 'ldap', label: 'LDAP-Bind gegen das Verzeichnis' },
+              ]"
+              option-label="label"
+              option-value="value"
+            />
+          </div>
+
+          <div class="field">
+            <label for="dn">Vorlage für den Bind-Namen</label>
+            <InputText id="dn" v-model="authSettings.userDnTemplate" />
+            <small class="muted">
+              Muss <code>{username}</code> enthalten. Für ein AD üblich:
+              <code>{username}@firma.local</code> oder <code>FIRMA\{username}</code>.
+            </small>
+          </div>
+
+          <div class="field">
+            <label for="fallback">Lokale Anmeldung weiterhin zulassen</label>
+            <ToggleSwitch id="fallback" v-model="authSettings.allowLocalFallback" />
+            <small class="muted">
+              Dringend empfohlen. Ohne diesen Weg sperrt ein ausgefallener Domänencontroller oder
+              eine falsche Vorlage jeden aus — genau dann, wenn man hineinsehen will.
+            </small>
+          </div>
+        </div>
+
+        <Message
+          v-if="authSettings.provider === 'ldap' && !ad.configured"
+          severity="warn"
+          :closable="false"
+          style="margin-top: 0.5rem"
+        >
+          Es ist kein Verzeichnis konfiguriert. Die LDAP-Anmeldung kann so nicht funktionieren.
+        </Message>
+      </template>
+
+      <template #footer>
+        <Button label="Speichern" :loading="savingAuth" @click="saveAuth" />
+      </template>
+    </Card>
+
     <Card v-if="!loading">
       <template #title>Aufbewahrung</template>
       <template #subtitle>
-        Der nächtliche Aufräumjob folgt in Phase 7. Bis dahin sind das die Werte, mit denen er
-        später arbeiten wird.
+        Ein Job räumt nachts um 03:15 auf: Ereignisse und Check-ins, die älter sind als die
+        Fristen. Die aktuellen Update-Zustände bleiben unberührt.
       </template>
 
       <template #content>
@@ -277,7 +448,20 @@ onMounted(load);
       </template>
 
       <template #footer>
-        <Button label="Speichern" :loading="savingRetention" @click="saveRetention" />
+        <div style="display: flex; gap: 0.5rem; align-items: center">
+          <Button label="Speichern" :loading="savingRetention" @click="saveRetention" />
+          <Button
+            label="Jetzt aufräumen"
+            icon="pi pi-trash"
+            severity="secondary"
+            outlined
+            :loading="cleaning"
+            @click="runRetention"
+          />
+          <small class="muted">
+            Löscht endgültig. Sinnvoll, um zu sehen, was eine geänderte Frist tatsächlich trifft.
+          </small>
+        </div>
       </template>
     </Card>
   </div>

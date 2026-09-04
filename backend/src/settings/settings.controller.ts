@@ -4,6 +4,10 @@ import { SessionGuard } from '../auth/session.guard.js';
 import {
   AdSettingsDto,
   AdSettingsViewDto,
+  AgentSettingsViewDto,
+  AuthSettingsDto,
+  AuthSettingsViewDto,
+  EnrollmentTokenDto,
   RetentionSettingsDto,
   RetentionSettingsViewDto,
   SettingsViewDto,
@@ -22,13 +26,33 @@ export class SettingsController {
   @Get()
   @ApiOperation({ summary: 'Alle Laufzeiteinstellungen.' })
   async read(): Promise<SettingsViewDto> {
-    const [ad, thresholds, retention] = await Promise.all([
+    const [agent, ad, auth, thresholds, retention] = await Promise.all([
+      this.settings.getAgent(),
       this.settings.getAd(),
+      this.settings.getAuth(),
       this.settings.getThresholds(),
       this.settings.getRetention(),
     ]);
 
-    return { ad: toAdView(ad), thresholds, retention };
+    return { agent, ad: toAdView(ad), auth, thresholds, retention };
+  }
+
+  @Put('auth')
+  @ApiOperation({ summary: 'Aendert den Anmeldeweg.' })
+  updateAuth(@Body() dto: AuthSettingsDto): Promise<AuthSettingsViewDto> {
+    return this.settings.updateAuth(dto);
+  }
+
+  /**
+   * Setzt das Enrollment-Token. Ohne Angabe wird eines erzeugt.
+   *
+   * Bereits registrierte Geraete sind davon nicht betroffen — sie arbeiten mit
+   * ihrem eigenen Secret weiter. Betroffen sind nur Neuinstallationen.
+   */
+  @Put('agent/enrollment-token')
+  @ApiOperation({ summary: 'Setzt oder erneuert das Enrollment-Token.' })
+  setEnrollmentToken(@Body() dto: EnrollmentTokenDto): Promise<AgentSettingsViewDto> {
+    return this.settings.setEnrollmentToken(dto.token);
   }
 
   /**

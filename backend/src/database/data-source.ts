@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { config as loadDotenv } from 'dotenv';
 import { DataSource, DataSourceOptions } from 'typeorm';
+import { AgentReleaseSize1788480000000 } from '../../migrations/1788480000000-AgentReleaseSize.js';
 import { InitialSchema1788307200000 } from '../../migrations/1788307200000-InitialSchema.js';
 import { ALL_ENTITIES } from './entities/index.js';
 
@@ -40,7 +41,7 @@ export const dataSourceOptions: DataSourceOptions = {
    * Import hat ohnehin den Vorteil, dass eine vergessene Registrierung schon
    * beim Kompilieren auffaellt statt erst beim Deployment.
    */
-  migrations: [InitialSchema1788307200000],
+  migrations: [InitialSchema1788307200000, AgentReleaseSize1788480000000],
   migrationsTableName: 'schema_migrations',
 
   /**

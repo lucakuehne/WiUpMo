@@ -32,7 +32,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new ApiError(response.status, await readError(response));
+    const error = new ApiError(response.status, await readError(response));
+    handleUnauthorized(error);
+    throw error;
   }
 
   if (response.status === 204) {
@@ -40,6 +42,29 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+/**
+ * Wird gesetzt, sobald der Router steht. Der Umweg über einen Rückruf statt
+ * eines direkten Imports vermeidet, dass sich Client und Router gegenseitig
+ * importieren.
+ */
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: () => void): void {
+  onUnauthorized = handler;
+}
+
+/**
+ * Eine abgelaufene Sitzung ist kein Fehler, den der Benutzer lesen soll,
+ * sondern eine Aufforderung, sich neu anzumelden. Ohne diese Behandlung zeigte
+ * jede Ansicht nach zwölf Stunden eine rote Meldung „Die Sitzung ist
+ * abgelaufen" und blieb sonst leer.
+ */
+function handleUnauthorized(error: ApiError): void {
+  if (error.isUnauthorized) {
+    onUnauthorized?.();
+  }
 }
 
 /**
@@ -83,6 +108,27 @@ export function post<T>(path: string, body?: unknown): Promise<T> {
     method: 'POST',
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+}
+
+export function del<T>(path: string): Promise<T> {
+  return request<T>(path, { method: 'DELETE' });
+}
+
+/**
+ * Multipart-Upload. Ohne `Content-Type` — den setzt der Browser samt der
+ * `boundary` selbst; ein von Hand gesetzter Wert ohne boundary lässt den
+ * Upload serverseitig scheitern.
+ */
+export async function upload<T>(path: string, form: FormData): Promise<T> {
+  const response = await fetch(path, { method: 'POST', body: form, credentials: 'include' });
+
+  if (!response.ok) {
+    const error = new ApiError(response.status, await readError(response));
+    handleUnauthorized(error);
+    throw error;
+  }
+
+  return (await response.json()) as T;
 }
 
 export function put<T>(path: string, body?: unknown): Promise<T> {

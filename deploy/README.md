@@ -66,12 +66,11 @@ Zugriff auf `registry.npmjs.org` und `ghcr.io`/Docker Hub.
 
 ```bash
 openssl rand -base64 32   # → DB_PASSWORD
-openssl rand -base64 32   # → AGENT_ENROLLMENT_TOKEN
 ```
 
-Das Enrollment-Token bekommt später jeder Agent beim erstmaligen Start zu sehen.
-Es ist kein Dauergeheimnis pro Gerät — danach arbeitet jedes Gerät mit einem
-eigenen, serverseitig erzeugten Secret.
+Mehr braucht es nicht. Das Enrollment-Token für die Agents erzeugt das Backend
+beim ersten Start selbst; es steht danach im Frontend unter **Einstellungen**
+und lässt sich dort auch erneuern.
 
 ### 3. Stack in Portainer anlegen
 
@@ -94,11 +93,11 @@ Darunter unter **Environment variables** setzen:
 
 ```
 DB_PASSWORD=<erzeugter Wert>
-AGENT_ENROLLMENT_TOKEN=<erzeugter Wert>
 ```
 
 Mehr ist nicht nötig — alles Übrige hat brauchbare Standardwerte, `BACKEND_IMAGE`
-eingeschlossen. Nach Bedarf zusätzlich:
+eingeschlossen. AD-Anbindung, Schwellwerte und das Enrollment-Token werden im
+Frontend unter **Einstellungen** gepflegt, nicht hier. Nach Bedarf zusätzlich:
 
 | Variable | Wann |
 |---|---|
@@ -130,11 +129,13 @@ Agents.
 
 ### 5. Ersten Agent melden lassen
 
-Auf einem Windows-Rechner:
+Das Enrollment-Token steht im Frontend unter **Einstellungen → Agent-Registrierung**;
+dort steht auch der fertige Aufrufbefehl zum Kopieren. Auf einem Windows-Rechner,
+als Administrator:
 
 ```powershell
 dotnet publish agent/src/WiUpMo.Agent/WiUpMo.Agent.csproj -c Release -r win-x64 -o agent/publish
-agent\publish\wiupmo-agent.exe --backend-url http://<host>:3000 --enrollment-token <token>
+agent\publish\wiupmo-agent.exe --install --backend-url http://<host>:3000 --enrollment-token <token>
 ```
 
 Erwartete Ausgabe: eine Zeile „Registriert als Gerät …", danach „Snapshot
@@ -213,6 +214,20 @@ aber nur bedingt: Sie zieht Änderungen an der Compose-Datei nach, nicht an
 `BACKEND_IMAGE` — das ist eine Portainer-Variable, kein Repository-Inhalt. Der
 Versionswechsel bleibt also ein bewusster Handgriff. Genau so soll es bei einem
 System sein, an dem eine ganze Geräteflotte hängt.
+
+### Agent-Versionen
+
+Die hochgeladenen Agent-Binaries liegen im Volume `wiupmo_agent-releases`,
+nicht in der Datenbank. Ein `pg_dump` sichert sie also **nicht**. Sie sind
+ersetzbar — ein Release lässt sich jederzeit neu hochladen —, aber die
+Zuordnung Version → Prüfsumme steckt in der Datenbank. Geht das Volume
+verloren, zeigen die Einträge auf fehlende Dateien; das Backend antwortet dem
+Agent dann mit 404, und der Auftrag scheitert kontrolliert.
+
+```bash
+sudo docker run --rm -v wiupmo_agent-releases:/data -v "$PWD:/backup" alpine \
+  tar czf /backup/agent-releases.tar.gz -C /data .
+```
 
 ### Von vorn anfangen
 

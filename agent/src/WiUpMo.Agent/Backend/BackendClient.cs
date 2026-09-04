@@ -89,6 +89,52 @@ public sealed class BackendClient : IDisposable
         PostAsync<BatchCheckinRequest, CheckinResponse>(
             "api/agent/v1/checkin/batch", identity, new BatchCheckinRequest { Snapshots = snapshots }, ct);
 
+    public Task ReportUpdateResultAsync(
+        DeviceIdentity identity,
+        UpdateResultRequest request,
+        CancellationToken ct) =>
+        PostAsync<UpdateResultRequest, UpdateAck>("api/agent/v1/update-result", identity, request, ct);
+
+    /// <summary>
+    /// Laedt ein Agent-Binary in eine Datei.
+    ///
+    /// Ueber einen Datenstrom statt ueber ein Byte-Array: Das Binary ist rund
+    /// 75 MB, und der Agent laeuft auf Geraeten, deren Arbeitsspeicher man
+    /// nicht kennt.
+    /// </summary>
+    public async Task DownloadAsync(
+        DeviceIdentity identity,
+        string path,
+        string targetFile,
+        CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, path.TrimStart('/'));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", identity.Token);
+
+        using HttpResponseMessage response = await _http
+            .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
+            .ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new BackendException(
+                response.StatusCode,
+                $"Der Download endete mit {(int)response.StatusCode} {response.ReasonPhrase}.");
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(targetFile)!);
+
+        await using (FileStream file = File.Create(targetFile))
+        {
+            await response.Content.CopyToAsync(file, ct).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class UpdateAck
+    {
+        public bool Ok { get; init; }
+    }
+
     private async Task<TResponse> PostAsync<TRequest, TResponse>(
         string path,
         DeviceIdentity identity,

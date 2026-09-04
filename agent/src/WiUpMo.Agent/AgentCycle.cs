@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using WiUpMo.Agent.Backend;
 using WiUpMo.Agent.Contracts;
 using WiUpMo.Agent.Storage;
+using WiUpMo.Agent.Update;
 
 namespace WiUpMo.Agent;
 
@@ -20,6 +21,7 @@ public sealed class AgentCycle(
     SnapshotQueue queue,
     DeviceIdentityStore identityStore,
     BackendClient backend,
+    SelfUpdateService selfUpdate,
     ILogger<AgentCycle> logger)
 {
     public async Task RunAsync(CancellationToken ct)
@@ -92,6 +94,17 @@ public sealed class AgentCycle(
             }
 
             Settle(pending, response);
+
+            // Erst das Ergebnis eines laufenden Updates abschliessen, dann
+            // einen neuen Auftrag annehmen — und beides erst, nachdem die
+            // Warteschlange draussen ist. Ein Selbst-Update mitten in einer
+            // vollen Warteschlange wuerde im Fehlerfall beides mitnehmen.
+            await selfUpdate.ReportPendingOutcomeAsync(identity, ct).ConfigureAwait(false);
+
+            if (response.AgentUpdate is { } job)
+            {
+                await selfUpdate.PrepareAsync(identity, job, ct).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (ex is BackendException or HttpRequestException or TaskCanceledException
                                       && !ct.IsCancellationRequested)

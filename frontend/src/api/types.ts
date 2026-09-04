@@ -147,6 +147,134 @@ export interface UpdateDevices {
   unaffected: number;
 }
 
+export type AgentUpdateJobState = 'pending' | 'delivered' | 'installing' | 'done' | 'failed';
+
+export interface AgentRelease {
+  id: string;
+  version: string;
+  sha256: string;
+  sizeBytes: string;
+  releasedAt: string;
+  isCurrent: boolean;
+  notes: string | null;
+  devices: number;
+}
+
+export interface AgentUpdateJobView {
+  id: string;
+  deviceId: string;
+  hostname: string;
+  targetVersion: string;
+  state: AgentUpdateJobState;
+  createdAt: string;
+  completedAt: string | null;
+  error: string | null;
+}
+
+export interface CreateUpdateJobsResult {
+  created: number;
+  skipped: number;
+  targetVersion: string;
+}
+
+export interface Summary {
+  devicesTotal: number;
+  devicesActive: number;
+  devicesArchived: number;
+  devicesEnrolled: number;
+  devicesWithoutAgent: number;
+  staleAgents: number;
+  devicesWithOpenSecurity: number;
+  devicesCritical: number;
+  devicesPendingReboot: number;
+  openUpdatesTotal: number;
+  openSecurityUpdatesTotal: number;
+  medianPatchAgeDays: number | null;
+  staleAgentDays: number;
+  criticalOpenDays: number;
+}
+
+export interface TrendPoint {
+  date: string;
+  openUpdates: number;
+  appeared: number;
+  installed: number;
+}
+
+export interface UpdateSourceCount {
+  source: UpdateSource;
+  devices: number;
+  medianPatchAgeDays: number | null;
+}
+
+export interface SourceChange {
+  deviceId: string;
+  hostname: string;
+  previousSource: UpdateSource;
+  currentSource: UpdateSource;
+  changedAt: string;
+}
+
+export interface UpdateSourcesReport {
+  distribution: UpdateSourceCount[];
+  changes: SourceChange[];
+}
+
+export interface PatchAgeBucket {
+  fromDays: number | null;
+  toDays: number | null;
+  label: string;
+  devices: number;
+}
+
+export interface PatchAgeReport {
+  buckets: PatchAgeBucket[];
+  osBuilds: Array<{ osName: string | null; osBuild: string | null; devices: number }>;
+}
+
+export interface ComplianceDevice {
+  deviceId: string;
+  hostname: string;
+  adOu: string | null;
+  openSecurityUpdates: number;
+  oldestOpenDays: number | null;
+  lastSeenAt: string | null;
+  pendingReboot: boolean;
+}
+
+export interface StaleAgent {
+  deviceId: string;
+  hostname: string;
+  adOu: string | null;
+  lastSeenAt: string | null;
+  daysSilent: number | null;
+  agentVersion: string | null;
+}
+
+export interface MissingAgent {
+  deviceId: string;
+  hostname: string;
+  adOu: string | null;
+  osName: string | null;
+  adDn: string | null;
+}
+
+export interface TimeToPatch {
+  severity: string;
+  updates: number;
+  medianDays: number | null;
+  p90Days: number | null;
+}
+
+export interface FailureGroup {
+  updateId: string;
+  kbArticle: string | null;
+  title: string;
+  hresult: number | null;
+  devices: number;
+  attempts: number;
+}
+
 export type AdSyncTrigger = 'scheduled' | 'manual';
 
 export type AdSyncStatus = 'running' | 'success' | 'failed';
@@ -199,8 +327,28 @@ export interface RetentionSettings {
   checkinDays: number;
 }
 
+export interface AgentSettingsView {
+  /** Wird bewusst ausgeliefert — man braucht es bei jeder Agent-Installation. */
+  enrollmentToken: string;
+}
+
+export interface AuthSettings {
+  provider: 'local' | 'ldap';
+  userDnTemplate: string;
+  allowLocalFallback: boolean;
+}
+
+export interface RetentionResult {
+  eventsDeleted: number;
+  checkinsDeleted: number;
+  eventDays: number;
+  checkinDays: number;
+}
+
 export interface SettingsView {
+  agent: AgentSettingsView;
   ad: AdSettingsView;
+  auth: AuthSettings;
   thresholds: ThresholdSettings;
   retention: RetentionSettings;
 }

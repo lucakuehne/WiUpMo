@@ -31,6 +31,16 @@ import { AdController } from '../dist/src/ad/ad.controller.js';
 import { AdSyncService } from '../dist/src/ad/ad-sync.service.js';
 import { SettingsController } from '../dist/src/settings/settings.controller.js';
 import { SettingsService } from '../dist/src/settings/settings.service.js';
+import { ReportsController } from '../dist/src/reports/reports.controller.js';
+import { ReportsService } from '../dist/src/reports/reports.service.js';
+import {
+  AgentUpdateJobsController,
+  ReleasesController,
+} from '../dist/src/releases/releases.controller.js';
+import { ReleasesService } from '../dist/src/releases/releases.service.js';
+import { AgentUpdateController } from '../dist/src/agent-api/agent-update.controller.js';
+import { RetentionController } from '../dist/src/retention/retention.controller.js';
+import { RetentionService } from '../dist/src/retention/retention.service.js';
 import { HealthController } from '../dist/src/health/health.controller.js';
 import { Device, DeviceSecret } from '../dist/src/database/entities/index.js';
 import { getDataSourceToken } from '@nestjs/typeorm';
@@ -46,6 +56,11 @@ const moduleRef = await Test.createTestingModule({
     UpdatesController,
     AdController,
     SettingsController,
+    ReportsController,
+    ReleasesController,
+    AgentUpdateJobsController,
+    AgentUpdateController,
+    RetentionController,
     HealthController,
   ],
   providers: [
@@ -56,6 +71,9 @@ const moduleRef = await Test.createTestingModule({
     { provide: UpdatesService, useValue: stub },
     { provide: AdSyncService, useValue: stub },
     { provide: SettingsService, useValue: stub },
+    { provide: ReportsService, useValue: stub },
+    { provide: ReleasesService, useValue: stub },
+    { provide: RetentionService, useValue: stub },
     // Guards werden von Nest ueber den Container erzeugt; ohne Attrappe
     // scheiterte schon das Zusammenbauen des Moduls.
     { provide: SessionGuard, useValue: { canActivate: () => true } },

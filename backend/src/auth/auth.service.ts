@@ -12,6 +12,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { Setting, User } from '../database/entities/index.js';
+import { SettingsService } from '../settings/settings.service.js';
 import { AUTH_PROVIDER, AuthProvider, AuthenticatedUser } from './auth-provider.js';
 import { LocalAuthProvider } from './local-auth.provider.js';
 import { SetupDto } from './dto/auth.dto.js';
@@ -39,6 +40,9 @@ export class AuthService implements OnModuleInit {
     @Inject(AUTH_PROVIDER) private readonly provider: AuthProvider,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    // Getrennt vom Repository oben: Dieses liest das Sitzungsgeheimnis roh
+    // ueber seinen Schluessel, jenes die typisierten Laufzeiteinstellungen.
+    private readonly settingsService: SettingsService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -52,8 +56,8 @@ export class AuthService implements OnModuleInit {
     }
   }
 
-  get providerName(): string {
-    return this.provider.name;
+  async providerName(): Promise<string> {
+    return (await this.settingsService.getAuth()).provider;
   }
 
   async isSetupRequired(): Promise<boolean> {

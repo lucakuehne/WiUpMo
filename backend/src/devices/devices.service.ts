@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { SqlParams } from '../common/sql-params.js';
+import { SqlParams, toCsv } from '../common/sql-params.js';
 import { DeviceStatus, UpdateEventType, UpdateSource, UpdateState } from '../database/enums.js';
 import {
   DeviceCheckinDto,
@@ -132,6 +132,53 @@ export class DevicesService {
       page: query.page,
       limit: query.limit,
     };
+  }
+
+  /**
+   * Export der gefilterten Menge, nicht der angezeigten Seite.
+   *
+   * Die Obergrenze von 50 000 Zeilen ist kein Schoenheitsfehler: Der Export
+   * baut die gesamte Datei im Speicher auf, und eine unbegrenzte Abfrage waere
+   * bei einer grossen Flotte ein Weg, das Backend umzubringen.
+   */
+  async exportCsv(query: DeviceQueryDto): Promise<string> {
+    const full: DeviceQueryDto = { ...query, page: 1, limit: 50_000 };
+    const { items } = await this.list(full);
+
+    return toCsv(
+      [
+        'Hostname',
+        'OU',
+        'Status',
+        'Betriebssystem',
+        'Version',
+        'Build',
+        'Update-Quelle',
+        'Offene Updates',
+        'davon Sicherheit',
+        'Patch-Alter (Tage)',
+        'Neustart ausstehend',
+        'Agent-Version',
+        'Registriert',
+        'Letzter Check-in',
+      ],
+      items.map((item) => [
+        item.hostname,
+        item.adOu,
+        item.status,
+        item.osName,
+        item.osVersion,
+        item.osBuild,
+        item.updateSource,
+        item.openUpdates,
+        item.openSecurityUpdates,
+        item.patchAgeDays,
+        item.pendingReboot ? 'ja' : 'nein',
+        item.agentVersion,
+        item.enrolledAt,
+        item.lastSeenAt,
+      ]),
+    );
   }
 
   private buildWhere(query: DeviceQueryDto, params: SqlParams): string {

@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AppModule } from './app.module.js';
+import { AllExceptionsFilter } from './common/all-exceptions.filter.js';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
@@ -14,6 +15,8 @@ async function bootstrap(): Promise<void> {
   // Das Sitzungstoken kommt als HttpOnly-Cookie; ohne diesen Leser ist
   // request.cookies undefiniert und jede Anmeldung liefe ins Leere.
   app.use(cookieParser());
+
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   app.useGlobalPipes(
     new ValidationPipe({

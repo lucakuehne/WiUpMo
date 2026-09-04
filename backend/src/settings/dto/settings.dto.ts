@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -8,10 +9,57 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
 } from 'class-validator';
 
 const toInt = () =>
   Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)));
+
+export class EnrollmentTokenDto {
+  /**
+   * Leer lassen erzeugt ein neues Token. Die Mindestlaenge gilt nur fuer
+   * selbst vergebene Werte — erzeugte sind ohnehin laenger.
+   */
+  @IsString()
+  @MinLength(16, { message: 'Das Enrollment-Token muss mindestens 16 Zeichen lang sein.' })
+  @MaxLength(512)
+  @IsOptional()
+  token?: string;
+}
+
+export class AgentSettingsViewDto {
+  /**
+   * Wird ausgeliefert, anders als das AD-Passwort: Man braucht es bei jeder
+   * Agent-Installation.
+   */
+  enrollmentToken: string;
+}
+
+export class AuthSettingsDto {
+  @IsIn(['local', 'ldap'])
+  @IsOptional()
+  provider?: 'local' | 'ldap';
+
+  /**
+   * Muss `{username}` enthalten — ohne den Platzhalter wuerde jede Anmeldung
+   * denselben Bind-Namen benutzen, und die Pruefung waere wertlos.
+   */
+  @IsString()
+  @MaxLength(256)
+  @Matches(/\{username\}/, { message: 'Die Vorlage muss {username} enthalten.' })
+  @IsOptional()
+  userDnTemplate?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  allowLocalFallback?: boolean;
+}
+
+export class AuthSettingsViewDto {
+  provider: 'local' | 'ldap';
+  userDnTemplate: string;
+  allowLocalFallback: boolean;
+}
 
 export class AdSettingsDto {
   /**
@@ -157,7 +205,9 @@ export class RetentionSettingsViewDto {
 }
 
 export class SettingsViewDto {
+  agent: AgentSettingsViewDto;
   ad: AdSettingsViewDto;
+  auth: AuthSettingsViewDto;
   thresholds: ThresholdSettingsViewDto;
   retention: RetentionSettingsViewDto;
 }

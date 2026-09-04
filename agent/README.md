@@ -43,7 +43,8 @@ liegen Geräteidentität und Protokolle.
 |---|---|
 | *(ohne Argumente)* | Dauerlauf im Vordergrund — praktisch zum Beobachten |
 | `--once` | Ein Durchlauf, dann beenden. Zum Prüfen einer Installation. |
-| `--install` / `--uninstall` | Dienst einrichten bzw. entfernen (Administratorrechte) |
+| `--install` / `--uninstall` | Dienst und Updater-Task einrichten bzw. entfernen (Administratorrechte) |
+| `--updater` | Ein Updater-Lauf. Wird vom geplanten Task aufgerufen, nicht von Hand. |
 
 > `--once` greift auf dieselbe Warteschlange zu wie der Dienst. Läuft der
 > Dienst, sind zwei gleichzeitige Durchläufe zwar unschädlich — SQLite
@@ -167,10 +168,48 @@ Innerhalb der späten Bindung fiel die Wahl auf `Type.InvokeMember` statt
 `dynamic` — der Aufruf ist damit eindeutig, vor allem bei indizierten
 Eigenschaften wie `Item`, und das Publish zieht den C#-Laufzeitbinder nicht mit.
 
-### Noch offen
+## Selbst-Update
 
-Der **Updater-Task** aus dem Entwicklungsplan wird von `--install` bewusst noch
-nicht angelegt. Er hätte in Phase 2 kein Ziel: Ein geplanter Task, der ein
-Selbst-Update ausführen soll, das es noch nicht gibt, wäre nur eine
-Angriffsfläche. Er kommt mit Phase 6, zusammen mit der Release-Verwaltung im
-Backend und der Stop/Tausch/Start-Choreografie.
+`--install` legt neben dem Dienst eine **Kopie** `wiupmo-updater.exe` an und
+meldet einen geplanten Task `WiUpMo Agent Updater` an, der sie alle 5 Minuten
+als SYSTEM ausführt.
+
+Die Kopie ist der Kern des Verfahrens, nicht Redundanz: Windows sperrt die Datei
+eines laufenden Prozesses. Ein Updater in derselben EXE könnte sich beim Tausch
+nicht selbst ersetzen. Die Kopie wird deshalb **nie** aktualisiert — sie bleibt
+auf dem Stand der Installation und ist damit auch nie Ziel eines Selbst-Updates.
+Ihre Logik muss von Anfang an stimmen; sie beschränkt sich auf
+Dateioperationen und `sc.exe` und fällt bei jedem Zweifel auf den vorherigen
+Stand zurück. Netzwerkzugriff hat sie keinen.
+
+### Ablauf
+
+Dienst und Updater reden ausschliesslich über `%ProgramData%\WiUpMo\update.json`
+miteinander.
+
+| Zustand | Wer handelt | Was passiert |
+|---|---|---|
+| — | Dienst | Auftrag in der Check-in-Antwort: Binary laden, SHA-256 prüfen, als `wiupmo-agent.new.exe` ablegen, Marker `pendingSwap`, `installing` melden |
+| `pendingSwap` | Updater | Dienst anhalten, alte EXE nach `.bak`, neue an ihre Stelle, Marker `verifying` mit Frist, Dienst starten |
+| `verifying` | Dienst | Läuft er in der Zielversion, setzt er den Marker auf `verified` |
+| `verifying`, Frist abgelaufen | Updater | Rücktausch aus `.bak`, Marker `rolledBack` mit Begründung |
+| `verified` / `rolledBack` | Dienst | Ergebnis ans Backend melden, Marker und `.bak` entfernen |
+
+### Warum `verified` ein eigener Zustand ist
+
+Die lokale Bestätigung ist bewusst vom Melden ans Backend getrennt. Wäre sie es
+nicht, würde ein unerreichbares Backend dazu führen, dass der Updater nach
+Ablauf der Frist eine einwandfrei laufende neue Version zurückdreht — bei einem
+Laptop im Homeoffice der Normalfall, nicht die Ausnahme. Der Dienst setzt
+`verified` deshalb ohne jeden Netzwerkzugriff, und der Updater lässt ab diesem
+Zustand die Finger davon.
+
+Die Frist beträgt 10 Minuten. Sie muss länger sein als Startverzögerung plus
+erster Check-in, sonst nimmt der Updater einen Tausch zurück, der nur noch
+keine Gelegenheit zur Bestätigung hatte.
+
+### Bei einer nicht passenden Prüfsumme
+
+wird abgebrochen, nicht getauscht. Eine Datei unbekannter Herkunft als Dienst
+unter `LocalSystem` zu starten wäre der schlimmste denkbare Ausgang dieses
+Vorgangs.

@@ -1,4 +1,5 @@
 import Aura from '@primeuix/themes/aura';
+import ConfirmationService from 'primevue/confirmationservice';
 import PrimeVue from 'primevue/config';
 import ToastService from 'primevue/toastservice';
 import { createApp } from 'vue';
@@ -33,4 +34,5 @@ createApp(App)
     },
   })
   .use(ToastService)
+  .use(ConfirmationService)
   .mount('#app');

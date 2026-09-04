@@ -10,7 +10,7 @@ import Select from 'primevue/select';
 import Tag from 'primevue/tag';
 import ToggleButton from 'primevue/togglebutton';
 import { onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { get } from '@/api/client';
 import type { DeviceListItem, Paged, UpdateSource } from '@/api/types';
 import {
@@ -20,6 +20,7 @@ import {
   sourceSeverity,
 } from '@/format';
 
+const route = useRoute();
 const router = useRouter();
 
 const rows = ref<DeviceListItem[]>([]);
@@ -122,7 +123,56 @@ function openDevice(id: string): void {
   void router.push({ name: 'device', params: { id } });
 }
 
-onMounted(load);
+/**
+ * Der Export geht über einen eigenen Endpunkt statt über die geladenen Zeilen:
+ * Die Tabelle kennt nur die aktuelle Seite, der Export soll die gesamte
+ * gefilterte Menge enthalten. Deshalb ein direkter Navigationsaufruf — der
+ * Browser lädt die Datei und schickt das Sitzungscookie dabei mit.
+ */
+function exportCsv(): void {
+  const params = new URLSearchParams();
+  const filters: Record<string, unknown> = {
+    sortBy: sortBy.value,
+    sortDir: sortDir.value,
+    search: search.value || undefined,
+    updateSource: updateSource.value ?? undefined,
+    staleDays: staleDays.value ?? undefined,
+    hasOpenSecurity: hasOpenSecurity.value || undefined,
+    pendingReboot: pendingReboot.value || undefined,
+    withoutAgent: withoutAgent.value || undefined,
+  };
+
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== '') {
+      params.set(key, String(value));
+    }
+  }
+
+  window.location.href = `/api/devices/export?${params.toString()}`;
+}
+
+/** Übernimmt Filter, mit denen das Dashboard hierher verlinkt. */
+function applyQueryFilters(): void {
+  const query = route.query;
+
+  if (typeof query.staleDays === 'string') {
+    staleDays.value = Number(query.staleDays);
+  }
+  if (query.hasOpenSecurity === '1') {
+    hasOpenSecurity.value = true;
+  }
+  if (query.pendingReboot === '1') {
+    pendingReboot.value = true;
+  }
+  if (query.withoutAgent === '1') {
+    withoutAgent.value = true;
+  }
+}
+
+onMounted(() => {
+  applyQueryFilters();
+  void load();
+});
 </script>
 
 <template>
@@ -180,6 +230,16 @@ onMounted(load);
       />
 
       <Button label="Zurücksetzen" severity="secondary" text size="small" @click="resetFilters" />
+
+      <Button
+        label="Export"
+        icon="pi pi-download"
+        severity="secondary"
+        outlined
+        size="small"
+        style="margin-left: auto"
+        @click="exportCsv"
+      />
     </div>
 
     <Message v-if="error" severity="error" :closable="false" style="margin-bottom: 1rem">

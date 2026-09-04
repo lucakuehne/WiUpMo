@@ -55,7 +55,10 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME:-wiupmo}
       DB_SSL: 'false'
-      AGENT_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:?AGENT_ENROLLMENT_TOKEN muss gesetzt sein}
+      # Nur noch Erstbefuellung: Das Token liegt in den Einstellungen und wird
+      # dort im Frontend abgelesen und erneuert. Leer lassen — das Backend
+      # erzeugt beim ersten Start selbst eines.
+      AGENT_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       # Auf 'true', sobald ein Reverse Proxy mit TLS davorsteht — sonst
       # verwirft der Browser das Sitzungscookie.
@@ -72,6 +75,8 @@ services:
       AD_SYNC_INTERVAL_MINUTES: ${AD_SYNC_INTERVAL_MINUTES:-360}
       AD_STARTUP_DELAY_SECONDS: ${AD_STARTUP_DELAY_SECONDS:-60}
       AD_TLS_REJECT_UNAUTHORIZED: ${AD_TLS_REJECT_UNAUTHORIZED:-true}
+      # Ablage der hochgeladenen Agent-Binaries. Zeigt auf das Volume unten.
+      AGENT_RELEASES_DIR: /app/agent-releases
     command:
       - node
       - node_modules/typeorm/cli.js

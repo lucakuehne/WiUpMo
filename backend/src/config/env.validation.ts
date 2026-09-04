@@ -68,15 +68,19 @@ export class EnvironmentVariables {
   DB_SSL: boolean = false;
 
   /**
-   * Gemeinsames Geheimnis, mit dem sich ein Agent einmalig registriert. Danach
-   * arbeitet er mit seinem eigenen, pro Geraet erzeugten Secret weiter.
-   * Mindestlaenge, damit hier nicht versehentlich "test" landet.
+   * Nur noch die Erstbefuellung. Das Enrollment-Token liegt in den
+   * Einstellungen und wird dort im Frontend abgelesen und erneuert; fehlt die
+   * Variable, erzeugt das Backend beim ersten Start selbst eines.
+   *
+   * Gesetzt bleiben sollte sie nur bei einer bestehenden Installation, deren
+   * Agents bereits mit diesem Wert verteilt wurden.
    */
   @IsString()
   @MinLength(16, {
     message: 'AGENT_ENROLLMENT_TOKEN muss mindestens 16 Zeichen lang sein.',
   })
-  AGENT_ENROLLMENT_TOKEN: string;
+  @IsOptional()
+  AGENT_ENROLLMENT_TOKEN?: string;
 
   /**
    * Erlaubte Herkuenfte fuer das Frontend, kommagetrennt. Leer = keine

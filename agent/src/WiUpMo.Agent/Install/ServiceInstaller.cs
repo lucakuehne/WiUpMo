@@ -16,6 +16,7 @@ public static class ServiceInstaller
 {
     public const string ServiceName = "WiUpMoAgent";
     public const string EventSourceName = "WiUpMo Agent";
+    public const string UpdaterTaskName = "WiUpMo Agent Updater";
 
     private const string DisplayName = "WiUpMo Windows-Update-Monitoring";
     private const string Description =
@@ -64,6 +65,7 @@ public static class ServiceInstaller
         WriteConfiguration(target, options);
         PrepareDataDirectory(options.DataDirectory);
         EnsureEventSource();
+        InstallUpdater(target);
 
         if (!exists)
         {
@@ -117,6 +119,10 @@ public static class ServiceInstaller
             Console.Error.WriteLine("--uninstall muss mit erhoehten Rechten laufen.");
             return 2;
         }
+
+        // Zuerst der Task: Liefe er noch, koennte er einen Dienst starten, den
+        // wir gerade entfernen.
+        Run("schtasks.exe", "/Delete", "/TN", UpdaterTaskName, "/F");
 
         if (ServiceExists())
         {
@@ -193,6 +199,43 @@ public static class ServiceInstaller
     {
         Directory.CreateDirectory(path);
         Directory.CreateDirectory(Path.Combine(path, "logs"));
+    }
+
+    /// <summary>
+    /// Legt die Updater-Kopie an und meldet den geplanten Task an.
+    ///
+    /// Die Kopie ist der Kern des Verfahrens: Windows sperrt die Datei eines
+    /// laufenden Prozesses, ein Updater in derselben EXE koennte sich beim
+    /// Tausch nicht selbst ersetzen. Die Kopie wird daher nie aktualisiert —
+    /// sie bleibt auf dem Stand der Installation und ist damit auch nie das
+    /// Ziel eines Selbst-Updates.
+    ///
+    /// Der Task laeuft als SYSTEM, weil er den Dienst anhalten und Dateien in
+    /// ProgramFiles verschieben muss. Alle 5 Minuten: Er beendet sich sofort,
+    /// wenn kein Marker vorliegt, kostet also praktisch nichts.
+    /// </summary>
+    private static void InstallUpdater(string serviceExe)
+    {
+        string updater = Path.Combine(Path.GetDirectoryName(serviceExe)!, "wiupmo-updater.exe");
+        File.Copy(serviceExe, updater, overwrite: true);
+
+        int result = Run(
+            "schtasks.exe",
+            "/Create",
+            "/TN", UpdaterTaskName,
+            "/TR", $"\"{updater}\" --updater",
+            "/SC", "MINUTE",
+            "/MO", "5",
+            "/RU", "SYSTEM",
+            "/RL", "HIGHEST",
+            "/F");
+
+        if (result != 0)
+        {
+            Console.Error.WriteLine(
+                "Der Updater-Task liess sich nicht anlegen. Der Agent laeuft, kann sich aber nicht " +
+                "selbst aktualisieren — Updates muessen dann per --install verteilt werden.");
+        }
     }
 
     /// <summary>

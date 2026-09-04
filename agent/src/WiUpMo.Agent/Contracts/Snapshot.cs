@@ -150,7 +150,34 @@ public sealed class SnapshotResult
     public string? Error { get; init; }
 }
 
+/// <summary>Auftrag zum Selbst-Update, den das Backend der Check-in-Antwort beilegt.</summary>
+public sealed class AgentUpdateJob
+{
+    public string JobId { get; init; } = string.Empty;
+    public string TargetVersion { get; init; } = string.Empty;
+
+    /// <summary>SHA-256 der erwarteten Datei, hexadezimal.</summary>
+    public string Sha256 { get; init; } = string.Empty;
+
+    /// <summary>Relativ zur Basisadresse, z. B. <c>/api/agent/v1/binary/0.2.0</c>.</summary>
+    public string DownloadPath { get; init; } = string.Empty;
+}
+
 public sealed class CheckinResponse
 {
     public List<SnapshotResult> Results { get; init; } = [];
+
+    /// <summary><c>null</c>, wenn kein Auftrag offen ist.</summary>
+    public AgentUpdateJob? AgentUpdate { get; init; }
+}
+
+public sealed class UpdateResultRequest
+{
+    public required string JobId { get; init; }
+
+    /// <summary><c>installing</c>, <c>done</c> oder <c>failed</c>.</summary>
+    public required string State { get; init; }
+
+    public string? AgentVersion { get; init; }
+    public string? Error { get; init; }
 }

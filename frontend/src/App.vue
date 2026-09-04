@@ -16,9 +16,12 @@ const showNavigation = computed(
 );
 
 const items = [
+  { label: 'Dashboard', icon: 'pi pi-chart-bar', route: '/' },
   { label: 'Geräte', icon: 'pi pi-desktop', route: '/devices' },
   { label: 'Updates', icon: 'pi pi-download', route: '/updates' },
+  { label: 'Auswertungen', icon: 'pi pi-chart-line', route: '/reports' },
   { label: 'AD-Abgleich', icon: 'pi pi-sync', route: '/ad' },
+  { label: 'Agent-Versionen', icon: 'pi pi-box', route: '/agent-releases' },
   { label: 'Einstellungen', icon: 'pi pi-cog', route: '/settings' },
 ];
 

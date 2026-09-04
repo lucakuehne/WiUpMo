@@ -1,14 +1,13 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module.js';
-import { Setting } from '../database/entities/index.js';
+import { SettingsCoreModule } from './settings-core.module.js';
 import { SettingsController } from './settings.controller.js';
-import { SettingsService } from './settings.service.js';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Setting]), AuthModule],
+  imports: [SettingsCoreModule, AuthModule],
   controllers: [SettingsController],
-  providers: [SettingsService],
-  exports: [SettingsService],
+  // Weiterreichen, damit die uebrigen Module weiterhin dieses Modul einbinden
+  // koennen und nicht wissen muessen, dass die Ablage daneben liegt.
+  exports: [SettingsCoreModule],
 })
 export class SettingsModule {}

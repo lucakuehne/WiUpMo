@@ -8,9 +8,11 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Response } from 'express';
 import { SessionGuard } from '../auth/session.guard.js';
 import { DevicesService } from './devices.service.js';
 import { ArchiveDeviceDto, DeviceDetailDto, TimelineDto, TimelineQueryDto } from './dto/device-detail.dto.js';
@@ -26,6 +28,22 @@ export class DevicesController {
   @ApiOperation({ summary: 'Geraeteliste mit Filter, Sortierung und Seiten.' })
   list(@Query() query: DeviceQueryDto): Promise<DeviceListDto> {
     return this.devices.list(query);
+  }
+
+  /**
+   * Muss vor `:id` stehen — sonst faengt die Detailroute den Pfad ab und der
+   * UUID-Filter weist "export" als ungueltige Kennung zurueck.
+   */
+  @Get('export')
+  @ApiOperation({ summary: 'Die gefilterte Geraeteliste als CSV.' })
+  async export(@Query() query: DeviceQueryDto, @Res() response: Response): Promise<void> {
+    const csv = await this.devices.exportCsv(query);
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    response
+      .header('Content-Type', 'text/csv; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="geraete-${stamp}.csv"`)
+      .send(csv);
   }
 
   @Get(':id')
