@@ -77,6 +77,24 @@ export interface AdSettings {
    */
   bindPassword: string;
 
+  /**
+   * `guided` setzt den Filter aus den Ankreuzfeldern zusammen, `custom`
+   * benutzt <see cref="filter"/> unveraendert. Der geführte Weg ist der
+   * Normalfall — die LDAP-Filtersyntax ist fehleranfaellig, und der Ausdruck
+   * fuer "nicht deaktiviert" merkt sich niemand.
+   */
+  filterMode: 'guided' | 'custom';
+
+  /** Nur im gefuehrten Modus. */
+  excludeDisabled: boolean;
+
+  /**
+   * Blendet Serverbetriebssysteme aus. Der Scope der Loesung sind Laptops und
+   * Arbeitsplatzrechner; Server wuerden die Auswertungen verzerren.
+   */
+  excludeServers: boolean;
+
+  /** Im gefuehrten Modus der zusammengesetzte Ausdruck, sonst der eigene. */
   filter: string;
 
   /** AD liefert ohne Paging hoechstens 1000 Eintraege. */
@@ -117,6 +135,9 @@ export const DEFAULT_AD: AdSettings = {
   baseDn: '',
   bindDn: '',
   bindPassword: '',
+  filterMode: 'guided',
+  excludeDisabled: true,
+  excludeServers: false,
   filter: '(objectClass=computer)',
   pageSize: 500,
   intervalMinutes: 360,
@@ -139,4 +160,32 @@ export const DEFAULT_RETENTION: RetentionSettings = {
 /** Ohne Server und Suchwurzel ist nichts abzugleichen. */
 export function isAdConfigured(ad: AdSettings): boolean {
   return ad.url.trim() !== '' && ad.baseDn.trim() !== '';
+}
+
+/**
+ * Der tatsaechlich verwendete LDAP-Filter.
+ *
+ * Im gefuehrten Modus wird er aus den Ankreuzfeldern gebaut, damit niemand die
+ * Bitmasken-Syntax fuer `userAccountControl` von Hand schreiben muss — ein
+ * verirrtes Zeichen darin liefert keinen Fehler, sondern still zu wenige oder
+ * zu viele Konten.
+ */
+export function effectiveAdFilter(ad: AdSettings): string {
+  if (ad.filterMode === 'custom') {
+    return ad.filter.trim() || '(objectClass=computer)';
+  }
+
+  const clauses = ['(objectClass=computer)'];
+
+  if (ad.excludeDisabled) {
+    // Bit 2 (ACCOUNTDISABLE) in userAccountControl, ueber den
+    // LDAP_MATCHING_RULE_BIT_AND-Vergleich.
+    clauses.push('(!(userAccountControl:1.2.840.113556.1.4.803:=2))');
+  }
+
+  if (ad.excludeServers) {
+    clauses.push('(!(operatingSystem=*Server*))');
+  }
+
+  return clauses.length === 1 ? clauses[0] : `(&${clauses.join('')})`;
 }

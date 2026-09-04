@@ -1,6 +1,30 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Client, type Entry } from 'ldapts';
-import { AdSettings } from '../settings/settings.types.js';
+import { AdSettings, effectiveAdFilter } from '../settings/settings.types.js';
+
+/** Was die Sondierung ueber das Verzeichnis herausfindet. */
+export interface AdProbe {
+  dnsHostName: string | null;
+
+  /** Wurzel der Domaene, z. B. `DC=firma,DC=local`. Der Vorschlag fuer die Suchwurzel. */
+  defaultNamingContext: string | null;
+
+  namingContexts: string[];
+
+  /** Aus dem Namenskontext abgeleitet, z. B. `firma.local` — der UPN-Zusatz. */
+  domainDnsName: string | null;
+
+  /** Kurzname der Domaene, z. B. `FIRMA`. */
+  domainNetbiosName: string | null;
+}
+
+export interface OrganizationalUnit {
+  dn: string;
+  name: string;
+
+  /** Schachtelungstiefe unterhalb der Suchwurzel, fuer die Einrueckung. */
+  depth: number;
+}
 
 /** Ein Computerkonto, auf das Noetigste eingedampft. */
 export interface AdComputer {
@@ -37,7 +61,7 @@ export class LdapClient {
 
       const { searchEntries } = await client.search(config.baseDn, {
         scope: 'sub',
-        filter: config.filter,
+        filter: effectiveAdFilter(config),
         paged: { pageSize: config.pageSize },
         attributes: [
           'objectGUID',
@@ -67,6 +91,134 @@ export class LdapClient {
       await client.unbind().catch(() => {
         // Die Verbindung ist ohnehin am Ende; ein Fehler beim Abmelden darf
         // den Abgleich nicht nachtraeglich scheitern lassen.
+      });
+    }
+  }
+
+  /**
+   * Verbindet, meldet sich an und fragt das Verzeichnis nach sich selbst.
+   *
+   * Die RootDSE beantwortet die Fragen, die sonst jemand von Hand eintippen
+   * muesste: Wie heisst die Domaene, wo ist ihre Wurzel, welche Namenskontexte
+   * gibt es. Damit wird aus dem Ausfuellen eines Formulars ein Auswaehlen.
+   */
+  async probe(config: AdSettings): Promise<AdProbe> {
+    return this.withClient(config, async (client) => {
+      const { searchEntries } = await client.search('', {
+        scope: 'base',
+        filter: '(objectClass=*)',
+        attributes: [
+          'defaultNamingContext',
+          'rootDomainNamingContext',
+          'namingContexts',
+          'dnsHostName',
+        ],
+      });
+
+      const root = searchEntries[0] ?? {};
+      const defaultNamingContext = asString(root.defaultNamingContext);
+
+      return {
+        dnsHostName: asString(root.dnsHostName),
+        defaultNamingContext,
+        namingContexts: asStrings(root.namingContexts),
+        domainDnsName: dnToDnsName(defaultNamingContext),
+        domainNetbiosName: await this.readNetbiosName(
+          client,
+          asString(root.rootDomainNamingContext) ?? defaultNamingContext,
+          defaultNamingContext,
+        ),
+      };
+    });
+  }
+
+  /**
+   * Zaehlt, wie viele Konten der eingestellte Filter unterhalb der Suchwurzel
+   * trifft. Das ist die eigentliche Probe aufs Exempel — eine Verbindung, die
+   * steht, aber null Treffer liefert, ist genauso unbrauchbar wie gar keine.
+   */
+  async countMatches(config: AdSettings): Promise<number> {
+    return this.withClient(config, async (client) => {
+      const { searchEntries } = await client.search(config.baseDn, {
+        scope: 'sub',
+        filter: effectiveAdFilter(config),
+        paged: { pageSize: config.pageSize },
+        attributes: ['distinguishedName'],
+      });
+
+      return searchEntries.length;
+    });
+  }
+
+  /** Organisationseinheiten unterhalb eines Knotens, fuer die Auswahl im Frontend. */
+  async listOrganizationalUnits(config: AdSettings, base: string): Promise<OrganizationalUnit[]> {
+    return this.withClient(config, async (client) => {
+      const { searchEntries } = await client.search(base, {
+        scope: 'sub',
+        filter: '(|(objectClass=organizationalUnit)(objectClass=container))',
+        paged: { pageSize: 500 },
+        attributes: ['distinguishedName', 'name'],
+      });
+
+      const baseParts = base.split(',').length;
+
+      return searchEntries
+        .map((entry) => {
+          const dn = asString(entry.distinguishedName) ?? String(entry.dn);
+          return {
+            dn,
+            name: asString(entry.name) ?? dn.split(',')[0],
+            depth: Math.max(0, dn.split(',').length - baseParts),
+          };
+        })
+        // Nach dem vollstaendigen Namen von hinten sortiert, damit
+        // untergeordnete Einheiten direkt unter ihrer uebergeordneten stehen.
+        .sort((a, b) => reverseDn(a.dn).localeCompare(reverseDn(b.dn), 'de'));
+    });
+  }
+
+  /**
+   * Der NetBIOS-Name steht nicht in der RootDSE, sondern im
+   * Partitions-Container der Konfiguration. Er ist nur ein Komfortwert — misslingt
+   * die Abfrage, faellt die Anzeige auf den abgeleiteten Namen zurueck.
+   */
+  private async readNetbiosName(
+    client: Client,
+    configurationRoot: string | null,
+    defaultNamingContext: string | null,
+  ): Promise<string | null> {
+    if (!configurationRoot || !defaultNamingContext) {
+      return null;
+    }
+
+    try {
+      const { searchEntries } = await client.search(`CN=Partitions,CN=Configuration,${configurationRoot}`, {
+        scope: 'sub',
+        filter: `(&(objectClass=crossRef)(nCName=${defaultNamingContext}))`,
+        attributes: ['nETBIOSName'],
+      });
+
+      return asString(searchEntries[0]?.nETBIOSName);
+    } catch {
+      const derived = dnToDnsName(defaultNamingContext)?.split('.')[0];
+      return derived ? derived.toUpperCase() : null;
+    }
+  }
+
+  private async withClient<T>(config: AdSettings, work: (client: Client) => Promise<T>): Promise<T> {
+    const client = new Client({
+      url: config.url,
+      timeout: config.timeoutSeconds * 1000,
+      connectTimeout: config.timeoutSeconds * 1000,
+      tlsOptions: { rejectUnauthorized: config.tlsRejectUnauthorized },
+    });
+
+    try {
+      await client.bind(config.bindDn, config.bindPassword);
+      return await work(client);
+    } finally {
+      await client.unbind().catch(() => {
+        // Verbindung ist ohnehin am Ende.
       });
     }
   }
@@ -110,6 +262,33 @@ function asString(value: unknown): string | null {
     return value[0];
   }
   return null;
+}
+
+function asStrings(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string');
+  }
+  return typeof value === 'string' ? [value] : [];
+}
+
+/** `DC=firma,DC=local` wird zu `firma.local` — der UPN-Zusatz der Domaene. */
+export function dnToDnsName(dn: string | null): string | null {
+  if (!dn) {
+    return null;
+  }
+
+  const parts = dn
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.toLowerCase().startsWith('dc='))
+    .map((part) => part.slice(3));
+
+  return parts.length > 0 ? parts.join('.') : null;
+}
+
+/** Dreht die Bestandteile eines DN um, damit sich hierarchisch sortieren laesst. */
+function reverseDn(dn: string): string {
+  return dn.split(',').reverse().join(',').toLowerCase();
 }
 
 function asBuffer(value: unknown): Buffer | null {

@@ -301,13 +301,35 @@ export interface AdSyncResult {
   error: string | null;
 }
 
+export interface AdProbeResult {
+  ok: boolean;
+  message: string;
+  dnsHostName: string | null;
+  defaultNamingContext: string | null;
+  namingContexts: string[];
+  domainDnsName: string | null;
+  domainNetbiosName: string | null;
+  matchedComputers: number | null;
+  effectiveFilter: string;
+}
+
+export interface OrganizationalUnit {
+  dn: string;
+  name: string;
+  depth: number;
+}
+
 export interface AdSettingsView {
   url: string;
   baseDn: string;
   bindDn: string;
   /** Das Passwort selbst wird nie ausgeliefert. */
   bindPasswordSet: boolean;
+  filterMode: 'guided' | 'custom';
+  excludeDisabled: boolean;
+  excludeServers: boolean;
   filter: string;
+  effectiveFilter: string;
   pageSize: number;
   intervalMinutes: number;
   startupDelaySeconds: number;

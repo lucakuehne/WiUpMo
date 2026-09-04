@@ -29,6 +29,7 @@ import { UpdatesController } from '../dist/src/updates/updates.controller.js';
 import { UpdatesService } from '../dist/src/updates/updates.service.js';
 import { AdController } from '../dist/src/ad/ad.controller.js';
 import { AdSyncService } from '../dist/src/ad/ad-sync.service.js';
+import { LdapClient } from '../dist/src/ad/ldap.client.js';
 import { SettingsController } from '../dist/src/settings/settings.controller.js';
 import { SettingsService } from '../dist/src/settings/settings.service.js';
 import { ReportsController } from '../dist/src/reports/reports.controller.js';
@@ -70,6 +71,7 @@ const moduleRef = await Test.createTestingModule({
     { provide: DevicesService, useValue: stub },
     { provide: UpdatesService, useValue: stub },
     { provide: AdSyncService, useValue: stub },
+    { provide: LdapClient, useValue: stub },
     { provide: SettingsService, useValue: stub },
     { provide: ReportsService, useValue: stub },
     { provide: ReleasesService, useValue: stub },

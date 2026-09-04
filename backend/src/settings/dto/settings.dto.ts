@@ -90,6 +90,19 @@ export class AdSettingsDto {
   @IsOptional()
   bindPassword?: string;
 
+  @IsIn(['guided', 'custom'])
+  @IsOptional()
+  filterMode?: 'guided' | 'custom';
+
+  @IsBoolean()
+  @IsOptional()
+  excludeDisabled?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  excludeServers?: boolean;
+
+  /** Nur im Modus `custom` wirksam. */
   @IsString()
   @MaxLength(512)
   @IsOptional()
@@ -182,7 +195,14 @@ export class AdSettingsViewDto {
   baseDn: string;
   bindDn: string;
   bindPasswordSet: boolean;
+  filterMode: 'guided' | 'custom';
+  excludeDisabled: boolean;
+  excludeServers: boolean;
   filter: string;
+
+  /** Der tatsaechlich verwendete Ausdruck, auch im gefuehrten Modus. */
+  effectiveFilter: string;
+
   pageSize: number;
   intervalMinutes: number;
   startupDelaySeconds: number;

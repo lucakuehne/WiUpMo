@@ -7,17 +7,27 @@ import Message from 'primevue/message';
 import Password from 'primevue/password';
 import Select from 'primevue/select';
 import ToggleSwitch from 'primevue/toggleswitch';
-import { onMounted, reactive, ref, type Ref } from 'vue';
+import Checkbox from 'primevue/checkbox';
+import { computed, onMounted, reactive, ref, watch, type Ref } from 'vue';
 import { get, post, put } from '@/api/client';
 import type {
+  AdProbeResult,
   AdSettingsView,
   AgentSettingsView,
   AuthSettings,
+  OrganizationalUnit,
   RetentionResult,
   RetentionSettings,
   SettingsView,
   ThresholdSettings,
 } from '@/api/types';
+import {
+  adjustPortForScheme,
+  buildLdapUrl,
+  LDAPS_PORT,
+  parseLdapUrl,
+  type LdapUrlParts,
+} from '@/ldap-url';
 
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -28,7 +38,11 @@ const ad = reactive<AdSettingsView>({
   baseDn: '',
   bindDn: '',
   bindPasswordSet: false,
+  filterMode: 'guided',
+  excludeDisabled: true,
+  excludeServers: false,
   filter: '',
+  effectiveFilter: '',
   pageSize: 500,
   intervalMinutes: 360,
   startupDelaySeconds: 60,
@@ -61,6 +75,114 @@ const copied = ref(false);
 
 /** Die Adresse, unter der das Frontend erreichbar ist, ist auch die des Backends. */
 const backendUrl = window.location.origin;
+
+/** Die Adresse getrennt nach Host, Port und TLS — siehe ldap-url.ts. */
+const url = reactive<LdapUrlParts>({ host: '', port: LDAPS_PORT, secure: true });
+
+const probe = ref<AdProbeResult | null>(null);
+const probing = ref(false);
+const organizationalUnits = ref<Array<OrganizationalUnit & { label: string }>>([]);
+const loadingOus = ref(false);
+const customFilter = ref(false);
+const filterText = ref('');
+
+function onSchemeChange(secure: boolean): void {
+  url.port = adjustPortForScheme({ ...url, secure: !secure }, secure);
+}
+
+function onFilterModeChange(custom: boolean): void {
+  ad.filterMode = custom ? 'custom' : 'guided';
+
+  if (custom) {
+    // Den zusammengesetzten Ausdruck als Ausgangspunkt übernehmen, statt ein
+    // leeres Feld zu hinterlassen.
+    ad.filter = filterText.value;
+  }
+}
+
+/** Die aktuell zusammengesetzte Fassung, solange nicht von Hand geschrieben. */
+watch(
+  () => [ad.filterMode, ad.excludeDisabled, ad.excludeServers, ad.filter] as const,
+  () => {
+    if (ad.filterMode === 'custom') {
+      filterText.value = ad.filter;
+      return;
+    }
+
+    const clauses = ['(objectClass=computer)'];
+    if (ad.excludeDisabled) {
+      clauses.push('(!(userAccountControl:1.2.840.113556.1.4.803:=2))');
+    }
+    if (ad.excludeServers) {
+      clauses.push('(!(operatingSystem=*Server*))');
+    }
+    filterText.value = clauses.length === 1 ? clauses[0] : `(&${clauses.join('')})`;
+  },
+  { immediate: true },
+);
+
+/** Die noch nicht gespeicherten Werte, wie sie das Backend zum Prüfen braucht. */
+function currentAdPayload(): Record<string, unknown> {
+  return {
+    url: buildLdapUrl(url),
+    baseDn: ad.baseDn,
+    bindDn: ad.bindDn,
+    ...(bindPassword.value ? { bindPassword: bindPassword.value } : {}),
+    filterMode: ad.filterMode,
+    excludeDisabled: ad.excludeDisabled,
+    excludeServers: ad.excludeServers,
+    filter: ad.filterMode === 'custom' ? filterText.value : ad.filter,
+    pageSize: ad.pageSize,
+    intervalMinutes: ad.intervalMinutes,
+    startupDelaySeconds: ad.startupDelaySeconds,
+    tlsRejectUnauthorized: ad.tlsRejectUnauthorized,
+    timeoutSeconds: ad.timeoutSeconds,
+  };
+}
+
+async function runProbe(): Promise<void> {
+  probing.value = true;
+  error.value = null;
+  saved.value = null;
+
+  try {
+    probe.value = await post<AdProbeResult>('/api/ad/probe', currentAdPayload());
+
+    if (probe.value.defaultNamingContext) {
+      // Suchwurzel vorbelegen, solange noch keine gewählt ist.
+      if (!ad.baseDn) {
+        ad.baseDn = probe.value.defaultNamingContext;
+      }
+      await loadOrganizationalUnits();
+    }
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Die Prüfung ist fehlgeschlagen.';
+  } finally {
+    probing.value = false;
+  }
+}
+
+async function loadOrganizationalUnits(): Promise<void> {
+  loadingOus.value = true;
+
+  try {
+    const units = await post<OrganizationalUnit[]>('/api/ad/organizational-units', {
+      ...currentAdPayload(),
+      base: probe.value?.defaultNamingContext,
+    });
+
+    // Einrückung über geschützte Leerzeichen: PrimeVue rendert die Beschriftung
+    // als Text, gewöhnliche Leerzeichen würden zusammenfallen.
+    organizationalUnits.value = units.map((unit) => ({
+      ...unit,
+      label: `${'  '.repeat(unit.depth)}${unit.depth === 0 ? unit.dn : unit.name}`,
+    }));
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Die Organisationseinheiten konnten nicht gelesen werden.';
+  } finally {
+    loadingOus.value = false;
+  }
+}
 
 const authSettings = reactive<AuthSettings>({
   provider: 'local',
@@ -107,7 +229,11 @@ async function load(): Promise<void> {
     const settings = await get<SettingsView>('/api/settings');
     Object.assign(agent, settings.agent);
     Object.assign(ad, settings.ad);
+    Object.assign(url, parseLdapUrl(settings.ad.url));
+    customFilter.value = settings.ad.filterMode === 'custom';
+    filterText.value = settings.ad.effectiveFilter;
     Object.assign(authSettings, settings.auth);
+    dnMode.value = detectDnMode(settings.auth.userDnTemplate);
     Object.assign(thresholds, settings.thresholds);
     Object.assign(retention, settings.retention);
   } catch (e) {
@@ -146,19 +272,7 @@ async function save(
 }
 
 function saveAd(): void {
-  void save('ad', savingAd, {
-    url: ad.url,
-    baseDn: ad.baseDn,
-    bindDn: ad.bindDn,
-    // Nur mitschicken, wenn tatsächlich etwas eingegeben wurde.
-    ...(bindPassword.value ? { bindPassword: bindPassword.value } : {}),
-    filter: ad.filter,
-    pageSize: ad.pageSize,
-    intervalMinutes: ad.intervalMinutes,
-    startupDelaySeconds: ad.startupDelaySeconds,
-    tlsRejectUnauthorized: ad.tlsRejectUnauthorized,
-    timeoutSeconds: ad.timeoutSeconds,
-  });
+  void save('ad', savingAd, currentAdPayload());
 }
 
 function saveThresholds(): void {
@@ -167,6 +281,41 @@ function saveThresholds(): void {
 
 function saveRetention(): void {
   void save('retention', savingRetention, { ...retention });
+}
+
+/**
+ * Die drei Formen, die ein Active Directory beim Bind akzeptiert. Statt eine
+ * Vorlage zu tippen, wählt man die Form — der Domänenname kommt aus der
+ * Verbindungsprüfung.
+ */
+type DnMode = 'upn' | 'netbios' | 'custom';
+
+const dnMode = ref<DnMode>('upn');
+
+const dnModeOptions = computed(() => {
+  const dns = probe.value?.domainDnsName ?? 'firma.local';
+  const netbios = probe.value?.domainNetbiosName ?? 'FIRMA';
+
+  return [
+    { value: 'upn', label: `Benutzerprinzipalname (benutzer@${dns})` },
+    { value: 'netbios', label: `Vorangestellte Domäne (${netbios}\\benutzer)` },
+    { value: 'custom', label: 'Eigene Vorlage' },
+  ];
+});
+
+function applyDnMode(mode: DnMode): void {
+  if (mode === 'upn') {
+    authSettings.userDnTemplate = `{username}@${probe.value?.domainDnsName ?? 'firma.local'}`;
+  } else if (mode === 'netbios') {
+    authSettings.userDnTemplate = `${probe.value?.domainNetbiosName ?? 'FIRMA'}\\{username}`;
+  }
+}
+
+/** Aus einer gespeicherten Vorlage die passende Form erkennen. */
+function detectDnMode(template: string): DnMode {
+  if (/^\{username\}@.+/.test(template)) return 'upn';
+  if (/^[^\\]+\\\{username\}$/.test(template)) return 'netbios';
+  return 'custom';
 }
 
 function saveAuth(): void {
@@ -259,29 +408,47 @@ onMounted(load);
       </template>
 
       <template #content>
+        <h3 class="section">1 · Verbindung</h3>
+
         <div class="settings-grid">
           <div class="field">
-            <label for="ad-url">Server</label>
-            <InputText id="ad-url" v-model="ad.url" placeholder="ldaps://dc01.firma.local:636" />
+            <label for="ad-host">Domänencontroller</label>
+            <InputText id="ad-host" v-model="url.host" placeholder="dc01.firma.local" />
+            <small class="muted">Nur der Name, ohne Schema und Port.</small>
+          </div>
+
+          <div class="field">
+            <label for="ad-secure">Verschlüsselt (LDAPS)</label>
+            <ToggleSwitch id="ad-secure" v-model="url.secure" @update:model-value="onSchemeChange" />
             <small class="muted">
-              <code>ldaps://</code> bevorzugen — über <code>ldap://</code> geht das Passwort des
-              Dienstkontos im Klartext durchs Netz.
+              Ohne LDAPS geht das Passwort des Dienstkontos im Klartext durchs Netz.
             </small>
           </div>
 
           <div class="field">
-            <label for="ad-base">Suchwurzel</label>
-            <InputText
-              id="ad-base"
-              v-model="ad.baseDn"
-              placeholder="OU=Computer,DC=firma,DC=local"
-            />
+            <label for="ad-port">Port</label>
+            <InputNumber id="ad-port" v-model="url.port" :min="1" :max="65535" :use-grouping="false" />
+          </div>
+
+          <div class="field">
+            <label for="ad-tls">Zertifikat prüfen</label>
+            <ToggleSwitch id="ad-tls" v-model="ad.tlsRejectUnauthorized" />
+            <small class="muted">
+              Ausschalten nur bei einem selbstsignierten Zertifikat.
+            </small>
           </div>
 
           <div class="field">
             <label for="ad-bind">Dienstkonto</label>
-            <InputText id="ad-bind" v-model="ad.bindDn" placeholder="CN=wiupmo,OU=Dienste,DC=…" />
-            <small class="muted">Leserecht auf die Computerobjekte genügt.</small>
+            <InputText
+              id="ad-bind"
+              v-model="ad.bindDn"
+              :placeholder="probe?.domainDnsName ? `wiupmo@${probe.domainDnsName}` : 'wiupmo@firma.local'"
+            />
+            <small class="muted">
+              Als <code>konto@domäne</code> oder <code>DOMÄNE\konto</code> — ein vollständiger DN ist
+              nicht nötig. Leserecht auf die Computerobjekte genügt.
+            </small>
           </div>
 
           <div class="field">
@@ -295,16 +462,108 @@ onMounted(load);
               :placeholder="ad.bindPasswordSet ? 'gesetzt — leer lassen für unverändert' : 'nicht gesetzt'"
             />
           </div>
+        </div>
 
+        <Button
+          label="Verbindung prüfen"
+          icon="pi pi-link"
+          severity="secondary"
+          :loading="probing"
+          :disabled="!url.host"
+          @click="runProbe"
+        />
+
+        <Message
+          v-if="probe"
+          :severity="probe.ok ? 'success' : 'error'"
+          :closable="false"
+          style="margin-top: 0.75rem"
+        >
+          <div>{{ probe.message }}</div>
+          <div v-if="probe.dnsHostName" class="muted" style="font-size: 0.8rem; margin-top: 0.25rem">
+            {{ probe.dnsHostName }} · Domäne {{ probe.domainDnsName }}
+            <template v-if="probe.domainNetbiosName">({{ probe.domainNetbiosName }})</template>
+          </div>
+        </Message>
+
+        <h3 class="section">2 · Was abgeglichen wird</h3>
+
+        <div class="settings-grid">
           <div class="field" style="grid-column: 1 / -1">
-            <label for="ad-filter">LDAP-Filter</label>
-            <InputText id="ad-filter" v-model="ad.filter" />
+            <label for="ad-base">Suchwurzel</label>
+            <Select
+              v-if="organizationalUnits.length > 0"
+              id="ad-base"
+              v-model="ad.baseDn"
+              :options="organizationalUnits"
+              option-label="label"
+              option-value="dn"
+              filter
+              :loading="loadingOus"
+            />
+            <InputText v-else id="ad-base" v-model="ad.baseDn" placeholder="Zuerst Verbindung prüfen" />
             <small class="muted">
-              Deaktivierte Konten ausschliessen mit
-              <code>(&amp;(objectClass=computer)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))</code>
+              <template v-if="organizationalUnits.length > 0">
+                Aus dem Verzeichnis gelesen. Die oberste Zeile bedeutet „gesamte Domäne".
+              </template>
+              <template v-else>
+                Nach erfolgreicher Verbindungsprüfung wird hier eine Auswahl angeboten.
+              </template>
             </small>
           </div>
 
+          <div class="field" style="grid-column: 1 / -1">
+            <label>Auswahl der Konten</label>
+            <div style="display: flex; flex-wrap: wrap; gap: 1rem; align-items: center">
+              <div style="display: flex; gap: 0.5rem; align-items: center">
+                <Checkbox
+                  v-model="ad.excludeDisabled"
+                  input-id="excl-disabled"
+                  binary
+                  :disabled="ad.filterMode === 'custom'"
+                />
+                <label for="excl-disabled">Deaktivierte Konten überspringen</label>
+              </div>
+
+              <div style="display: flex; gap: 0.5rem; align-items: center">
+                <Checkbox
+                  v-model="ad.excludeServers"
+                  input-id="excl-servers"
+                  binary
+                  :disabled="ad.filterMode === 'custom'"
+                />
+                <label for="excl-servers">Server überspringen</label>
+              </div>
+
+              <div style="display: flex; gap: 0.5rem; align-items: center">
+                <Checkbox v-model="customFilter" input-id="custom-filter" binary @update:model-value="onFilterModeChange" />
+                <label for="custom-filter">Eigener LDAP-Filter</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="field" style="grid-column: 1 / -1">
+            <label for="ad-filter">Wirksamer Filter</label>
+            <InputText
+              id="ad-filter"
+              v-model="filterText"
+              :readonly="ad.filterMode !== 'custom'"
+              :class="ad.filterMode !== 'custom' ? 'readonly-field' : ''"
+            />
+            <small class="muted">
+              <template v-if="ad.filterMode === 'custom'">
+                Eigener Ausdruck. Die Verbindungsprüfung zeigt, wie viele Konten er trifft.
+              </template>
+              <template v-else>
+                Aus den Ankreuzfeldern zusammengesetzt — hier nur zur Ansicht.
+              </template>
+            </small>
+          </div>
+        </div>
+
+        <h3 class="section">3 · Ablauf</h3>
+
+        <div class="settings-grid">
           <div class="field">
             <label for="ad-interval">Intervall (Minuten)</label>
             <InputNumber id="ad-interval" v-model="ad.intervalMinutes" :min="5" :max="10080" show-buttons />
@@ -319,14 +578,6 @@ onMounted(load);
           <div class="field">
             <label for="ad-timeout">Zeitlimit (Sekunden)</label>
             <InputNumber id="ad-timeout" v-model="ad.timeoutSeconds" :min="5" :max="600" show-buttons />
-          </div>
-
-          <div class="field">
-            <label for="ad-tls">Zertifikat prüfen</label>
-            <ToggleSwitch id="ad-tls" v-model="ad.tlsRejectUnauthorized" />
-            <small class="muted">
-              Ausschalten nur bei einem selbstsignierten Zertifikat des Domänencontrollers.
-            </small>
           </div>
         </div>
       </template>
@@ -390,12 +641,24 @@ onMounted(load);
           </div>
 
           <div class="field">
-            <label for="dn">Vorlage für den Bind-Namen</label>
-            <InputText id="dn" v-model="authSettings.userDnTemplate" />
+            <label for="dn-mode">Namensform bei der Anmeldung</label>
+            <Select
+              id="dn-mode"
+              v-model="dnMode"
+              :options="dnModeOptions"
+              option-label="label"
+              option-value="value"
+              @update:model-value="applyDnMode"
+            />
             <small class="muted">
-              Muss <code>{username}</code> enthalten. Für ein AD üblich:
-              <code>{username}@firma.local</code> oder <code>FIRMA\{username}</code>.
+              <template v-if="dnMode === 'custom'">Eigene Vorlage, muss <code>{username}</code> enthalten.</template>
+              <template v-else>Ergibt: <code>{{ authSettings.userDnTemplate }}</code></template>
             </small>
+          </div>
+
+          <div v-if="dnMode === 'custom'" class="field">
+            <label for="dn">Vorlage</label>
+            <InputText id="dn" v-model="authSettings.userDnTemplate" />
           </div>
 
           <div class="field">
@@ -468,6 +731,26 @@ onMounted(load);
 </template>
 
 <style scoped>
+.section {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--p-text-muted-color);
+  margin: 1.25rem 0 0.5rem;
+}
+
+.section:first-child {
+  margin-top: 0;
+}
+
+/* Der zusammengesetzte Filter ist Anzeige, kein Eingabefeld — das soll man
+   sehen, bevor man hineinklickt. */
+.readonly-field {
+  background: var(--p-content-hover-background);
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+
 .settings-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
