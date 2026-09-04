@@ -4,6 +4,7 @@ import {
   Folder,
   FolderTree,
   Link2,
+  ListFilter,
   Loader2,
   RefreshCw,
   Shield,
@@ -58,6 +59,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import GroupPicker from '@/components/GroupPicker.vue';
 import OuPicker from '@/components/OuPicker.vue';
+import { formatDnPath } from '@/dn';
 import {
   adjustPortForScheme,
   buildLdapUrl,
@@ -194,7 +196,6 @@ const savingRetention = ref(false);
 const rotating = ref(false);
 const cleaning = ref(false);
 
-const customFilter = ref(false);
 const filterText = ref('');
 const backendUrl = window.location.origin;
 
@@ -209,7 +210,6 @@ async function load(): Promise<void> {
     Object.assign(ad, settings.ad);
     Object.assign(url, parseLdapUrl(settings.ad.url));
     selectedBases.value = [...settings.ad.searchBases];
-    customFilter.value = settings.ad.filterMode === 'custom';
     filterText.value = settings.ad.effectiveFilter;
     Object.assign(authSettings, settings.auth);
     dnMode.value = detectDnMode(settings.auth.userDnTemplate);
@@ -292,40 +292,70 @@ const protocol = computed<'ldap' | 'ldaps'>({
 });
 
 /**
- * Der Wert kommt als `boolean | 'indeterminate'` — der unbestimmte Zustand
- * tritt hier nicht auf, muss aber behandelt werden.
+ * Setzt den LDAP-Ausdruck aus den Vorgaben zusammen — dieselbe Regel wie im
+ * Backend, damit die Vorschau nicht von dem abweicht, was später tatsächlich
+ * abgefragt wird.
  */
-function onFilterModeChange(value: boolean | 'indeterminate'): void {
-  const custom = value === true;
-  customFilter.value = custom;
-  ad.filterMode = custom ? 'custom' : 'guided';
+function composeFilter(excludeDisabled: boolean, excludeServers: boolean): string {
+  const clauses = ['(objectClass=computer)'];
 
-  if (custom) {
-    // Den zusammengesetzten Ausdruck als Ausgangspunkt übernehmen, statt ein
-    // leeres Feld zu hinterlassen.
-    ad.filter = filterText.value;
+  if (excludeDisabled) {
+    clauses.push('(!(userAccountControl:1.2.840.113556.1.4.803:=2))');
   }
+  if (excludeServers) {
+    clauses.push('(!(operatingSystem=*Server*))');
+  }
+
+  return clauses.length === 1 ? clauses[0] : `(&${clauses.join('')})`;
 }
 
 watch(
   () => [ad.filterMode, ad.excludeDisabled, ad.excludeServers, ad.filter] as const,
   () => {
-    if (ad.filterMode === 'custom') {
-      filterText.value = ad.filter;
-      return;
-    }
-
-    const clauses = ['(objectClass=computer)'];
-    if (ad.excludeDisabled) {
-      clauses.push('(!(userAccountControl:1.2.840.113556.1.4.803:=2))');
-    }
-    if (ad.excludeServers) {
-      clauses.push('(!(operatingSystem=*Server*))');
-    }
-    filterText.value = clauses.length === 1 ? clauses[0] : `(&${clauses.join('')})`;
+    filterText.value =
+      ad.filterMode === 'custom'
+        ? ad.filter
+        : composeFilter(ad.excludeDisabled, ad.excludeServers);
   },
   { immediate: true },
 );
+
+/**
+ * Der Filter wird im Dialog zusammengestellt, in der Karte steht nur das
+ * Ergebnis. Auch hier über eine Kopie, damit „Abbrechen" wirklich verwirft.
+ */
+const filterDialogOpen = ref(false);
+
+const draftFilter = reactive({
+  mode: 'guided' as 'guided' | 'custom',
+  excludeDisabled: true,
+  excludeServers: false,
+  custom: '',
+});
+
+const draftFilterPreview = computed(() =>
+  draftFilter.mode === 'custom'
+    ? draftFilter.custom.trim() || '(objectClass=computer)'
+    : composeFilter(draftFilter.excludeDisabled, draftFilter.excludeServers),
+);
+
+function openFilterDialog(): void {
+  draftFilter.mode = ad.filterMode;
+  draftFilter.excludeDisabled = ad.excludeDisabled;
+  draftFilter.excludeServers = ad.excludeServers;
+  // Beim Wechsel auf einen eigenen Ausdruck ist der zusammengesetzte der
+  // sinnvollste Ausgangspunkt — ein leeres Feld wäre nur eine Hürde.
+  draftFilter.custom = ad.filterMode === 'custom' ? ad.filter : filterText.value;
+  filterDialogOpen.value = true;
+}
+
+function confirmFilterDialog(): void {
+  ad.filterMode = draftFilter.mode;
+  ad.excludeDisabled = draftFilter.excludeDisabled;
+  ad.excludeServers = draftFilter.excludeServers;
+  ad.filter = draftFilter.mode === 'custom' ? draftFilter.custom.trim() : filterText.value;
+  filterDialogOpen.value = false;
+}
 
 async function runProbe(): Promise<void> {
   probing.value = true;
@@ -534,6 +564,76 @@ onMounted(load);
     </DialogContent>
   </Dialog>
 
+  <Dialog v-model:open="filterDialogOpen">
+    <DialogContent class="sm:max-w-2xl">
+      <DialogHeader>
+        <DialogTitle>Filter bearbeiten</DialogTitle>
+        <DialogDescription>
+          Bestimmt, welche Computerkonten aus den gewählten Bereichen übernommen werden.
+        </DialogDescription>
+      </DialogHeader>
+
+      <div class="space-y-4">
+        <div class="space-y-2">
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="excl-disabled"
+              v-model="draftFilter.excludeDisabled"
+              :disabled="draftFilter.mode === 'custom'"
+            />
+            <Label for="excl-disabled" class="font-normal">
+              Deaktivierte Konten überspringen
+            </Label>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="excl-servers"
+              v-model="draftFilter.excludeServers"
+              :disabled="draftFilter.mode === 'custom'"
+            />
+            <Label for="excl-servers" class="font-normal">
+              Server überspringen
+              <span class="text-muted-foreground text-xs">
+                (erkannt am Betriebssystem)
+              </span>
+            </Label>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="custom-filter"
+              :model-value="draftFilter.mode === 'custom'"
+              @update:model-value="draftFilter.mode = $event === true ? 'custom' : 'guided'"
+            />
+            <Label for="custom-filter" class="font-normal">Eigener LDAP-Filter</Label>
+          </div>
+        </div>
+
+        <div v-if="draftFilter.mode === 'custom'" class="space-y-1.5">
+          <Label for="draft-filter">Ausdruck</Label>
+          <Input id="draft-filter" v-model="draftFilter.custom" class="font-mono text-xs" />
+          <p class="text-muted-foreground text-xs">
+            Ein fehlerhafter Ausdruck wird vom Verzeichnis abgelehnt — die Verbindungsprüfung
+            zeigt es sofort.
+          </p>
+        </div>
+
+        <div class="space-y-1.5">
+          <Label>Ergebnis</Label>
+          <div class="bg-muted rounded-md border px-3 py-2 font-mono text-xs break-all">
+            {{ draftFilterPreview }}
+          </div>
+        </div>
+      </div>
+
+      <DialogFooter>
+        <Button variant="outline" @click="filterDialogOpen = false">Abbrechen</Button>
+        <Button @click="confirmFilterDialog">Übernehmen</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
   <div class="mx-auto max-w-[1600px] px-5 py-6">
     <h1 class="mb-5 text-xl font-semibold">Einstellungen</h1>
 
@@ -566,8 +666,6 @@ onMounted(load);
           <CardHeader>
             <CardTitle>Active Directory</CardTitle>
             <CardDescription>
-              Ohne Server und Bereich bleibt der Abgleich aus. Änderungen wirken sofort, ein
-              Neustart ist nicht nötig.
             </CardDescription>
           </CardHeader>
 
@@ -608,11 +706,8 @@ onMounted(load);
                   </div>
                 </div>
 
-                <p class="text-muted-foreground -mt-2 text-xs">
-                  Der Name ohne Schema und Port; der Standardport folgt dem Protokoll.
-                  <template v-if="!url.secure">
-                    <strong>Über LDAP geht das Passwort des Dienstkontos im Klartext durchs Netz.</strong>
-                  </template>
+                <p v-if="!url.secure" class="text-muted-foreground -mt-2 text-xs">
+                  <strong>Über LDAP geht das Passwort des Dienstkontos im Klartext durchs Netz.</strong>
                 </p>
 
                 <div class="grid gap-3 sm:grid-cols-2">
@@ -641,8 +736,7 @@ onMounted(load);
                 </div>
 
                 <p class="text-muted-foreground -mt-2 text-xs">
-                  Konto als <code>konto@domäne</code> oder <code>DOMÄNE\konto</code> — ein
-                  vollständiger DN ist nicht nötig. Leserecht auf die Computerobjekte genügt.
+                  Konto als <code>konto@domäne</code> oder <code>DOMÄNE\konto</code>. Leserecht auf die Computerobjekte genügt.
                 </p>
 
                 <div class="space-y-2">
@@ -680,9 +774,8 @@ onMounted(load);
                       Abschalten der Prüfung fällt ein untergeschobener Server weiterhin auf.
                     </template>
                     <template v-else>
-                      Bei einem Zertifikat aus interner PKI hier das Zertifikat der ausstellenden
-                      Stelle hinterlegen (PEM). Nur wenn das nicht möglich ist, die Prüfung
-                      abschalten.
+                      Bei einem internen Zertifikat hier das Zertifikat der CA hinterlegen (PEM). 
+                      Nur wenn das nicht möglich ist, die Prüfung abschalten.
                     </template>
                   </p>
                 </div>
@@ -739,8 +832,10 @@ onMounted(load);
                       class="flex items-center gap-2 px-2 py-1.5"
                     >
                       <Folder class="text-muted-foreground size-4 shrink-0" />
-                      <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="base">
-                        {{ base }}
+                      <!-- Der vollständige DN bleibt als Hinweistext erreichbar:
+                           Zwei Einheiten können denselben Pfadnamen tragen. -->
+                      <span class="min-w-0 flex-1 truncate text-sm" :title="base">
+                        {{ formatDnPath(base) }}
                       </span>
                       <Button
                         variant="ghost"
@@ -760,56 +855,35 @@ onMounted(load);
                 </div>
 
                 <div class="space-y-2">
-                  <Label>Auswahl der Konten</Label>
-
-                  <div class="flex flex-wrap gap-x-6 gap-y-2">
-                    <div class="flex items-center gap-2">
-                      <Checkbox
-                        id="excl-disabled"
-                        v-model="ad.excludeDisabled"
-                        :disabled="ad.filterMode === 'custom'"
-                      />
-                      <Label for="excl-disabled" class="font-normal">
-                        Deaktivierte Konten überspringen
-                      </Label>
-                    </div>
-
-                    <div class="flex items-center gap-2">
-                      <Checkbox
-                        id="excl-servers"
-                        v-model="ad.excludeServers"
-                        :disabled="ad.filterMode === 'custom'"
-                      />
-                      <Label for="excl-servers" class="font-normal">Server überspringen</Label>
-                    </div>
-
-                    <div class="flex items-center gap-2">
-                      <Checkbox
-                        id="custom-filter"
-                        :model-value="customFilter"
-                        @update:model-value="onFilterModeChange"
-                      />
-                      <Label for="custom-filter" class="font-normal">Eigener LDAP-Filter</Label>
-                    </div>
+                  <div class="flex items-center justify-between gap-2">
+                    <Label>Auswahl der Konten</Label>
+                    <Button variant="outline" size="sm" @click="openFilterDialog">
+                      <ListFilter class="size-4" />
+                      Filter bearbeiten
+                    </Button>
                   </div>
-                </div>
 
-                <div class="space-y-1.5">
-                  <Label for="ad-filter">Wirksamer Filter</Label>
-                  <Input
-                    id="ad-filter"
-                    v-model="filterText"
-                    :readonly="ad.filterMode !== 'custom'"
-                    class="font-mono text-xs"
-                    :class="ad.filterMode !== 'custom' ? 'bg-muted' : ''"
-                  />
+                  <div class="bg-muted rounded-md border px-3 py-2 font-mono text-xs break-all">
+                    {{ filterText }}
+                  </div>
+
                   <p class="text-muted-foreground text-xs">
                     <template v-if="ad.filterMode === 'custom'">
-                      Eigener Ausdruck. Die Verbindungsprüfung zeigt, wie viele Konten er trifft.
+                      Eigener Ausdruck.
                     </template>
                     <template v-else>
-                      Aus den Ankreuzfeldern zusammengesetzt — hier nur zur Ansicht.
+                      Zusammengesetzt:
+                      {{
+                        [
+                          'alle Computerkonten',
+                          ad.excludeDisabled ? 'ohne deaktivierte' : null,
+                          ad.excludeServers ? 'ohne Server' : null,
+                        ]
+                          .filter(Boolean)
+                          .join(', ')
+                      }}.
                     </template>
+                    Die Verbindungsprüfung zeigt, wie viele Konten er trifft.
                   </p>
                 </div>
               </section>

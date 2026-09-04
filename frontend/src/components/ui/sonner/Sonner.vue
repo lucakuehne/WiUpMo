@@ -3,6 +3,10 @@ import type { ToasterProps } from "vue-sonner"
 import { CircleCheckIcon, InfoIcon, Loader2Icon, OctagonXIcon, TriangleAlertIcon, XIcon } from "@lucide/vue"
 import { Toaster as Sonner } from "vue-sonner"
 import { cn } from "@/lib/utils"
+// Ohne dieses Stylesheet erscheinen die Meldungen ohne jede Gestaltung. Der
+// von der CLI erzeugte Wrapper setzt nur die Farbvariablen und laesst den
+// Import weg — ergaenzt, damit die Gestaltung mit der Komponente mitwandert.
+import "vue-sonner/style.css"
 
 const props = defineProps<ToasterProps>()
 </script>
