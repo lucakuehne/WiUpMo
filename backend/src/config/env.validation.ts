@@ -21,13 +21,18 @@ export enum NodeEnv {
  * `.env`-Werte sind immer Zeichenketten. Diese beiden Helfer wandeln sie in den
  * erwarteten Typ um, damit die Validierung unten etwas Sinnvolles pruefen kann.
  */
-const toInt = () =>
-  Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)));
+const toInt = () => Transform(({ obj, key, value }) => (key in obj ? Number(value) : value));
 
+/**
+ * Beide Umwandlungen lassen einen nicht uebergebenen Wert unangetastet
+ * durch — dort steht dank `exposeDefaultValues` bereits der Vorgabewert der
+ * Klasse. Wuerden sie stattdessen `undefined` zurueckgeben, ueberschrieben sie
+ * ihn, und aus `PORT = 3000` wuerde `undefined`.
+ */
 const toBool = () =>
-  Transform(({ value }) => {
+  Transform(({ obj, key, value }) => {
+    if (!(key in obj)) return value;
     if (typeof value === 'boolean') return value;
-    if (value === undefined || value === '') return undefined;
     return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
   });
 
@@ -113,7 +118,25 @@ export class EnvironmentVariables {
 }
 
 export function validateEnv(raw: Record<string, unknown>): EnvironmentVariables {
-  const parsed = plainToInstance(EnvironmentVariables, raw, {
+  /**
+   * Leere Werte entfernen, bevor irgendetwas umgewandelt oder geprueft wird.
+   *
+   * Docker Compose uebergibt eine nicht gesetzte Variable als `VAR=`, also als
+   * leere Zeichenkette und nicht als fehlenden Wert. `@IsOptional()`
+   * ueberspringt aber nur `null` und `undefined` — eine optionale Variable mit
+   * Laengenpruefung fiel damit durch, sobald sie im Stack stand und leer blieb,
+   * und das Backend startete nicht.
+   *
+   * An dieser einen Stelle behandelt, gilt es fuer jedes Feld: leer heisst
+   * "nicht gesetzt", und der Vorgabewert der Klasse greift.
+   */
+  const provided = Object.fromEntries(
+    Object.entries(raw).filter(
+      ([, value]) => !(typeof value === 'string' && value.trim() === ''),
+    ),
+  );
+
+  const parsed = plainToInstance(EnvironmentVariables, provided, {
     enableImplicitConversion: false,
     exposeDefaultValues: true,
   });
