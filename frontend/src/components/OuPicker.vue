@@ -183,6 +183,10 @@ watch(
 
     collapsed.value = next;
   },
+  // Auch beim Einhängen: Die Komponente lebt im Dialog und wird bei jedem
+  // Öffnen neu erzeugt — ohne `immediate` stünde der Baum dann vollständig
+  // aufgeklappt da.
+  { immediate: true },
 );
 </script>
 

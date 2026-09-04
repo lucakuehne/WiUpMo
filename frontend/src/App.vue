@@ -12,6 +12,7 @@ import {
 import { computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Button } from '@/components/ui/button';
+import { Toaster } from '@/components/ui/sonner';
 import { auth, logout } from '@/auth';
 
 const route = useRoute();
@@ -87,4 +88,10 @@ onMounted(() => {
   </header>
 
   <router-view />
+
+  <!--
+    Einmal in der Hülle, nicht je Ansicht: Meldungen sollen auch dann noch
+    stehen, wenn die auslösende Ansicht schon gewechselt hat.
+  -->
+  <Toaster rich-colors close-button position="top-right" />
 </template>

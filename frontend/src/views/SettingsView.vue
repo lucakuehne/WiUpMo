@@ -1,6 +1,18 @@
 <script setup lang="ts">
-import { Check, Loader2, Link2, RefreshCw, Shield, Trash2, Upload } from '@lucide/vue';
+import {
+  Check,
+  Folder,
+  FolderTree,
+  Link2,
+  Loader2,
+  RefreshCw,
+  Shield,
+  Trash2,
+  Upload,
+  X,
+} from '@lucide/vue';
 import { computed, onMounted, reactive, ref, watch, type Ref } from 'vue';
+import { toast } from 'vue-sonner';
 import { get, post, put } from '@/api/client';
 import type {
   AdGroup,
@@ -26,6 +38,14 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -65,7 +85,6 @@ const active = ref<SectionId>('ad');
 
 const loading = ref(true);
 const error = ref<string | null>(null);
-const saved = ref<string | null>(null);
 
 // --- Zustand ---------------------------------------------------------------
 
@@ -210,7 +229,6 @@ async function save(
 ): Promise<void> {
   busy.value = true;
   error.value = null;
-  saved.value = null;
 
   try {
     const result = await put<unknown>(`/api/settings/${section}`, payload);
@@ -220,7 +238,7 @@ async function save(
       bindPassword.value = '';
     }
 
-    saved.value = 'Gespeichert.';
+    toast.success('Gespeichert.');
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Speichern fehlgeschlagen.';
   } finally {
@@ -312,13 +330,28 @@ watch(
 async function runProbe(): Promise<void> {
   probing.value = true;
   error.value = null;
-  saved.value = null;
 
   try {
-    probe.value = await post<AdProbeResult>('/api/ad/probe', currentAdPayload());
+    const result = await post<AdProbeResult>('/api/ad/probe', currentAdPayload());
+    probe.value = result;
 
-    if (probe.value.defaultNamingContext) {
-      ad.baseDn = probe.value.defaultNamingContext;
+    // Die Eckdaten der Domäne wandern in die Beschreibung statt in eine eigene
+    // Zeile: Sie bestätigen, dass man beim richtigen Verzeichnis gelandet ist.
+    const details = result.dnsHostName
+      ? `${result.dnsHostName} · Domäne ${result.domainDnsName}` +
+        (result.domainNetbiosName ? ` (${result.domainNetbiosName})` : '')
+      : undefined;
+
+    if (result.ok) {
+      toast.success(result.message, { description: details });
+    } else {
+      // Fehler bleiben länger stehen — die Meldungen nennen den nächsten
+      // Schritt, und den liest man nicht in vier Sekunden.
+      toast.error(result.message, { description: details, duration: 12000 });
+    }
+
+    if (result.defaultNamingContext) {
+      ad.baseDn = result.defaultNamingContext;
       await loadOrganizationalUnits();
     }
   } catch (e) {
@@ -326,6 +359,30 @@ async function runProbe(): Promise<void> {
   } finally {
     probing.value = false;
   }
+}
+
+/**
+ * Die Auswahl im Dialog läuft über eine Kopie.
+ *
+ * Ohne sie wäre „Abbrechen" wirkungslos — jedes Ankreuzen hätte den
+ * eigentlichen Zustand schon verändert, und man käme nur über erneutes
+ * Ankreuzen zurück.
+ */
+const ouDialogOpen = ref(false);
+const draftBases = ref<string[]>([]);
+
+function openOuDialog(): void {
+  draftBases.value = [...selectedBases.value];
+  ouDialogOpen.value = true;
+}
+
+function confirmOuDialog(): void {
+  selectedBases.value = [...draftBases.value];
+  ouDialogOpen.value = false;
+}
+
+function removeBase(dn: string): void {
+  selectedBases.value = selectedBases.value.filter((entry) => entry !== dn);
 }
 
 async function loadOrganizationalUnits(): Promise<void> {
@@ -384,12 +441,12 @@ async function copyToken(): Promise<void> {
 async function rotateToken(): Promise<void> {
   rotating.value = true;
   error.value = null;
-  saved.value = null;
 
   try {
     Object.assign(agent, await put<AgentSettingsView>('/api/settings/agent/enrollment-token', {}));
-    saved.value =
-      'Neues Enrollment-Token erzeugt. Bereits registrierte Geräte sind nicht betroffen.';
+    toast.success('Neues Enrollment-Token erzeugt.', {
+      description: 'Bereits registrierte Geräte sind nicht betroffen.',
+    });
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Das Token konnte nicht erneuert werden.';
   } finally {
@@ -435,13 +492,13 @@ function detectDnMode(template: string): DnMode {
 async function runRetention(): Promise<void> {
   cleaning.value = true;
   error.value = null;
-  saved.value = null;
 
   try {
     const result = await post<RetentionResult>('/api/maintenance/retention');
-    saved.value =
-      `${result.eventsDeleted} Ereignisse und ${result.checkinsDeleted} Check-ins entfernt ` +
-      `(älter als ${result.eventDays} bzw. ${result.checkinDays} Tage).`;
+    toast.success(
+      `${result.eventsDeleted} Ereignisse und ${result.checkinsDeleted} Check-ins entfernt`,
+      { description: `älter als ${result.eventDays} bzw. ${result.checkinDays} Tage` },
+    );
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Das Aufräumen ist fehlgeschlagen.';
   } finally {
@@ -453,6 +510,30 @@ onMounted(load);
 </script>
 
 <template>
+  <Dialog v-model:open="ouDialogOpen">
+    <DialogContent class="sm:max-w-2xl">
+      <DialogHeader>
+        <DialogTitle>Bereiche wählen</DialogTitle>
+        <DialogDescription>
+          Mehrere sind möglich; jeder angekreuzte Bereich wird samt allem darunter abgeglichen.
+          Ohne Auswahl gilt die gesamte Domäne.
+        </DialogDescription>
+      </DialogHeader>
+
+      <OuPicker v-model="draftBases" :units="ouUnits" :loading="loadingOus" />
+
+      <DialogFooter class="sm:justify-between">
+        <span class="text-muted-foreground self-center text-xs">
+          {{ draftBases.length }} gewählt
+        </span>
+        <div class="flex gap-2">
+          <Button variant="outline" @click="ouDialogOpen = false">Abbrechen</Button>
+          <Button @click="confirmOuDialog">Übernehmen</Button>
+        </div>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
   <div class="mx-auto max-w-[1600px] px-5 py-6">
     <h1 class="mb-5 text-xl font-semibold">Einstellungen</h1>
 
@@ -478,10 +559,6 @@ onMounted(load);
       <div class="min-w-0 flex-1">
         <Alert v-if="error" variant="destructive" class="mb-4">
           <AlertDescription>{{ error }}</AlertDescription>
-        </Alert>
-
-        <Alert v-if="saved" class="mb-4 border-success/40 text-success">
-          <AlertDescription>{{ saved }}</AlertDescription>
         </Alert>
 
         <!-- ================= Active Directory ================= -->
@@ -616,21 +693,6 @@ onMounted(load);
                   Verbindung prüfen
                 </Button>
 
-                <Alert
-                  v-if="probe"
-                  :variant="probe.ok ? 'default' : 'destructive'"
-                  :class="probe.ok ? 'border-success/40' : ''"
-                >
-                  <AlertDescription>
-                    <div>{{ probe.message }}</div>
-                    <div v-if="probe.dnsHostName" class="mt-1 text-xs opacity-80">
-                      {{ probe.dnsHostName }} · Domäne {{ probe.domainDnsName }}
-                      <template v-if="probe.domainNetbiosName">
-                        ({{ probe.domainNetbiosName }})
-                      </template>
-                    </div>
-                  </AlertDescription>
-                </Alert>
               </section>
 
               <section class="space-y-4">
@@ -639,21 +701,61 @@ onMounted(load);
                 </h3>
 
                 <div class="space-y-2">
-                  <Label>Bereiche im Verzeichnis</Label>
+                  <div class="flex items-center justify-between gap-2">
+                    <Label>Bereiche im Verzeichnis</Label>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      :disabled="ouUnits.length === 0"
+                      @click="openOuDialog"
+                    >
+                      <FolderTree class="size-4" />
+                      Bereiche wählen
+                    </Button>
+                  </div>
 
-                  <OuPicker
-                    v-model="selectedBases"
-                    :units="ouUnits"
-                    :loading="loadingOus"
-                    empty-hint="Nach erfolgreicher Verbindungsprüfung erscheint hier die Struktur des Verzeichnisses zum Ankreuzen."
-                  />
+                  <!--
+                    Ausgewählte Bereiche als vollständige Pfade. Der DN ist
+                    hier die einzige eindeutige Angabe — zwei Einheiten können
+                    denselben Namen tragen und an ganz verschiedenen Stellen
+                    hängen.
+                  -->
+                  <div
+                    v-if="selectedBases.length === 0"
+                    class="text-muted-foreground rounded-md border border-dashed p-3 text-sm"
+                  >
+                    <template v-if="ouUnits.length === 0">
+                      Nach erfolgreicher Verbindungsprüfung lassen sich hier die Bereiche wählen.
+                    </template>
+                    <template v-else>
+                      Keine Auswahl — es wird die gesamte Domäne abgeglichen.
+                    </template>
+                  </div>
+
+                  <ul v-else class="divide-y rounded-md border">
+                    <li
+                      v-for="base in selectedBases"
+                      :key="base"
+                      class="flex items-center gap-2 px-2 py-1.5"
+                    >
+                      <Folder class="text-muted-foreground size-4 shrink-0" />
+                      <span class="min-w-0 flex-1 truncate font-mono text-xs" :title="base">
+                        {{ base }}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="size-7 shrink-0"
+                        title="Entfernen"
+                        @click="removeBase(base)"
+                      >
+                        <X class="size-4" />
+                      </Button>
+                    </li>
+                  </ul>
 
                   <p class="text-muted-foreground text-xs">
-                    Mehrere Bereiche sind möglich; jeder wird samt allem darunter abgeglichen.
-                    <template v-if="selectedBases.length === 0">
-                      Ohne Auswahl wird die gesamte Domäne abgeglichen.
-                    </template>
-                    <template v-else>Gewählt: {{ selectedBases.length }} Bereich(e).</template>
+                    Jeder Bereich wird samt allem darunter abgeglichen.
                   </p>
                 </div>
 
