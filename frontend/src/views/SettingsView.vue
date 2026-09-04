@@ -6,7 +6,9 @@ import InputText from 'primevue/inputtext';
 import Message from 'primevue/message';
 import Password from 'primevue/password';
 import Select from 'primevue/select';
+import Tag from 'primevue/tag';
 import ToggleSwitch from 'primevue/toggleswitch';
+import Tree from 'primevue/tree';
 import Checkbox from 'primevue/checkbox';
 import { computed, onMounted, reactive, ref, watch, type Ref } from 'vue';
 import { get, post, put } from '@/api/client';
@@ -36,6 +38,9 @@ const saved = ref<string | null>(null);
 const ad = reactive<AdSettingsView>({
   url: '',
   baseDn: '',
+  searchBases: [],
+  effectiveSearchBases: [],
+  caCertificate: '',
   bindDn: '',
   bindPasswordSet: false,
   filterMode: 'guided',
@@ -81,8 +86,103 @@ const url = reactive<LdapUrlParts>({ host: '', port: LDAPS_PORT, secure: true })
 
 const probe = ref<AdProbeResult | null>(null);
 const probing = ref(false);
-const organizationalUnits = ref<Array<OrganizationalUnit & { label: string }>>([]);
 const loadingOus = ref(false);
+
+interface OuNode {
+  key: string;
+  label: string;
+  children: OuNode[];
+}
+
+const ouTree = ref<OuNode[]>([]);
+
+/** Von PrimeVue erwartetes Format: Schlüssel → `{ checked, partialChecked }`. */
+const selectedOus = ref<Record<string, { checked: boolean; partialChecked: boolean }>>({});
+
+/**
+ * Baut aus der flachen Liste der DNs einen Baum.
+ *
+ * Der übergeordnete Knoten eines DN ist alles nach dem ersten Komma. Einträge,
+ * deren Elternteil nicht in der Liste steht — etwa weil ein Container
+ * dazwischen kein OU ist —, hängen an der Wurzel, statt verlorenzugehen.
+ */
+function buildOuTree(units: OrganizationalUnit[]): OuNode[] {
+  const nodes = new Map<string, OuNode>();
+
+  for (const unit of units) {
+    nodes.set(unit.dn, { key: unit.dn, label: unit.depth === 0 ? unit.dn : unit.name, children: [] });
+  }
+
+  const roots: OuNode[] = [];
+
+  for (const unit of units) {
+    const node = nodes.get(unit.dn)!;
+    const parentDn = unit.dn.slice(unit.dn.indexOf(',') + 1);
+    const parent = unit.dn.includes(',') ? nodes.get(parentDn) : undefined;
+
+    if (parent && parent !== node) {
+      parent.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  return roots;
+}
+
+/**
+ * Nur die obersten angekreuzten Knoten. PrimeVue markiert beim Ankreuzen eines
+ * Elternteils sämtliche Kinder mit; die Suche läuft ohnehin über den gesamten
+ * Unterbaum, alles Untergeordnete wäre also nur Ballast in der Konfiguration.
+ */
+function collectSelectedBases(): string[] {
+  const checked = Object.entries(selectedOus.value)
+    .filter(([, state]) => state.checked)
+    .map(([key]) => key);
+
+  return checked.filter(
+    (candidate) =>
+      !checked.some(
+        (other) => other !== candidate && candidate.toLowerCase().endsWith(`,${other.toLowerCase()}`),
+      ),
+  );
+}
+
+/** Nur fuer die Anzeige — die Abfrage selbst nimmt collectSelectedBases(). */
+const selectedBases = computed(() =>
+  Object.entries(selectedOus.value)
+    .filter(([, state]) => state.checked)
+    .map(([key]) => key),
+);
+
+function applySelection(bases: string[]): void {
+  selectedOus.value = Object.fromEntries(
+    bases.map((base) => [base, { checked: true, partialChecked: false }]),
+  );
+}
+
+/** Lädt das Zertifikat aus einer Datei ins Textfeld. */
+async function onCertificateFile(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  const text = await file.text();
+
+  if (!text.includes('-----BEGIN CERTIFICATE-----')) {
+    error.value =
+      'Die Datei ist kein PEM-Zertifikat. Eine DER-kodierte .cer-Datei lässt sich mit ' +
+      '"certutil -encode" umwandeln.';
+    input.value = '';
+    return;
+  }
+
+  ad.caCertificate = text.trim();
+  error.value = null;
+  input.value = '';
+}
 const customFilter = ref(false);
 const filterText = ref('');
 
@@ -126,6 +226,8 @@ function currentAdPayload(): Record<string, unknown> {
   return {
     url: buildLdapUrl(url),
     baseDn: ad.baseDn,
+    searchBases: collectSelectedBases(),
+    caCertificate: ad.caCertificate,
     bindDn: ad.bindDn,
     ...(bindPassword.value ? { bindPassword: bindPassword.value } : {}),
     filterMode: ad.filterMode,
@@ -149,10 +251,9 @@ async function runProbe(): Promise<void> {
     probe.value = await post<AdProbeResult>('/api/ad/probe', currentAdPayload());
 
     if (probe.value.defaultNamingContext) {
-      // Suchwurzel vorbelegen, solange noch keine gewählt ist.
-      if (!ad.baseDn) {
-        ad.baseDn = probe.value.defaultNamingContext;
-      }
+      // Die Domänenwurzel ist der Ausgangspunkt fürs Durchsuchen — und der
+      // Rückfallwert, solange keine Bereiche angekreuzt sind.
+      ad.baseDn = probe.value.defaultNamingContext;
       await loadOrganizationalUnits();
     }
   } catch (e) {
@@ -171,12 +272,7 @@ async function loadOrganizationalUnits(): Promise<void> {
       base: probe.value?.defaultNamingContext,
     });
 
-    // Einrückung über geschützte Leerzeichen: PrimeVue rendert die Beschriftung
-    // als Text, gewöhnliche Leerzeichen würden zusammenfallen.
-    organizationalUnits.value = units.map((unit) => ({
-      ...unit,
-      label: `${'  '.repeat(unit.depth)}${unit.depth === 0 ? unit.dn : unit.name}`,
-    }));
+    ouTree.value = buildOuTree(units);
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Die Organisationseinheiten konnten nicht gelesen werden.';
   } finally {
@@ -230,6 +326,7 @@ async function load(): Promise<void> {
     Object.assign(agent, settings.agent);
     Object.assign(ad, settings.ad);
     Object.assign(url, parseLdapUrl(settings.ad.url));
+    applySelection(settings.ad.searchBases);
     customFilter.value = settings.ad.filterMode === 'custom';
     filterText.value = settings.ad.effectiveFilter;
     Object.assign(authSettings, settings.auth);
@@ -408,9 +505,17 @@ onMounted(load);
       </template>
 
       <template #content>
+        <!--
+          Zwei Spalten: Verbindung links, Auswahl rechts. Der Ablauf ist von
+          links nach rechts — erst steht die Verbindung, dann sieht man, was
+          sie hergibt. Untereinander war die Karte so hoch, dass die
+          Verbindungsprüfung beim Wählen der Bereiche nicht mehr sichtbar war.
+        -->
+        <div class="ad-columns">
+          <section>
         <h3 class="section">1 · Verbindung</h3>
 
-        <div class="settings-grid">
+        <div class="settings-grid one-column">
           <div class="field">
             <label for="ad-host">Domänencontroller</label>
             <InputText id="ad-host" v-model="url.host" placeholder="dc01.firma.local" />
@@ -428,14 +533,6 @@ onMounted(load);
           <div class="field">
             <label for="ad-port">Port</label>
             <InputNumber id="ad-port" v-model="url.port" :min="1" :max="65535" :use-grouping="false" />
-          </div>
-
-          <div class="field">
-            <label for="ad-tls">Zertifikat prüfen</label>
-            <ToggleSwitch id="ad-tls" v-model="ad.tlsRejectUnauthorized" />
-            <small class="muted">
-              Ausschalten nur bei einem selbstsignierten Zertifikat.
-            </small>
           </div>
 
           <div class="field">
@@ -464,6 +561,55 @@ onMounted(load);
           </div>
         </div>
 
+        <h4 class="subsection">Zertifikat des Domänencontrollers</h4>
+
+        <div class="field">
+          <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap">
+            <label
+              class="p-button p-button-secondary p-button-outlined p-button-sm"
+              style="cursor: pointer; margin: 0"
+            >
+              <span class="pi pi-upload" style="margin-right: 0.4rem" />
+              CA-Zertifikat wählen
+              <input type="file" accept=".pem,.crt,.cer" hidden @change="onCertificateFile" />
+            </label>
+
+            <Tag
+              v-if="ad.caCertificate"
+              value="hinterlegt"
+              severity="success"
+              icon="pi pi-shield"
+            />
+            <Button
+              v-if="ad.caCertificate"
+              label="Entfernen"
+              severity="danger"
+              text
+              size="small"
+              @click="ad.caCertificate = ''"
+            />
+
+            <div v-if="!ad.caCertificate" style="display: flex; align-items: center; gap: 0.5rem">
+              <ToggleSwitch id="ad-tls" v-model="ad.tlsRejectUnauthorized" />
+              <label for="ad-tls">Zertifikat prüfen</label>
+            </div>
+          </div>
+
+          <small class="muted">
+            <template v-if="ad.caCertificate">
+              Die Gegenstelle wird gegen dieses Zertifikat geprüft. Das ist der richtige Weg bei
+              einer internen PKI — im Gegensatz zum Abschalten der Prüfung fällt ein
+              untergeschobener Server weiterhin auf.
+            </template>
+            <template v-else>
+              Bei einem selbstsignierten oder intern ausgestellten Zertifikat hier das Zertifikat
+              der ausstellenden Stelle hinterlegen (PEM). Nur wenn das nicht möglich ist, die
+              Prüfung abschalten — dann ist die Verbindung zwar verschlüsselt, aber nicht mehr
+              gegen einen untergeschobenen Server geschützt.
+            </template>
+          </small>
+        </div>
+
         <Button
           label="Verbindung prüfen"
           icon="pi pi-link"
@@ -485,33 +631,43 @@ onMounted(load);
             <template v-if="probe.domainNetbiosName">({{ probe.domainNetbiosName }})</template>
           </div>
         </Message>
+          </section>
 
+          <section>
         <h3 class="section">2 · Was abgeglichen wird</h3>
 
-        <div class="settings-grid">
-          <div class="field" style="grid-column: 1 / -1">
-            <label for="ad-base">Suchwurzel</label>
-            <Select
-              v-if="organizationalUnits.length > 0"
-              id="ad-base"
-              v-model="ad.baseDn"
-              :options="organizationalUnits"
-              option-label="label"
-              option-value="dn"
-              filter
-              :loading="loadingOus"
-            />
-            <InputText v-else id="ad-base" v-model="ad.baseDn" placeholder="Zuerst Verbindung prüfen" />
-            <small class="muted">
-              <template v-if="organizationalUnits.length > 0">
-                Aus dem Verzeichnis gelesen. Die oberste Zeile bedeutet „gesamte Domäne".
-              </template>
-              <template v-else>
-                Nach erfolgreicher Verbindungsprüfung wird hier eine Auswahl angeboten.
-              </template>
-            </small>
-          </div>
+        <div class="field">
+          <label>Bereiche im Verzeichnis</label>
 
+          <Tree
+            v-if="ouTree.length > 0"
+            v-model:selection-keys="selectedOus"
+            :value="ouTree"
+            selection-mode="checkbox"
+            :loading="loadingOus"
+            filter
+            filter-mode="lenient"
+            filter-placeholder="Suchen"
+            class="ou-tree"
+          />
+
+          <Message v-else severity="secondary" :closable="false">
+            Nach erfolgreicher Verbindungsprüfung erscheint hier die Struktur des Verzeichnisses
+            zum Ankreuzen.
+          </Message>
+
+          <small class="muted">
+            Mehrere Bereiche sind möglich; jeder wird samt allem darunter abgeglichen.
+            <template v-if="selectedBases.length === 0">
+              Ohne Auswahl wird die gesamte Domäne abgeglichen.
+            </template>
+            <template v-else>
+              Gewählt: {{ selectedBases.length }} Bereich(e).
+            </template>
+          </small>
+        </div>
+
+        <div class="settings-grid">
           <div class="field" style="grid-column: 1 / -1">
             <label>Auswahl der Konten</label>
             <div style="display: flex; flex-wrap: wrap; gap: 1rem; align-items: center">
@@ -559,6 +715,9 @@ onMounted(load);
               </template>
             </small>
           </div>
+        </div>
+
+          </section>
         </div>
 
         <h3 class="section">3 · Ablauf</h3>
@@ -751,9 +910,45 @@ onMounted(load);
   font-size: 0.85rem;
 }
 
+.subsection {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 0.75rem 0 0.5rem;
+}
+
 .settings-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
   gap: 0 1.5rem;
+}
+
+/* Innerhalb einer Spalte bleibt es einspaltig — sonst waeren die Felder
+   schmaler als ihre Beschriftungen. */
+.settings-grid.one-column {
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.ad-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 2rem;
+  align-items: start;
+}
+
+/* Unterhalb dieser Breite stehen die Spalten wieder untereinander; zwei
+   halbe Spalten waeren dann schmaler als die Eingabefelder brauchen. */
+@media (max-width: 72rem) {
+  .ad-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Begrenzte Hoehe mit eigenem Rollbereich: Ein Verzeichnis mit hundert
+   Einheiten wuerde die Seite sonst unbenutzbar lang machen. */
+.ou-tree {
+  max-height: 22rem;
+  overflow: auto;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: var(--p-content-border-radius);
 }
 </style>

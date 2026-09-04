@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Client, type Entry } from 'ldapts';
-import { AdSettings, effectiveAdFilter } from '../settings/settings.types.js';
+import { AdSettings, effectiveAdFilter, effectiveSearchBases } from '../settings/settings.types.js';
 
 /** Was die Sondierung ueber das Verzeichnis herausfindet. */
 export interface AdProbe {
@@ -49,50 +49,46 @@ export class LdapClient {
    * Geraete als "im AD verschwunden" archiviert wuerden.
    */
   async fetchComputers(config: AdSettings): Promise<AdComputer[]> {
-    const client = new Client({
-      url: config.url,
-      timeout: config.timeoutSeconds * 1000,
-      connectTimeout: config.timeoutSeconds * 1000,
-      tlsOptions: { rejectUnauthorized: config.tlsRejectUnauthorized },
-    });
+    const bases = effectiveSearchBases(config);
+    const filter = effectiveAdFilter(config);
 
-    try {
-      await client.bind(config.bindDn, config.bindPassword);
+    return this.withClient(config, async (client) => {
+      // Ueber die objectGUID zusammengefuehrt: Ueberschneiden sich zwei
+      // gewaehlte Bereiche, taeuchte dasselbe Konto sonst mehrfach auf — und
+      // der Abgleich zaehlte es doppelt.
+      const byGuid = new Map<string, AdComputer>();
 
-      const { searchEntries } = await client.search(config.baseDn, {
-        scope: 'sub',
-        filter: effectiveAdFilter(config),
-        paged: { pageSize: config.pageSize },
-        attributes: [
-          'objectGUID',
-          'distinguishedName',
-          'cn',
-          'dNSHostName',
-          'operatingSystem',
-          'operatingSystemVersion',
-        ],
-        // objectGUID ist binaer. Ohne diese Angabe kaeme eine kaputte
-        // Zeichenkette statt der 16 Bytes an.
-        explicitBufferAttributes: ['objectGUID'],
-      });
+      for (const base of bases) {
+        const { searchEntries } = await client.search(base, {
+          scope: 'sub',
+          filter,
+          paged: { pageSize: config.pageSize },
+          attributes: [
+            'objectGUID',
+            'distinguishedName',
+            'cn',
+            'dNSHostName',
+            'operatingSystem',
+            'operatingSystemVersion',
+          ],
+          // objectGUID ist binaer. Ohne diese Angabe kaeme eine kaputte
+          // Zeichenkette statt der 16 Bytes an.
+          explicitBufferAttributes: ['objectGUID'],
+        });
 
-      const computers: AdComputer[] = [];
-
-      for (const entry of searchEntries) {
-        const computer = this.toComputer(entry);
-        if (computer) {
-          computers.push(computer);
+        for (const entry of searchEntries) {
+          const computer = this.toComputer(entry);
+          if (computer) {
+            byGuid.set(computer.objectGuid, computer);
+          }
         }
       }
 
-      this.logger.log(`${computers.length} Computerkonten aus dem AD gelesen.`);
-      return computers;
-    } finally {
-      await client.unbind().catch(() => {
-        // Die Verbindung ist ohnehin am Ende; ein Fehler beim Abmelden darf
-        // den Abgleich nicht nachtraeglich scheitern lassen.
-      });
-    }
+      this.logger.log(
+        `${byGuid.size} Computerkonten aus dem AD gelesen (${bases.length} Bereich(e)).`,
+      );
+      return [...byGuid.values()];
+    });
   }
 
   /**
@@ -138,15 +134,26 @@ export class LdapClient {
    * steht, aber null Treffer liefert, ist genauso unbrauchbar wie gar keine.
    */
   async countMatches(config: AdSettings): Promise<number> {
-    return this.withClient(config, async (client) => {
-      const { searchEntries } = await client.search(config.baseDn, {
-        scope: 'sub',
-        filter: effectiveAdFilter(config),
-        paged: { pageSize: config.pageSize },
-        attributes: ['distinguishedName'],
-      });
+    const bases = effectiveSearchBases(config);
+    const filter = effectiveAdFilter(config);
 
-      return searchEntries.length;
+    return this.withClient(config, async (client) => {
+      const seen = new Set<string>();
+
+      for (const base of bases) {
+        const { searchEntries } = await client.search(base, {
+          scope: 'sub',
+          filter,
+          paged: { pageSize: config.pageSize },
+          attributes: ['distinguishedName'],
+        });
+
+        for (const entry of searchEntries) {
+          seen.add(asString(entry.distinguishedName) ?? String(entry.dn));
+        }
+      }
+
+      return seen.size;
     });
   }
 
@@ -210,7 +217,14 @@ export class LdapClient {
       url: config.url,
       timeout: config.timeoutSeconds * 1000,
       connectTimeout: config.timeoutSeconds * 1000,
-      tlsOptions: { rejectUnauthorized: config.tlsRejectUnauthorized },
+      tlsOptions: {
+        rejectUnauthorized: config.tlsRejectUnauthorized,
+        // Ist ein Zertifikat der ausstellenden Stelle hinterlegt, wird
+        // ausschliesslich dagegen geprueft. Das ist der richtige Weg bei einer
+        // internen PKI — im Gegensatz zum Abschalten der Pruefung bleibt ein
+        // untergeschobener Server erkennbar.
+        ca: config.caCertificate.trim() ? [config.caCertificate] : undefined,
+      },
     });
 
     try {

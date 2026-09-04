@@ -93,6 +93,17 @@ Konfiguriert wird im Frontend unter **Einstellungen**; die Werte liegen in der
 Datenbank und wirken sofort, ein Neustart ist nicht nötig. Das Dienstkonto
 braucht ausschliesslich Leserecht auf die Computerobjekte.
 
+Die Einrichtung ist auf Auswählen statt Tippen ausgelegt: **Verbindung prüfen**
+liest die Eckdaten der Domäne aus dem Verzeichnis, danach werden die
+abzugleichenden Bereiche in einem Baum angekreuzt — mehrere sind möglich, jeder
+samt allem darunter. Die Auswahl der Konten läuft über Ankreuzfelder;
+ein eigener LDAP-Filter bleibt als Ausweichweg.
+
+**Zertifikat aus interner PKI:** Statt die Prüfung abzuschalten, lässt sich das
+Zertifikat der ausstellenden Stelle im PEM-Format hinterlegen. Die Gegenstelle
+wird dann weiterhin geprüft, nur gegen diese Stelle — ein untergeschobener
+Server fällt damit auf.
+
 Die `AD_*`-Umgebungsvariablen in [`deploy/.env.example`](deploy/.env.example)
 sind nur die Erstbefüllung beim allerersten Start und können leer bleiben.
 

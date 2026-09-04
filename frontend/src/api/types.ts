@@ -322,6 +322,9 @@ export interface OrganizationalUnit {
 export interface AdSettingsView {
   url: string;
   baseDn: string;
+  searchBases: string[];
+  effectiveSearchBases: string[];
+  caCertificate: string;
   bindDn: string;
   /** Das Passwort selbst wird nie ausgeliefert. */
   bindPasswordSet: boolean;

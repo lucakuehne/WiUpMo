@@ -15,7 +15,12 @@ import {
   ThresholdSettingsViewDto,
 } from './dto/settings.dto.js';
 import { SettingsService } from './settings.service.js';
-import { AdSettings, effectiveAdFilter, isAdConfigured } from './settings.types.js';
+import {
+  AdSettings,
+  effectiveAdFilter,
+  effectiveSearchBases,
+  isAdConfigured,
+} from './settings.types.js';
 
 @ApiTags('settings')
 @Controller('api/settings')
@@ -86,5 +91,6 @@ function toAdView(ad: AdSettings): AdSettingsViewDto {
     bindPasswordSet: bindPassword !== '',
     configured: isAdConfigured(ad),
     effectiveFilter: effectiveAdFilter(ad),
+    effectiveSearchBases: effectiveSearchBases(ad),
   };
 }

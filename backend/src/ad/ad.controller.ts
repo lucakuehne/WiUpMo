@@ -4,7 +4,12 @@ import { SessionGuard } from '../auth/session.guard.js';
 import { AdSyncStatus, AdSyncTrigger } from '../database/enums.js';
 import { AdSettingsDto } from '../settings/dto/settings.dto.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { AdSettings, effectiveAdFilter, isAdConfigured } from '../settings/settings.types.js';
+import {
+  AdSettings,
+  effectiveAdFilter,
+  effectiveSearchBases,
+  isAdConfigured,
+} from '../settings/settings.types.js';
 import { AdSyncService } from './ad-sync.service.js';
 import {
   AdProbeRequestDto,
@@ -76,17 +81,17 @@ export class AdController {
     try {
       const probe = await this.ldap.probe(config);
 
-      // Nur zaehlen, wenn eine Suchwurzel feststeht — sonst waere der Aufruf
-      // eine Suche ueber das gesamte Verzeichnis.
-      const matched = config.baseDn.trim()
+      // Nur zaehlen, wenn ein Bereich feststeht — sonst waere der Aufruf eine
+      // Suche ueber das gesamte Verzeichnis.
+      const matched = effectiveSearchBases(config).length > 0
         ? await this.ldap.countMatches(config)
         : null;
 
       const summary =
         matched === null
-          ? 'Verbindung steht. Es ist noch keine Suchwurzel gewählt.'
+          ? 'Verbindung steht. Es ist noch kein Bereich gewählt.'
           : matched === 0
-            ? 'Verbindung steht, der Filter trifft aber kein einziges Konto. Suchwurzel und Filter prüfen.'
+            ? 'Verbindung steht, der Filter trifft aber kein einziges Konto. Bereiche und Filter prüfen.'
             : `Verbindung steht. ${matched} Computerkonten gefunden.`;
 
       return {

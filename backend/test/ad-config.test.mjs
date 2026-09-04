@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { dnToDnsName } from '../dist/src/ad/ldap.client.js';
-import { effectiveAdFilter } from '../dist/src/settings/settings.types.js';
+import { effectiveAdFilter, effectiveSearchBases } from '../dist/src/settings/settings.types.js';
 
 const base = {
   filterMode: 'guided',
@@ -53,6 +53,46 @@ test('Filter: eigener Ausdruck schlaegt die Ankreuzfelder', () => {
 test('Filter: leerer eigener Ausdruck faellt auf die Objektklasse zurueck', () => {
   // Ein leerer Filter waere serverseitig ein Syntaxfehler, kein "alles".
   assert.equal(effectiveAdFilter({ ...base, filterMode: 'custom', filter: '   ' }), '(objectClass=computer)');
+});
+
+test('Bereiche: ohne Auswahl gilt die Domaenenwurzel', () => {
+  assert.deepEqual(
+    effectiveSearchBases({ baseDn: 'DC=firma,DC=local', searchBases: [] }),
+    ['DC=firma,DC=local'],
+  );
+});
+
+test('Bereiche: mehrere nebeneinanderliegende bleiben erhalten', () => {
+  const bases = ['OU=Notebooks,DC=firma,DC=local', 'OU=Arbeitsplaetze,DC=firma,DC=local'];
+  assert.deepEqual(effectiveSearchBases({ baseDn: 'DC=firma,DC=local', searchBases: bases }), bases);
+});
+
+test('Bereiche: untergeordnete Auswahl wird verworfen', () => {
+  // Die Suche laeuft ueber den gesamten Unterbaum — der zweite Eintrag wuerde
+  // dieselben Konten ein zweites Mal lesen.
+  assert.deepEqual(
+    effectiveSearchBases({
+      baseDn: 'DC=firma,DC=local',
+      searchBases: ['OU=Clients,DC=firma,DC=local', 'OU=Notebooks,OU=Clients,DC=firma,DC=local'],
+    }),
+    ['OU=Clients,DC=firma,DC=local'],
+  );
+});
+
+test('Bereiche: Gross- und Kleinschreibung spielt keine Rolle', () => {
+  // LDAP-DNs sind nicht schreibungssensitiv; das Verzeichnis liefert sie mal
+  // so, mal so.
+  assert.deepEqual(
+    effectiveSearchBases({
+      baseDn: 'DC=firma,DC=local',
+      searchBases: ['ou=Clients,dc=firma,dc=local', 'OU=Notebooks,OU=CLIENTS,DC=FIRMA,DC=LOCAL'],
+    }),
+    ['ou=Clients,dc=firma,dc=local'],
+  );
+});
+
+test('Bereiche: ohne alles leer, nicht die ganze Domaene', () => {
+  assert.deepEqual(effectiveSearchBases({ baseDn: '', searchBases: [] }), []);
 });
 
 test('Domaenenname: nur die DC-Bestandteile, in Reihenfolge', () => {

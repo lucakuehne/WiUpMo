@@ -65,8 +65,22 @@ export interface AdSettings {
   /** z. B. `ldaps://dc01.firma.local:636`. */
   url: string;
 
-  /** Suchwurzel, z. B. `OU=Computer,DC=firma,DC=local`. */
+  /**
+   * Wurzel der Domaene, z. B. `DC=firma,DC=local`. Sie dient dem Durchsuchen
+   * des Verzeichnisses und als Rueckfallwert, wenn keine Gruppen gewaehlt sind.
+   */
   baseDn: string;
+
+  /**
+   * Die tatsaechlich abgeglichenen Bereiche, jeweils ueber den gesamten
+   * Unterbaum. Leer bedeutet: die ganze Domaene.
+   *
+   * Mehrere Bereiche, weil Computerkonten selten an einer Stelle liegen —
+   * typisch sind getrennte Einheiten fuer Notebooks, Arbeitsplaetze und
+   * Standorte. Eine einzelne Suchwurzel zwaenge dazu, entweder die halbe
+   * Domaene mitzunehmen oder den Filter zu verbiegen.
+   */
+  searchBases: string[];
 
   bindDn: string;
 
@@ -105,7 +119,23 @@ export interface AdSettings {
   /** Wartezeit nach dem Start bis zum ersten Abgleich. */
   startupDelaySeconds: number;
 
-  /** `false` akzeptiert ein selbstsigniertes Zertifikat des Domaenencontrollers. */
+  /**
+   * Zertifikat der ausstellenden Stelle im PEM-Format, sofern der
+   * Domaenencontroller ein Zertifikat aus einer internen PKI verwendet.
+   *
+   * Der bessere Weg als das Abschalten der Pruefung: Die Gegenstelle wird
+   * weiterhin geprueft, nur eben gegen diese Stelle statt gegen die
+   * oeffentlichen Wurzelzertifikate. Ein untergeschobener Server faellt damit
+   * weiterhin auf.
+   */
+  caCertificate: string;
+
+  /**
+   * `false` schaltet die Pruefung der Gegenstelle ab. Nur sinnvoll, wenn kein
+   * Zertifikat der ausstellenden Stelle vorliegt — dann ist die Verbindung
+   * zwar verschluesselt, aber nicht mehr gegen einen untergeschobenen Server
+   * geschuetzt.
+   */
   tlsRejectUnauthorized: boolean;
 
   timeoutSeconds: number;
@@ -133,6 +163,8 @@ export interface RetentionSettings {
 export const DEFAULT_AD: AdSettings = {
   url: '',
   baseDn: '',
+  searchBases: [],
+  caCertificate: '',
   bindDn: '',
   bindPassword: '',
   filterMode: 'guided',
@@ -159,7 +191,30 @@ export const DEFAULT_RETENTION: RetentionSettings = {
 
 /** Ohne Server und Suchwurzel ist nichts abzugleichen. */
 export function isAdConfigured(ad: AdSettings): boolean {
-  return ad.url.trim() !== '' && ad.baseDn.trim() !== '';
+  return ad.url.trim() !== '' && effectiveSearchBases(ad).length > 0;
+}
+
+/**
+ * Die Bereiche, ueber die tatsaechlich gesucht wird.
+ *
+ * Untergeordnete Auswahlen werden verworfen: Wer `OU=Clients` und darin
+ * `OU=Notebooks` ankreuzt, meint einmal alles unterhalb von Clients. Die Suche
+ * laeuft ohnehin ueber den gesamten Unterbaum — die zweite Angabe braeuchte
+ * nur einen weiteren Durchlauf, um dieselben Konten noch einmal zu lesen.
+ */
+export function effectiveSearchBases(ad: AdSettings): string[] {
+  const selected = ad.searchBases.map((base) => base.trim()).filter((base) => base !== '');
+
+  if (selected.length === 0) {
+    return ad.baseDn.trim() !== '' ? [ad.baseDn.trim()] : [];
+  }
+
+  return selected.filter(
+    (candidate) =>
+      !selected.some(
+        (other) => other !== candidate && candidate.toLowerCase().endsWith(`,${other.toLowerCase()}`),
+      ),
+  );
 }
 
 /**

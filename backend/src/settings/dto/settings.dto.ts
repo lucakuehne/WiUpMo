@@ -1,5 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -78,6 +80,25 @@ export class AdSettingsDto {
   @MaxLength(512)
   @IsOptional()
   baseDn?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(512, { each: true })
+  @ArrayMaxSize(50)
+  @IsOptional()
+  searchBases?: string[];
+
+  /**
+   * PEM. Die Musterpruefung faengt den haeufigsten Fehler ab: eine
+   * DER-kodierte `.cer`-Datei, die als Binaersalat ankommt.
+   */
+  @IsString()
+  @MaxLength(65536)
+  @Matches(/^$|-----BEGIN CERTIFICATE-----/, {
+    message: 'Das Zertifikat muss im PEM-Format vorliegen und mit -----BEGIN CERTIFICATE----- beginnen.',
+  })
+  @IsOptional()
+  caCertificate?: string;
 
   @IsString()
   @MaxLength(512)
@@ -193,6 +214,14 @@ export class RetentionSettingsDto {
 export class AdSettingsViewDto {
   url: string;
   baseDn: string;
+  searchBases: string[];
+
+  /** Die Bereiche nach Auflösung: untergeordnete Auswahlen entfernt. */
+  effectiveSearchBases: string[];
+
+  /** Nur, ob eines hinterlegt ist — das Zertifikat selbst geht mit. */
+  caCertificate: string;
+
   bindDn: string;
   bindPasswordSet: boolean;
   filterMode: 'guided' | 'custom';
