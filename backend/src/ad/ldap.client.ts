@@ -26,6 +26,22 @@ export interface OrganizationalUnit {
   depth: number;
 }
 
+export interface AdGroup {
+  dn: string;
+  name: string;
+
+  /** `sAMAccountName`, oft der Name, unter dem die Gruppe bekannt ist. */
+  accountName: string | null;
+}
+
+/**
+ * `LDAP_MATCHING_RULE_IN_CHAIN`. Loest Gruppenketten auf: Ein Benutzer, der nur
+ * ueber eine untergeordnete Gruppe Mitglied ist, wird damit gefunden. Ohne
+ * diese Regel muesste man die Verschachtelung selbst nachlaufen — mit einer
+ * Abfrage je Ebene und ohne Schutz gegen Zyklen.
+ */
+const IN_CHAIN = '1.2.840.113556.1.4.1941';
+
 /** Ein Computerkonto, auf das Noetigste eingedampft. */
 export interface AdComputer {
   objectGuid: string;
@@ -157,6 +173,100 @@ export class LdapClient {
     });
   }
 
+  /** Gruppen unterhalb der Domaenenwurzel, fuer die Auswahl im Frontend. */
+  async listGroups(config: AdSettings, search: string): Promise<AdGroup[]> {
+    const base = config.baseDn.trim();
+    if (!base) {
+      return [];
+    }
+
+    // Der Suchbegriff wird maskiert: Ein `*` oder eine Klammer darin waere
+    // sonst Teil des Filterausdrucks und nicht des gesuchten Textes.
+    const term = search.trim() ? `*${escapeFilterValue(search.trim())}*` : '*';
+
+    return this.withClient(config, async (client) => {
+      const { searchEntries } = await client.search(base, {
+        scope: 'sub',
+        filter: `(&(objectClass=group)(|(cn=${term})(sAMAccountName=${term})))`,
+        paged: { pageSize: 500 },
+        sizeLimit: 500,
+        attributes: ['distinguishedName', 'cn', 'sAMAccountName'],
+      });
+
+      return searchEntries
+        .map((entry) => {
+          const dn = asString(entry.distinguishedName) ?? String(entry.dn);
+          return {
+            dn,
+            name: asString(entry.cn) ?? dn.split(',')[0],
+            accountName: asString(entry.sAMAccountName),
+          };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name, 'de'));
+    });
+  }
+
+  /**
+   * Prueft, ob ein Benutzer Mitglied einer der Gruppen ist — verschachtelte
+   * Mitgliedschaften eingeschlossen.
+   *
+   * Die Abfrage laeuft mit dem Dienstkonto, nicht mit dem des Benutzers: Ein
+   * Benutzer darf zwar in aller Regel seine eigenen Mitgliedschaften lesen,
+   * aber eben nicht ueberall — und die Anmeldung soll nicht davon abhaengen,
+   * wie grosszuegig die Berechtigungen im Verzeichnis gesetzt sind.
+   */
+  async isMemberOfAny(config: AdSettings, userDn: string, groups: string[]): Promise<boolean> {
+    if (groups.length === 0) {
+      return true;
+    }
+
+    return this.withClient(config, async (client) => {
+      const clauses = groups.map((group) => `(memberOf:${IN_CHAIN}:=${escapeFilterValue(group)})`);
+
+      const { searchEntries } = await client.search(userDn, {
+        scope: 'base',
+        filter: clauses.length === 1 ? clauses[0] : `(|${clauses.join('')})`,
+        attributes: ['distinguishedName'],
+      });
+
+      return searchEntries.length > 0;
+    });
+  }
+
+  /**
+   * Findet den vollstaendigen DN zu einem eingegebenen Benutzernamen.
+   *
+   * Gesucht wird ueber beide gebraeuchlichen Kennungen, weil im Anmeldefeld
+   * mal `benutzer` und mal `benutzer@firma.local` steht — und die
+   * Gruppenpruefung braucht den DN, nicht den Anmeldenamen.
+   */
+  async findUserDn(config: AdSettings, username: string): Promise<string | null> {
+    const base = config.baseDn.trim();
+    if (!base) {
+      return null;
+    }
+
+    const escaped = escapeFilterValue(username);
+    const short = escapeFilterValue(username.split('@')[0].split('\\').pop() ?? username);
+
+    return this.withClient(config, async (client) => {
+      const { searchEntries } = await client.search(base, {
+        scope: 'sub',
+        filter: `(&(objectClass=user)(|(userPrincipalName=${escaped})(sAMAccountName=${short})))`,
+        sizeLimit: 2,
+        attributes: ['distinguishedName'],
+      });
+
+      // Mehr als ein Treffer heisst, dass der Name nicht eindeutig ist. Dann
+      // lieber ablehnen als raten, welches Konto gemeint war.
+      if (searchEntries.length !== 1) {
+        return null;
+      }
+
+      return asString(searchEntries[0].distinguishedName) ?? String(searchEntries[0].dn);
+    });
+  }
+
   /** Organisationseinheiten unterhalb eines Knotens, fuer die Auswahl im Frontend. */
   async listOrganizationalUnits(config: AdSettings, base: string): Promise<OrganizationalUnit[]> {
     return this.withClient(config, async (client) => {
@@ -276,6 +386,30 @@ function asString(value: unknown): string | null {
     return value[0];
   }
   return null;
+}
+
+/**
+ * Maskiert einen Wert fuer einen LDAP-Filter nach RFC 4515.
+ *
+ * Ohne das koennte ein Benutzername wie `*)(objectClass=*` den Filter
+ * umschreiben — bei einer Abfrage, die ueber die Anmeldung erreichbar ist,
+ * ist das keine theoretische Sorge.
+ */
+function escapeFilterValue(value: string): string {
+  return value.replace(/[\\*()\0]/g, (char) => {
+    switch (char) {
+      case '\\':
+        return '\\5c';
+      case '*':
+        return '\\2a';
+      case '(':
+        return '\\28';
+      case ')':
+        return '\\29';
+      default:
+        return '\\00';
+    }
+  });
 }
 
 function asStrings(value: unknown): string[] {

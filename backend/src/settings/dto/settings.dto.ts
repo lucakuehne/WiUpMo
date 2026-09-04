@@ -52,6 +52,13 @@ export class AuthSettingsDto {
   @IsOptional()
   userDnTemplate?: string;
 
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(512, { each: true })
+  @ArrayMaxSize(50)
+  @IsOptional()
+  allowedGroups?: string[];
+
   @IsBoolean()
   @IsOptional()
   allowLocalFallback?: boolean;
@@ -60,6 +67,7 @@ export class AuthSettingsDto {
 export class AuthSettingsViewDto {
   provider: 'local' | 'ldap';
   userDnTemplate: string;
+  allowedGroups: string[];
   allowLocalFallback: boolean;
 }
 

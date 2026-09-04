@@ -1,0 +1,78 @@
+/*
+  Übergangsstile für die Ansichten, die noch auf PrimeVue laufen.
+  Wird Stück für Stück leerer und verschwindet, sobald die letzte Ansicht
+  umgestellt ist. Ohne diese Datei sähen die noch nicht umgestellten Seiten
+  nach dem Wechsel auf Tailwind kaputt aus.
+*/
+
+.page {
+  padding: 1.25rem;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.page-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.page-header h1 {
+  font-size: 1.35rem;
+  margin: 0;
+  font-weight: 600;
+}
+
+.muted {
+  color: var(--muted-foreground);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  align-items: center;
+}
+
+.centered {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.centered .p-card {
+  width: min(28rem, 100%);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem 1.5rem;
+}
+
+.detail-grid dt {
+  font-size: 0.8rem;
+  color: var(--muted-foreground);
+}
+
+.detail-grid dd {
+  margin: 0 0 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}

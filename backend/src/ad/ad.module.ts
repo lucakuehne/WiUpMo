@@ -5,12 +5,12 @@ import { SettingsModule } from '../settings/settings.module.js';
 import { AdController } from './ad.controller.js';
 import { AdSchedulerService } from './ad-scheduler.service.js';
 import { AdSyncService } from './ad-sync.service.js';
-import { LdapClient } from './ldap.client.js';
+import { LdapModule } from './ldap.module.js';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), AuthModule, SettingsModule],
+  imports: [ScheduleModule.forRoot(), AuthModule, SettingsModule, LdapModule],
   controllers: [AdController],
-  providers: [LdapClient, AdSyncService, AdSchedulerService],
+  providers: [AdSyncService, AdSchedulerService],
   exports: [AdSyncService],
 })
 export class AdModule {}

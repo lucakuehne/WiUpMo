@@ -12,8 +12,10 @@ import {
 } from '../settings/settings.types.js';
 import { AdSyncService } from './ad-sync.service.js';
 import {
+  AdGroupDto,
   AdProbeRequestDto,
   AdProbeResultDto,
+  ListGroupsRequestDto,
   ListOusRequestDto,
   OrganizationalUnitDto,
 } from './dto/ad-probe.dto.js';
@@ -125,6 +127,13 @@ export class AdController {
 
     // Die Wurzel selbst gehoert dazu: "alles" ist eine legitime Wahl.
     return [{ dn: base, name: base, depth: 0 }, ...units.filter((unit) => unit.dn !== base)];
+  }
+
+  @Post('groups')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Gruppen aus dem Verzeichnis, fuer die Anmeldefreigabe.' })
+  async groups(@Body() dto: ListGroupsRequestDto): Promise<AdGroupDto[]> {
+    return this.ldap.listGroups(await this.merge(dto), dto.search ?? '');
   }
 
   /**

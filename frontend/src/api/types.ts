@@ -357,9 +357,17 @@ export interface AgentSettingsView {
   enrollmentToken: string;
 }
 
+export interface AdGroup {
+  dn: string;
+  name: string;
+  accountName: string | null;
+}
+
 export interface AuthSettings {
   provider: 'local' | 'ldap';
   userDnTemplate: string;
+  /** Leer bedeutet: keine Einschränkung. */
+  allowedGroups: string[];
   allowLocalFallback: boolean;
 }
 

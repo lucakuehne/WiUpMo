@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { LdapModule } from '../ad/ldap.module.js';
 import { Setting, User } from '../database/entities/index.js';
 import { SettingsCoreModule } from '../settings/settings-core.module.js';
 import { AUTH_PROVIDER } from './auth-provider.js';
@@ -15,6 +16,7 @@ import { SessionGuard } from './session.guard.js';
   imports: [
     TypeOrmModule.forFeature([User, Setting]),
     SettingsCoreModule,
+    LdapModule,
     // Ohne globales Geheimnis: es wird pro Aufruf aus den Einstellungen bzw.
     // aus JWT_SECRET geholt, siehe AuthService.
     JwtModule.register({}),

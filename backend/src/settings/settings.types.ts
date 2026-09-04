@@ -25,6 +25,17 @@ export interface AuthSettings {
   userDnTemplate: string;
 
   /**
+   * Gruppen, deren Mitglieder sich anmelden duerfen (DNs). Leer heisst: jedes
+   * Konto, das sich am Verzeichnis anmelden kann, darf auch hier hinein.
+   *
+   * Die Pruefung schliesst verschachtelte Mitgliedschaften ein — wer nur ueber
+   * eine untergeordnete Gruppe drinsteckt, kommt ebenfalls herein. Alles
+   * andere waere in gewachsenen Verzeichnissen unbrauchbar, weil dort
+   * Berechtigungen fast immer ueber Gruppenketten vergeben sind.
+   */
+  allowedGroups: string[];
+
+  /**
    * Laesst lokale Benutzer auch im LDAP-Betrieb herein.
    *
    * Standardmaessig an, und das ist wichtig: Ohne diesen Weg sperrt ein
@@ -38,6 +49,7 @@ export interface AuthSettings {
 export const DEFAULT_AUTH: AuthSettings = {
   provider: 'local',
   userDnTemplate: '{username}',
+  allowedGroups: [],
   allowLocalFallback: true,
 };
 

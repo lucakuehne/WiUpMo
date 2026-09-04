@@ -1,4 +1,10 @@
 {
   "files": [],
-  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }]
+  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }],
+  "//compilerOptions": "Für den Build bedeutungslos — diese Datei verweist nur weiter. Die shadcn-CLI liest die Pfad-Zuordnung aber hier, um @/… aufzulösen.",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
 }

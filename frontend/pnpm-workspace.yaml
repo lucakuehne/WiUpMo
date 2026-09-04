@@ -5,3 +5,6 @@
 allowBuilds:
   # Legt die plattformeigene Binaerdatei ab; ohne sie startet Vite nicht.
   esbuild: true
+  # Waehlt beim Installieren die zur Vue-Version passenden Bindungen aus.
+  # Ohne den Lauf zeigt das Paket auf die Vue-2-Variante.
+  vue-demi: true

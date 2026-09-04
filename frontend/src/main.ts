@@ -8,6 +8,8 @@ import router from '@/router';
 
 import 'primeicons/primeicons.css';
 import '@/assets/main.css';
+// Übergangsweise, solange nicht alle Ansichten auf shadcn umgestellt sind.
+import '@/assets/legacy.css';
 
 createApp(App)
   .use(router)

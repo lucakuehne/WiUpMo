@@ -38,6 +38,20 @@ export class OrganizationalUnitDto {
   depth: number;
 }
 
+export class AdGroupDto {
+  dn: string;
+  name: string;
+  accountName: string | null;
+}
+
+export class ListGroupsRequestDto extends AdSettingsDto {
+  /** Freitext auf Name und Kontonamen. Leer liefert die ersten 500. */
+  @IsString()
+  @MaxLength(128)
+  @IsOptional()
+  search?: string;
+}
+
 export class ListOusRequestDto extends AdSettingsDto {
   /** Ohne Angabe wird die Domaenenwurzel aus der Sondierung genommen. */
   @IsString()

@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SettingsService } from '../settings/settings.service.js';
 import { AuthProvider, AuthenticatedUser } from './auth-provider.js';
-import { LdapAccountDisabledError, LdapAuthProvider } from './ldap-auth.provider.js';
+import {
+  LdapAccountDisabledError,
+  LdapAuthProvider,
+  LdapNotAuthorizedError,
+} from './ldap-auth.provider.js';
 import { LocalAuthProvider } from './local-auth.provider.js';
 
 /**
@@ -46,9 +50,10 @@ export class ProviderSelector implements AuthProvider {
         return user;
       }
     } catch (error) {
-      if (error instanceof LdapAccountDisabledError) {
-        // Ausdrueckliche Sperre im Frontend. Nicht ueber den lokalen Weg
-        // umgehbar — sonst waere die Sperre wirkungslos.
+      if (error instanceof LdapAccountDisabledError || error instanceof LdapNotAuthorizedError) {
+        // Ausdrueckliche Ablehnung — gesperrtes Konto oder fehlende
+        // Gruppenzugehoerigkeit. Nicht ueber den lokalen Weg umgehbar, sonst
+        // waere die Beschraenkung wirkungslos.
         return null;
       }
       this.logger.warn(`LDAP-Anmeldung nicht moeglich: ${String(error)}`);

@@ -1,93 +1,137 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/*
+  Dunkelmodus über eine Klasse am Wurzelelement statt über die
+  Systemeinstellung allein: So kann die Anwendung später eine ausdrückliche
+  Wahl anbieten, ohne dass sich die Regeln ändern. Gesetzt wird sie in App.vue.
+*/
+@custom-variant dark (&:is(.dark *));
+
+/*
+  Die Farbwerte der shadcn-Grundlage (Basis „neutral"). Sie sind der einzige
+  Ort, an dem konkrete Farben stehen — alles Weitere verweist auf diese
+  Variablen, damit hell und dunkel nicht auseinanderlaufen.
+*/
 :root {
-  color-scheme: light dark;
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+
+  /* Zustandsfarben der Anwendung: offen, gescheitert, erledigt. */
+  --warning: oklch(0.75 0.16 70);
+  --warning-foreground: oklch(0.22 0.05 70);
+  --success: oklch(0.6 0.13 155);
+  --success-foreground: oklch(0.985 0 0);
+
+  --chart-1: oklch(0.55 0.19 260);
+  --chart-2: oklch(0.62 0.15 155);
+  --chart-3: oklch(0.72 0.16 70);
+  --chart-4: oklch(0.58 0.2 320);
+  --chart-5: oklch(0.6 0.02 250);
 }
 
-* {
-  box-sizing: border-box;
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 18%);
+  --ring: oklch(0.556 0 0);
+
+  --warning: oklch(0.78 0.15 70);
+  --warning-foreground: oklch(0.2 0.04 70);
+  --success: oklch(0.68 0.13 155);
+  --success-foreground: oklch(0.16 0.03 155);
+
+  --chart-1: oklch(0.68 0.17 260);
+  --chart-2: oklch(0.7 0.14 155);
+  --chart-3: oklch(0.78 0.15 70);
+  --chart-4: oklch(0.68 0.19 320);
+  --chart-5: oklch(0.72 0.02 250);
 }
 
-body {
-  margin: 0;
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    sans-serif;
-  background: var(--p-content-background);
-  color: var(--p-text-color);
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
 }
 
-.page {
-  padding: 1.25rem;
-  max-width: 1600px;
-  margin: 0 auto;
-}
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
 
-.page-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
-}
+  body {
+    @apply bg-background text-foreground;
+  }
 
-.page-header h1 {
-  font-size: 1.35rem;
-  margin: 0;
-}
-
-.muted {
-  color: var(--p-text-muted-color);
-}
-
-.filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-  align-items: center;
-}
-
-/* Zentrierte Karte fuer Anmeldung und Einrichtung. */
-.centered {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 1rem;
-}
-
-.centered .p-card {
-  width: min(28rem, 100%);
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  margin-bottom: 1rem;
-}
-
-.detail-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-  gap: 0.75rem 1.5rem;
-}
-
-.detail-grid dt {
-  font-size: 0.8rem;
-  color: var(--p-text-muted-color);
-}
-
-.detail-grid dd {
-  margin: 0 0 0.5rem;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Zahlenspalten in Tabellen ausrichten, damit Groessenordnungen auf einen
-   Blick vergleichbar sind. */
-.num {
-  font-variant-numeric: tabular-nums;
-  text-align: right;
+  /*
+    Zahlen in Tabellen bekommen gleich breite Ziffern. Ohne das verrutschen
+    Spalten von Zeile zu Zeile und Grössenordnungen lassen sich nicht mehr
+    auf einen Blick vergleichen.
+  */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
 }

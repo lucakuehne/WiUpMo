@@ -3,8 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Client } from 'ldapts';
 import { Repository } from 'typeorm';
 import { User } from '../database/entities/index.js';
+import { LdapClient } from '../ad/ldap.client.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { isAdConfigured } from '../settings/settings.types.js';
+import { AdSettings, isAdConfigured } from '../settings/settings.types.js';
 import { AuthProvider, AuthenticatedUser } from './auth-provider.js';
 
 /**
@@ -29,6 +30,7 @@ export class LdapAuthProvider implements AuthProvider {
 
   constructor(
     private readonly settings: SettingsService,
+    private readonly ldap: LdapClient,
     @InjectRepository(User) private readonly users: Repository<User>,
   ) {}
 
@@ -69,7 +71,49 @@ export class LdapAuthProvider implements AuthProvider {
       });
     }
 
+    if (!(await this.isInAllowedGroup(ad, auth.allowedGroups, username))) {
+      // Zugangsdaten stimmen, die Berechtigung fehlt. Ausdruecklich als
+      // eigener Fall, damit der lokale Rueckfallweg nicht greift: Wer nicht in
+      // der Gruppe ist, soll nicht ueber ein gleichnamiges lokales Konto
+      // hereinkommen.
+      this.logger.warn(`Anmeldung von ${username} abgelehnt: in keiner der freigegebenen Gruppen.`);
+      throw new LdapNotAuthorizedError();
+    }
+
     return this.linkLocalUser(username);
+  }
+
+  /**
+   * Ohne konfigurierte Gruppen darf jeder herein, der sich am Verzeichnis
+   * anmelden kann. Mit Gruppen entscheidet die Mitgliedschaft — inklusive
+   * verschachtelter.
+   *
+   * Scheitert die Pruefung technisch (Dienstkonto darf nicht lesen,
+   * Domaenencontroller antwortet nicht), wird **abgelehnt**, nicht
+   * durchgelassen. Eine Berechtigungspruefung, die im Fehlerfall zustimmt,
+   * ist keine.
+   */
+  private async isInAllowedGroup(
+    ad: AdSettings,
+    allowedGroups: string[],
+    username: string,
+  ): Promise<boolean> {
+    if (allowedGroups.length === 0) {
+      return true;
+    }
+
+    try {
+      const userDn = await this.ldap.findUserDn(ad, username);
+      if (!userDn) {
+        this.logger.warn(`Kein eindeutiges Verzeichniskonto zu '${username}' gefunden.`);
+        return false;
+      }
+
+      return await this.ldap.isMemberOfAny(ad, userDn, allowedGroups);
+    } catch (error) {
+      this.logger.error(`Gruppenpruefung fuer ${username} fehlgeschlagen: ${String(error)}`);
+      return false;
+    }
   }
 
   /**
@@ -117,5 +161,13 @@ export class LdapAccountDisabledError extends Error {
   constructor() {
     super('Das Konto ist gesperrt.');
     this.name = 'LdapAccountDisabledError';
+  }
+}
+
+/** Zugangsdaten stimmen, aber die Gruppenzugehoerigkeit fehlt. */
+export class LdapNotAuthorizedError extends Error {
+  constructor() {
+    super('Das Konto ist fuer diese Anwendung nicht freigegeben.');
+    this.name = 'LdapNotAuthorizedError';
   }
 }

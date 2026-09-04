@@ -1,29 +1,43 @@
 <script setup lang="ts">
-import Button from 'primevue/button';
-import Menubar from 'primevue/menubar';
+import {
+  BarChart3,
+  Box,
+  Download,
+  LineChart,
+  LogOut,
+  Monitor,
+  RefreshCw,
+  Settings,
+} from '@lucide/vue';
 import { computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { Button } from '@/components/ui/button';
 import { auth, logout } from '@/auth';
 
 const route = useRoute();
 const router = useRouter();
 
-// Anmeldung und Einrichtung bekommen keine Navigation — dort gibt es nichts
-// zu navigieren, und eine Menuleiste ueber einem Anmeldeformular sieht nach
-// einem Fehler aus.
+// Anmeldung und Einrichtung bekommen keine Navigation — dort gibt es nichts zu
+// navigieren, und eine Menüleiste über einem Anmeldeformular sieht nach einem
+// Fehler aus.
 const showNavigation = computed(
   () => auth.authenticated && route.name !== 'login' && route.name !== 'setup',
 );
 
 const items = [
-  { label: 'Dashboard', icon: 'pi pi-chart-bar', route: '/' },
-  { label: 'Geräte', icon: 'pi pi-desktop', route: '/devices' },
-  { label: 'Updates', icon: 'pi pi-download', route: '/updates' },
-  { label: 'Auswertungen', icon: 'pi pi-chart-line', route: '/reports' },
-  { label: 'AD-Abgleich', icon: 'pi pi-sync', route: '/ad' },
-  { label: 'Agent-Versionen', icon: 'pi pi-box', route: '/agent-releases' },
-  { label: 'Einstellungen', icon: 'pi pi-cog', route: '/settings' },
+  { label: 'Dashboard', icon: BarChart3, to: '/' },
+  { label: 'Geräte', icon: Monitor, to: '/devices' },
+  { label: 'Updates', icon: Download, to: '/updates' },
+  { label: 'Auswertungen', icon: LineChart, to: '/reports' },
+  { label: 'AD-Abgleich', icon: RefreshCw, to: '/ad' },
+  { label: 'Agent-Versionen', icon: Box, to: '/agent-releases' },
+  { label: 'Einstellungen', icon: Settings, to: '/settings' },
 ];
+
+/** Die Wurzel darf nur bei genauer Übereinstimmung leuchten, sonst immer. */
+function isActive(to: string): boolean {
+  return to === '/' ? route.path === '/' : route.path.startsWith(to);
+}
 
 async function onLogout(): Promise<void> {
   await logout();
@@ -31,8 +45,8 @@ async function onLogout(): Promise<void> {
 }
 
 onMounted(() => {
-  // Dunkelmodus nach Systemeinstellung. PrimeVue schaltet ueber die Klasse am
-  // Wurzelelement, siehe darkModeSelector in main.ts.
+  // Dunkelmodus nach Systemeinstellung; die Klasse am Wurzelelement ist das,
+  // worauf die Farbvariablen in main.css hören.
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   const apply = (dark: boolean) => document.documentElement.classList.toggle('dark', dark);
   apply(media.matches);
@@ -41,34 +55,36 @@ onMounted(() => {
 </script>
 
 <template>
-  <Menubar v-if="showNavigation" :model="items">
-    <template #start>
-      <span style="font-weight: 600; margin-right: 1rem">Windows Update Monitoring</span>
-    </template>
+  <header v-if="showNavigation" class="border-b bg-card">
+    <div class="mx-auto flex h-14 max-w-[1600px] items-center gap-6 px-5">
+      <span class="shrink-0 text-sm font-semibold">Windows Update Monitoring</span>
 
-    <template #item="{ item, props }">
-      <router-link v-if="item.route" :to="item.route" custom v-slot="{ href, navigate }">
-        <a :href="href" v-bind="props.action" @click="navigate">
-          <span :class="item.icon" />
-          <span style="margin-left: 0.5rem">{{ item.label }}</span>
-        </a>
-      </router-link>
-    </template>
+      <nav class="flex flex-1 items-center gap-1 overflow-x-auto">
+        <router-link
+          v-for="item in items"
+          :key="item.to"
+          :to="item.to"
+          class="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm whitespace-nowrap transition-colors"
+          :class="
+            isActive(item.to)
+              ? 'bg-accent text-accent-foreground font-medium'
+              : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
+          "
+        >
+          <component :is="item.icon" class="size-4" />
+          {{ item.label }}
+        </router-link>
+      </nav>
 
-    <template #end>
-      <div style="display: flex; align-items: center; gap: 0.75rem">
-        <span class="muted">{{ auth.username }}</span>
-        <Button
-          label="Abmelden"
-          icon="pi pi-sign-out"
-          severity="secondary"
-          text
-          size="small"
-          @click="onLogout"
-        />
+      <div class="flex shrink-0 items-center gap-2">
+        <span class="text-muted-foreground text-sm">{{ auth.username }}</span>
+        <Button variant="ghost" size="sm" @click="onLogout">
+          <LogOut class="size-4" />
+          Abmelden
+        </Button>
       </div>
-    </template>
-  </Menubar>
+    </div>
+  </header>
 
   <router-view />
 </template>
