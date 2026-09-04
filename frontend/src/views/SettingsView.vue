@@ -36,6 +36,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import GroupPicker from '@/components/GroupPicker.vue';
 import OuPicker from '@/components/OuPicker.vue';
 import {
   adjustPortForScheme,
@@ -100,11 +101,22 @@ const url = reactive<LdapUrlParts>({ host: '', port: LDAPS_PORT, secure: true })
 
 const agent = reactive<AgentSettingsView>({ enrollmentToken: '' });
 const authSettings = reactive<AuthSettings>({
-  provider: 'local',
+  localEnabled: true,
+  ldapEnabled: false,
   userDnTemplate: '{username}',
   allowedGroups: [],
-  allowLocalFallback: true,
 });
+
+/**
+ * Den letzten offenen Weg darf man nicht abschalten. Das Backend weist es
+ * ohnehin ab — aber ein Feld, das man anklicken kann und das dann eine
+ * Fehlermeldung erzeugt, ist schlechter als eines, das gesperrt ist.
+ */
+const onlyRemainingWay = computed(
+  () =>
+    (authSettings.localEnabled && !authSettings.ldapEnabled) ||
+    (!authSettings.localEnabled && authSettings.ldapEnabled),
+);
 
 const groupSearch = ref('');
 const groups = ref<AdGroup[]>([]);
@@ -113,6 +125,7 @@ const loadingGroups = ref(false);
 /**
  * Die gewählten Gruppen bleiben sichtbar, auch wenn die Suche sie gerade nicht
  * enthält — sonst verschwände die eigene Auswahl beim Tippen aus dem Blick.
+ * Die Gliederung übernimmt der GroupPicker anhand der DNs.
  */
 const groupRows = computed<AdGroup[]>(() => {
   const known = new Map(groups.value.map((group) => [group.dn, group]));
@@ -123,11 +136,7 @@ const groupRows = computed<AdGroup[]>(() => {
     }
   }
 
-  return [...known.values()].sort((a, b) => {
-    const selectedA = authSettings.allowedGroups.includes(a.dn) ? 0 : 1;
-    const selectedB = authSettings.allowedGroups.includes(b.dn) ? 0 : 1;
-    return selectedA - selectedB || a.name.localeCompare(b.name, 'de');
-  });
+  return [...known.values()];
 });
 
 async function loadGroups(): Promise<void> {
@@ -146,11 +155,6 @@ async function loadGroups(): Promise<void> {
   }
 }
 
-function toggleGroup(dn: string, checked: boolean): void {
-  authSettings.allowedGroups = checked
-    ? [...authSettings.allowedGroups, dn]
-    : authSettings.allowedGroups.filter((entry) => entry !== dn);
-}
 const thresholds = reactive<ThresholdSettings>({
   staleAgentDays: 14,
   criticalOpenDays: 30,
@@ -252,10 +256,22 @@ const saveRetention = () => void save('retention', savingRetention, { ...retenti
 
 // --- Active Directory ------------------------------------------------------
 
-function onSchemeChange(secure: boolean): void {
-  url.port = adjustPortForScheme({ ...url, secure: !secure }, secure);
-  url.secure = secure;
-}
+/**
+ * Das Protokoll als Auswahl statt als Schalter: „LDAPS" ist der Name, unter
+ * dem es in jeder Anleitung und jeder Firewall-Regel steht — „verschlüsselt:
+ * ja" muss man erst übersetzen.
+ *
+ * Der Standardport zieht beim Wechsel mit, aber nur, wenn er noch der
+ * Standard war. Ein von Hand gesetzter Port bleibt stehen.
+ */
+const protocol = computed<'ldap' | 'ldaps'>({
+  get: () => (url.secure ? 'ldaps' : 'ldap'),
+  set: (value) => {
+    const secure = value === 'ldaps';
+    url.port = adjustPortForScheme({ ...url }, secure);
+    url.secure = secure;
+  },
+});
 
 /**
  * Der Wert kommt als `boolean | 'indeterminate'` — der unbestimmte Zustand
@@ -490,29 +506,40 @@ onMounted(load);
                   1 · Verbindung
                 </h3>
 
-                <div class="grid gap-4 sm:grid-cols-2">
-                  <div class="space-y-1.5 sm:col-span-2">
+                <!-- Protokoll, Name und Port gehören zusammen — sie bilden
+                     zusammen die Adresse und werden auch zusammen geändert. -->
+                <div class="grid gap-3 sm:grid-cols-[8.5rem_1fr_6rem]">
+                  <div class="space-y-1.5">
+                    <Label>Protokoll</Label>
+                    <Select v-model="protocol">
+                      <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ldaps">LDAPS</SelectItem>
+                        <SelectItem value="ldap">LDAP</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div class="space-y-1.5">
                     <Label for="ad-host">Domänencontroller</Label>
                     <Input id="ad-host" v-model="url.host" placeholder="dc01.firma.local" />
-                    <p class="text-muted-foreground text-xs">Nur der Name, ohne Schema und Port.</p>
                   </div>
 
                   <div class="space-y-1.5">
                     <Label for="ad-port">Port</Label>
                     <Input id="ad-port" v-model.number="url.port" type="number" min="1" max="65535" />
                   </div>
+                </div>
 
+                <p class="text-muted-foreground -mt-2 text-xs">
+                  Der Name ohne Schema und Port; der Standardport folgt dem Protokoll.
+                  <template v-if="!url.secure">
+                    <strong>Über LDAP geht das Passwort des Dienstkontos im Klartext durchs Netz.</strong>
+                  </template>
+                </p>
+
+                <div class="grid gap-3 sm:grid-cols-2">
                   <div class="space-y-1.5">
-                    <Label>Verschlüsselt (LDAPS)</Label>
-                    <div class="flex h-9 items-center gap-2">
-                      <Switch :model-value="url.secure" @update:model-value="onSchemeChange" />
-                      <span class="text-muted-foreground text-xs">
-                        Sonst geht das Passwort im Klartext durchs Netz.
-                      </span>
-                    </div>
-                  </div>
-
-                  <div class="space-y-1.5 sm:col-span-2">
                     <Label for="ad-bind">Dienstkonto</Label>
                     <Input
                       id="ad-bind"
@@ -521,13 +548,9 @@ onMounted(load);
                         probe?.domainDnsName ? `wiupmo@${probe.domainDnsName}` : 'wiupmo@firma.local'
                       "
                     />
-                    <p class="text-muted-foreground text-xs">
-                      Als <code>konto@domäne</code> oder <code>DOMÄNE\konto</code>. Leserecht auf
-                      die Computerobjekte genügt.
-                    </p>
                   </div>
 
-                  <div class="space-y-1.5 sm:col-span-2">
+                  <div class="space-y-1.5">
                     <Label for="ad-password">Passwort</Label>
                     <Input
                       id="ad-password"
@@ -539,6 +562,11 @@ onMounted(load);
                     />
                   </div>
                 </div>
+
+                <p class="text-muted-foreground -mt-2 text-xs">
+                  Konto als <code>konto@domäne</code> oder <code>DOMÄNE\konto</code> — ein
+                  vollständiger DN ist nicht nötig. Leserecht auf die Computerobjekte genügt.
+                </p>
 
                 <div class="space-y-2">
                   <Label>Zertifikat des Domänencontrollers</Label>
@@ -770,18 +798,42 @@ onMounted(load);
           </CardHeader>
 
           <CardContent class="space-y-4">
-            <div class="space-y-1.5">
-              <Label>Anmeldeweg</Label>
-              <Select v-model="authSettings.provider">
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="local">Lokale Benutzer</SelectItem>
-                  <SelectItem value="ldap">LDAP-Bind gegen das Verzeichnis</SelectItem>
-                </SelectContent>
-              </Select>
+            <div class="space-y-2">
+              <Label>Zugelassene Anmeldewege</Label>
+
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  id="auth-local"
+                  v-model="authSettings.localEnabled"
+                  :disabled="authSettings.localEnabled && onlyRemainingWay"
+                />
+                <Label for="auth-local" class="font-normal">Lokale Benutzer</Label>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  id="auth-ldap"
+                  v-model="authSettings.ldapEnabled"
+                  :disabled="authSettings.ldapEnabled && onlyRemainingWay"
+                />
+                <Label for="auth-ldap" class="font-normal">
+                  LDAP-Bind gegen das Verzeichnis
+                </Label>
+              </div>
+
+              <p class="text-muted-foreground text-xs">
+                Beide sind gleichwertig und lassen sich zusammen betreiben; beim Anmelden wird
+                zuerst das Verzeichnis gefragt. Mindestens einer muss offen bleiben — deshalb
+                lässt sich der letzte nicht abwählen.
+                <template v-if="authSettings.ldapEnabled && !authSettings.localEnabled">
+                  <strong>
+                    Ohne lokale Benutzer sperrt ein ausgefallener Domänencontroller jeden aus.
+                  </strong>
+                </template>
+              </p>
             </div>
 
-            <div class="space-y-1.5">
+            <div v-if="authSettings.ldapEnabled" class="space-y-1.5">
               <Label>Namensform bei der Anmeldung</Label>
               <Select :model-value="dnMode" @update:model-value="applyDnMode($event as DnMode)">
                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -801,12 +853,12 @@ onMounted(load);
               </p>
             </div>
 
-            <div v-if="dnMode === 'custom'" class="space-y-1.5">
+            <div v-if="authSettings.ldapEnabled && dnMode === 'custom'" class="space-y-1.5">
               <Label for="dn">Vorlage</Label>
               <Input id="dn" v-model="authSettings.userDnTemplate" class="font-mono" />
             </div>
 
-            <div v-if="authSettings.provider === 'ldap'" class="space-y-2">
+            <div v-if="authSettings.ldapEnabled" class="space-y-2">
               <Label>Freigegebene Gruppen</Label>
 
               <div class="flex gap-2">
@@ -822,33 +874,12 @@ onMounted(load);
                 </Button>
               </div>
 
-              <div
-                v-if="groupRows.length === 0"
-                class="text-muted-foreground rounded-md border border-dashed p-3 text-sm"
-              >
-                Noch keine Gruppen geladen. Suchbegriff eingeben und „Suchen" — oder leer lassen,
-                um die ersten 500 zu sehen.
-              </div>
-
-              <div v-else class="max-h-64 space-y-1 overflow-auto rounded-md border p-2">
-                <div
-                  v-for="group in groupRows"
-                  :key="group.dn"
-                  class="hover:bg-accent/50 flex items-center gap-2 rounded px-1 py-1 text-sm"
-                >
-                  <Checkbox
-                    :id="`grp-${group.dn}`"
-                    :model-value="authSettings.allowedGroups.includes(group.dn)"
-                    @update:model-value="toggleGroup(group.dn, $event === true)"
-                  />
-                  <label :for="`grp-${group.dn}`" class="cursor-pointer truncate" :title="group.dn">
-                    {{ group.name }}
-                    <span v-if="group.accountName" class="text-muted-foreground text-xs">
-                      ({{ group.accountName }})
-                    </span>
-                  </label>
-                </div>
-              </div>
+              <GroupPicker
+                v-model="authSettings.allowedGroups"
+                :groups="groupRows"
+                :loading="loadingGroups"
+                empty-hint="Noch keine Gruppen geladen. Suchbegriff eingeben und „Suchen“ — oder leer lassen, um die ersten 500 zu sehen."
+              />
 
               <p class="text-muted-foreground text-xs">
                 <template v-if="authSettings.allowedGroups.length === 0">
@@ -863,20 +894,7 @@ onMounted(load);
               </p>
             </div>
 
-            <div class="space-y-1.5">
-              <div class="flex items-center gap-2">
-                <Switch id="fallback" v-model="authSettings.allowLocalFallback" />
-                <Label for="fallback" class="font-normal">
-                  Lokale Anmeldung weiterhin zulassen
-                </Label>
-              </div>
-              <p class="text-muted-foreground text-xs">
-                Dringend empfohlen. Ohne diesen Weg sperrt ein ausgefallener Domänencontroller oder
-                eine falsche Vorlage jeden aus — genau dann, wenn man hineinsehen will.
-              </p>
-            </div>
-
-            <Alert v-if="authSettings.provider === 'ldap' && !ad.configured" class="border-warning/50">
+            <Alert v-if="authSettings.ldapEnabled && !ad.configured" class="border-warning/50">
               <AlertDescription>
                 Es ist kein Verzeichnis konfiguriert. Die LDAP-Anmeldung kann so nicht
                 funktionieren.

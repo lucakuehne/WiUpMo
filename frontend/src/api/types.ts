@@ -364,11 +364,12 @@ export interface AdGroup {
 }
 
 export interface AuthSettings {
-  provider: 'local' | 'ldap';
+  /** Die beiden Wege sind unabhängig; mindestens einer muss offen bleiben. */
+  localEnabled: boolean;
+  ldapEnabled: boolean;
   userDnTemplate: string;
   /** Leer bedeutet: keine Einschränkung. */
   allowedGroups: string[];
-  allowLocalFallback: boolean;
 }
 
 export interface RetentionResult {

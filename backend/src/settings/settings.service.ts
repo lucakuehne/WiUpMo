@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -13,6 +13,7 @@ import {
   DEFAULT_AUTH,
   DEFAULT_RETENTION,
   DEFAULT_THRESHOLDS,
+  migrateAuthSettings,
   RetentionSettings,
   SETTING_KEYS,
   ThresholdSettings,
@@ -64,12 +65,21 @@ export class SettingsService implements OnModuleInit {
   }
 
   async getAuth(): Promise<AuthSettings> {
-    return this.read(SETTING_KEYS.auth, DEFAULT_AUTH);
+    return migrateAuthSettings(await this.read(SETTING_KEYS.auth, DEFAULT_AUTH));
   }
 
   async updateAuth(patch: Partial<AuthSettings>): Promise<AuthSettings> {
     const next = { ...(await this.getAuth()), ...patch };
-    await this.write(SETTING_KEYS.auth, next, 'Anmeldeweg fuer das Frontend.');
+
+    // Beide Wege abzuschalten wuerde jeden aussperren, ohne Weg zurueck ueber
+    // die Oberflaeche. Das darf die Anwendung nicht zulassen.
+    if (!next.localEnabled && !next.ldapEnabled) {
+      throw new BadRequestException(
+        'Mindestens ein Anmeldeweg muss aktiv bleiben — sonst kommt niemand mehr herein.',
+      );
+    }
+
+    await this.write(SETTING_KEYS.auth, next, 'Anmeldewege fuer das Frontend.');
     return next;
   }
 

@@ -56,8 +56,12 @@ export class AuthService implements OnModuleInit {
     }
   }
 
+  /** Fuer die Anzeige im Frontend: welche Wege gerade offen sind. */
   async providerName(): Promise<string> {
-    return (await this.settingsService.getAuth()).provider;
+    const auth = await this.settingsService.getAuth();
+    return [auth.ldapEnabled ? 'ldap' : null, auth.localEnabled ? 'local' : null]
+      .filter(Boolean)
+      .join('+');
   }
 
   async isSetupRequired(): Promise<boolean> {

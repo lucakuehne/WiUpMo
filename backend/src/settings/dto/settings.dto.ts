@@ -38,9 +38,13 @@ export class AgentSettingsViewDto {
 }
 
 export class AuthSettingsDto {
-  @IsIn(['local', 'ldap'])
+  @IsBoolean()
   @IsOptional()
-  provider?: 'local' | 'ldap';
+  localEnabled?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  ldapEnabled?: boolean;
 
   /**
    * Muss `{username}` enthalten — ohne den Platzhalter wuerde jede Anmeldung
@@ -59,16 +63,13 @@ export class AuthSettingsDto {
   @IsOptional()
   allowedGroups?: string[];
 
-  @IsBoolean()
-  @IsOptional()
-  allowLocalFallback?: boolean;
 }
 
 export class AuthSettingsViewDto {
-  provider: 'local' | 'ldap';
+  localEnabled: boolean;
+  ldapEnabled: boolean;
   userDnTemplate: string;
   allowedGroups: string[];
-  allowLocalFallback: boolean;
 }
 
 export class AdSettingsDto {

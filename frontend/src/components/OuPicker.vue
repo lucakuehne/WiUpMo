@@ -104,26 +104,50 @@ const rows = computed<Row[]>(() => {
   return result;
 });
 
+function isDescendantOf(dn: string, ancestor: string): boolean {
+  return dn.toLowerCase().endsWith(`,${ancestor.toLowerCase()}`);
+}
+
 /** Deckt eine gewählte übergeordnete Auswahl diesen Knoten bereits ab? */
 function coveredByParent(dn: string): boolean {
-  return props.modelValue.some(
-    (selected) => selected !== dn && dn.toLowerCase().endsWith(`,${selected.toLowerCase()}`),
-  );
+  return props.modelValue.some((selected) => selected !== dn && isDescendantOf(dn, selected));
 }
 
-function isChecked(dn: string): boolean {
-  return props.modelValue.includes(dn);
+/** Wie viele Einträge unterhalb dieses Knotens sind einzeln gewählt? */
+function selectedBelow(dn: string): number {
+  return props.modelValue.filter((selected) => isDescendantOf(selected, dn)).length;
 }
 
+/**
+ * Drei Zustände statt zwei.
+ *
+ * `indeterminate` heisst hier: Der Knoten selbst ist nicht gewählt, aber
+ * darunter liegt eine Auswahl. Ohne diesen Zustand sähe ein eingeklappter
+ * Ast leer aus, obwohl darin etwas ausgewählt ist — und man würde ihn
+ * versehentlich ganz ankreuzen und damit die feinere Auswahl überschreiben.
+ */
+function nodeState(dn: string): boolean | 'indeterminate' {
+  if (props.modelValue.includes(dn)) {
+    return true;
+  }
+  return selectedBelow(dn) > 0 ? 'indeterminate' : false;
+}
+
+/**
+ * Ein Klick auf einen teilweise gewählten Knoten wählt den ganzen Ast — das
+ * ist die übliche Erwartung und zugleich die einzige sinnvolle Deutung: Ein
+ * zweiter Klick nimmt ihn wieder ganz heraus.
+ */
 function toggle(dn: string, checked: boolean): void {
   if (checked) {
     // Untergeordnete Auswahlen fallen weg — sie wären ab jetzt redundant.
-    const kept = props.modelValue.filter(
-      (selected) => !selected.toLowerCase().endsWith(`,${dn.toLowerCase()}`),
-    );
+    const kept = props.modelValue.filter((selected) => !isDescendantOf(selected, dn));
     emit('update:modelValue', [...kept, dn]);
   } else {
-    emit('update:modelValue', props.modelValue.filter((selected) => selected !== dn));
+    emit(
+      'update:modelValue',
+      props.modelValue.filter((selected) => selected !== dn),
+    );
   }
 }
 
@@ -137,12 +161,27 @@ function toggleCollapse(dn: string): void {
   collapsed.value = next;
 }
 
-// Bei einer frisch geladenen Struktur alles ausser der Wurzel einklappen —
-// ein Verzeichnis mit hundert Einheiten wäre sonst unlesbar.
+/**
+ * Bei einer frisch geladenen Struktur alles ausser der Wurzel einklappen — ein
+ * Verzeichnis mit hundert Einheiten wäre sonst unlesbar.
+ *
+ * Ausgenommen sind die Pfade zu bereits gewählten Einträgen: Eine bestehende
+ * Auswahl soll man sehen, ohne sie erst suchen zu müssen.
+ */
 watch(
   () => props.units,
   (units) => {
-    collapsed.value = new Set(units.filter((unit) => unit.depth >= 1).map((unit) => unit.dn));
+    const next = new Set(units.filter((unit) => unit.depth >= 1).map((unit) => unit.dn));
+
+    for (const selected of props.modelValue) {
+      for (const unit of units) {
+        if (isDescendantOf(selected, unit.dn)) {
+          next.delete(unit.dn);
+        }
+      }
+    }
+
+    collapsed.value = next;
   },
 );
 </script>
@@ -183,7 +222,7 @@ watch(
 
         <Checkbox
           :id="`ou-${row.dn}`"
-          :model-value="isChecked(row.dn)"
+          :model-value="nodeState(row.dn)"
           :disabled="coveredByParent(row.dn)"
           @update:model-value="toggle(row.dn, $event === true)"
         />
@@ -196,6 +235,12 @@ watch(
         >
           {{ row.label }}
           <span v-if="coveredByParent(row.dn)" class="text-xs">(bereits abgedeckt)</span>
+          <span
+            v-else-if="nodeState(row.dn) === 'indeterminate'"
+            class="text-muted-foreground text-xs"
+          >
+            ({{ selectedBelow(row.dn) }} darunter gewählt)
+          </span>
         </label>
       </div>
     </div>

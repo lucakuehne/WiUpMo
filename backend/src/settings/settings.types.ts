@@ -15,7 +15,17 @@ export const SETTING_KEYS = {
 export type AuthProviderName = 'local' | 'ldap';
 
 export interface AuthSettings {
-  provider: AuthProviderName;
+  /**
+   * Die Anmeldewege sind einzeln schaltbar und schliessen sich nicht aus.
+   *
+   * Das ersetzt die frueheren Felder `provider` und `allowLocalFallback`: Ein
+   * "Weg plus Ausnahme" beschrieb denselben Sachverhalt umstaendlicher, und
+   * die Ausnahme war in Wahrheit ein zweiter gleichwertiger Weg. Beim Anmelden
+   * wird zuerst das Verzeichnis gefragt, danach die lokale Tabelle.
+   */
+  localEnabled: boolean;
+
+  ldapEnabled: boolean;
 
   /**
    * Vorlage fuer den Bind-Namen, `{username}` wird ersetzt. Fuer ein Active
@@ -34,24 +44,44 @@ export interface AuthSettings {
    * Berechtigungen fast immer ueber Gruppenketten vergeben sind.
    */
   allowedGroups: string[];
-
-  /**
-   * Laesst lokale Benutzer auch im LDAP-Betrieb herein.
-   *
-   * Standardmaessig an, und das ist wichtig: Ohne diesen Weg sperrt ein
-   * ausgefallener Domaenencontroller oder eine falsch gesetzte Vorlage jeden
-   * aus dem System aus — ausgerechnet in dem Moment, in dem man hineinsehen
-   * moechte.
-   */
-  allowLocalFallback: boolean;
 }
 
 export const DEFAULT_AUTH: AuthSettings = {
-  provider: 'local',
+  localEnabled: true,
+  ldapEnabled: false,
   userDnTemplate: '{username}',
   allowedGroups: [],
-  allowLocalFallback: true,
 };
+
+/** Die abgeloeste Form, wie sie in bestehenden Installationen gespeichert ist. */
+interface LegacyAuthSettings {
+  provider?: AuthProviderName;
+  allowLocalFallback?: boolean;
+}
+
+/**
+ * Uebersetzt eine gespeicherte Konfiguration in die aktuelle Form.
+ *
+ * Eine Migration in der Datenbank waere hier der schwerere Weg: Es geht um
+ * einen einzigen jsonb-Wert, und die Umrechnung ist eindeutig. Beim naechsten
+ * Speichern verschwindet die alte Form von selbst.
+ */
+export function migrateAuthSettings(raw: AuthSettings & LegacyAuthSettings): AuthSettings {
+  const { localEnabled, ldapEnabled, userDnTemplate, allowedGroups } = raw;
+
+  if (raw.provider === undefined) {
+    return { localEnabled, ldapEnabled, userDnTemplate, allowedGroups };
+  }
+
+  return {
+    ldapEnabled: raw.provider === 'ldap',
+    // Im lokalen Betrieb war die lokale Anmeldung immer offen; im
+    // LDAP-Betrieb entschied der Rueckfallschalter, der standardmaessig an war.
+    localEnabled: raw.provider === 'local' || raw.allowLocalFallback !== false,
+    userDnTemplate,
+    allowedGroups,
+  };
+}
 
 export interface AgentSettings {
   /**

@@ -38,31 +38,34 @@ export class ProviderSelector implements AuthProvider {
 
   async validateCredentials(username: string, password: string): Promise<AuthenticatedUser | null> {
     const auth = await this.settings.getAuth();
-    this.lastResolved = auth.provider;
 
-    if (auth.provider !== 'ldap') {
+    this.lastResolved = [auth.ldapEnabled ? 'ldap' : null, auth.localEnabled ? 'local' : null]
+      .filter(Boolean)
+      .join('+');
+
+    // Das Verzeichnis zuerst: Ist ein Konto dort bekannt, soll dessen Zustand
+    // gelten — auch wenn zufaellig ein gleichnamiges lokales Konto existiert.
+    if (auth.ldapEnabled) {
+      try {
+        const user = await this.ldap.validateCredentials(username, password);
+        if (user) {
+          return user;
+        }
+      } catch (error) {
+        if (error instanceof LdapAccountDisabledError || error instanceof LdapNotAuthorizedError) {
+          // Ausdrueckliche Ablehnung — gesperrtes Konto oder fehlende
+          // Gruppenzugehoerigkeit. Nicht ueber den lokalen Weg umgehbar, sonst
+          // waere die Beschraenkung wirkungslos.
+          return null;
+        }
+        this.logger.warn(`LDAP-Anmeldung nicht moeglich: ${String(error)}`);
+      }
+    }
+
+    if (auth.localEnabled) {
       return this.local.validateCredentials(username, password);
     }
 
-    try {
-      const user = await this.ldap.validateCredentials(username, password);
-      if (user) {
-        return user;
-      }
-    } catch (error) {
-      if (error instanceof LdapAccountDisabledError || error instanceof LdapNotAuthorizedError) {
-        // Ausdrueckliche Ablehnung — gesperrtes Konto oder fehlende
-        // Gruppenzugehoerigkeit. Nicht ueber den lokalen Weg umgehbar, sonst
-        // waere die Beschraenkung wirkungslos.
-        return null;
-      }
-      this.logger.warn(`LDAP-Anmeldung nicht moeglich: ${String(error)}`);
-    }
-
-    if (!auth.allowLocalFallback) {
-      return null;
-    }
-
-    return this.local.validateCredentials(username, password);
+    return null;
   }
 }
