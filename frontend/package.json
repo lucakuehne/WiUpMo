@@ -7,7 +7,8 @@
   "license": "UNLICENSED",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --build && vite build",
+    "//build": "--force, weil vue-tsc sonst inkrementell arbeitet und Dateien ueberspringt, die es fuer unveraendert haelt. Der Container prueft immer vollstaendig; ohne --force faellt lokal durch, was dort scheitert.",
+    "build": "vue-tsc --build --force && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --build"
   },
