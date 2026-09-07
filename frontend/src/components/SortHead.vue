@@ -42,5 +42,9 @@ function onClick(): void {
       <ArrowDown v-else-if="isActive" class="size-3.5" />
       <ChevronsUpDown v-else class="size-3.5 opacity-40" />
     </button>
+
+    <!-- Ausserhalb des Knopfes: Was hier steht, soll anklickbar sein, ohne
+         dabei die Sortierung umzustellen. -->
+    <span v-if="$slots.after" class="ml-1 inline-flex align-middle"><slot name="after" /></span>
   </TableHead>
 </template>

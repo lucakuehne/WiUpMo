@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/table';
 import OuNavigator from '@/components/OuNavigator.vue';
 import SortHead from '@/components/SortHead.vue';
+import SourceLegend from '@/components/SourceLegend.vue';
 import TablePager from '@/components/TablePager.vue';
 import { formatDnPath } from '@/dn';
 import { UPDATE_SOURCE_LABELS, formatDateTime, formatRelative, sourceBadgeClass } from '@/format';
@@ -311,17 +312,20 @@ onMounted(() => {
         </SelectContent>
       </Select>
 
-      <Select :model-value="updateSource ?? ''" @update:model-value="onSourceChange">
-        <SelectTrigger class="w-48">
-          <SelectValue placeholder="Update-Quelle" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem :value="ANY">Alle Quellen</SelectItem>
-          <SelectItem v-for="option in sourceOptions" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </SelectItem>
-        </SelectContent>
-      </Select>
+      <div class="flex items-center gap-1">
+        <Select :model-value="updateSource ?? ''" @update:model-value="onSourceChange">
+          <SelectTrigger class="w-48">
+            <SelectValue placeholder="Update-Quelle" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem :value="ANY">Alle Quellen</SelectItem>
+            <SelectItem v-for="option in sourceOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <SourceLegend />
+      </div>
 
       <Select
         :model-value="staleDays === null ? '' : String(staleDays)"
@@ -402,6 +406,7 @@ onMounted(() => {
                 </SortHead>
                 <SortHead field="updateSource" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
                   Quelle
+                  <template #after><SourceLegend /></template>
                 </SortHead>
                 <SortHead
                   field="openUpdates"

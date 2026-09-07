@@ -24,6 +24,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import SourceLegend from '@/components/SourceLegend.vue';
 import TablePager from '@/components/TablePager.vue';
 import { formatDnPath } from '@/dn';
 import {
@@ -157,13 +158,12 @@ onMounted(load);
 
           <div class="flex flex-wrap items-center gap-2">
             <Badge v-if="device.status === 'archived'" variant="secondary">archiviert</Badge>
-            <Badge
-              v-if="latestCheckin"
-              variant="outline"
-              :class="sourceBadgeClass(latestCheckin.updateSource)"
-            >
-              {{ UPDATE_SOURCE_LABELS[latestCheckin.updateSource] }}
-            </Badge>
+            <span v-if="latestCheckin" class="flex items-center gap-1">
+              <Badge variant="outline" :class="sourceBadgeClass(latestCheckin.updateSource)">
+                {{ UPDATE_SOURCE_LABELS[latestCheckin.updateSource] }}
+              </Badge>
+              <SourceLegend />
+            </span>
             <Badge v-if="latestCheckin?.pendingReboot" variant="outline" class="border-warning/40 text-warning-foreground dark:text-warning">
               <AlertTriangle class="size-3" />
               Neustart ausstehend
@@ -383,7 +383,9 @@ onMounted(load);
                 <TableRow>
                   <TableHead>Erfasst</TableHead>
                   <TableHead>Eingegangen</TableHead>
-                  <TableHead>Quelle</TableHead>
+                  <TableHead>
+                    <span class="inline-flex items-center gap-1">Quelle <SourceLegend /></span>
+                  </TableHead>
                   <TableHead>WSUS-Server</TableHead>
                   <TableHead class="w-24">Agent</TableHead>
                 </TableRow>

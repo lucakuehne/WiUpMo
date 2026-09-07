@@ -25,6 +25,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import SourceLegend from '@/components/SourceLegend.vue';
 import TablePager from '@/components/TablePager.vue';
 import { formatDnPath } from '@/dn';
 import {
@@ -247,7 +248,9 @@ onMounted(load);
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Quelle</TableHead>
+                  <TableHead>
+                    <span class="inline-flex items-center gap-1">Quelle <SourceLegend /></span>
+                  </TableHead>
                   <TableHead class="w-24 text-right">Geräte</TableHead>
                   <TableHead class="w-24 text-right">Median</TableHead>
                 </TableRow>
@@ -274,7 +277,9 @@ onMounted(load);
                 <TableHeader>
                   <TableRow>
                     <TableHead>Gerät</TableHead>
-                    <TableHead>von → nach</TableHead>
+                    <TableHead>
+                      <span class="inline-flex items-center gap-1">von → nach <SourceLegend /></span>
+                    </TableHead>
                     <TableHead class="w-40">Wann</TableHead>
                   </TableRow>
                 </TableHeader>

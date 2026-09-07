@@ -7,6 +7,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChartCanvas from '@/components/ChartCanvas.vue';
+import SourceLegend from '@/components/SourceLegend.vue';
 import { baseOptions, palette } from '@/chart';
 import { UPDATE_SOURCE_LABELS } from '@/format';
 
@@ -228,7 +229,10 @@ onMounted(load);
 
       <Card>
         <CardHeader>
-          <CardTitle>Update-Quellen</CardTitle>
+          <CardTitle class="flex items-center gap-1.5">
+            Update-Quellen
+            <SourceLegend />
+          </CardTitle>
           <CardDescription>Geräte je Quelle — der Stand der WSUS-Ablösung.</CardDescription>
         </CardHeader>
         <CardContent>
