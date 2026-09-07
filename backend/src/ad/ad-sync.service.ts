@@ -3,7 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { AdSyncStatus, AdSyncTrigger, DeviceStatus } from '../database/enums.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { isAdConfigured } from '../settings/settings.types.js';
+import { effectiveSearchBases, isAdConfigured } from '../settings/settings.types.js';
 import { AdComputer, LdapClient } from './ldap.client.js';
 
 export interface AdSyncResult {
@@ -16,7 +16,18 @@ export interface AdSyncResult {
   error: string | null;
 }
 
-const ARCHIVE_REASON = 'Im Active Directory nicht mehr vorhanden.';
+/**
+ * Zwei Gruende, weil dahinter zwei verschiedene Sachverhalte stehen.
+ *
+ * Ein Konto, das im Verzeichnis geloescht wurde, ist ausgemustert. Ein Konto,
+ * das nur nicht mehr in den abgeglichenen Bereichen liegt, existiert weiterhin
+ * — es wurde verschoben oder eine Organisationseinheit wurde aus den
+ * Einstellungen genommen. Wer die Geraeteliste liest, soll das auseinander
+ * halten koennen, ohne im AD nachzusehen.
+ */
+const ARCHIVE_REASON_GONE = 'Im Active Directory nicht mehr vorhanden.';
+const ARCHIVE_REASON_OUT_OF_SCOPE =
+  'Liegt nicht mehr in den abgeglichenen Bereichen des Verzeichnisses.';
 
 @Injectable()
 export class AdSyncService {
@@ -69,7 +80,7 @@ export class AdSyncService {
         );
       }
 
-      const result = await this.apply(computers);
+      const result = await this.apply(computers, effectiveSearchBases(config));
 
       await this.finishRun(runId, AdSyncStatus.Success, result, null);
 
@@ -113,7 +124,10 @@ export class AdSyncService {
    * nach dem Einlesen und vor dem Archivieren ab, bliebe ein halber Stand
    * zurueck — und beim naechsten Lauf saehe alles richtig aus.
    */
-  private async apply(computers: AdComputer[]): Promise<Omit<AdSyncResult, 'id' | 'status' | 'error'>> {
+  private async apply(
+    computers: AdComputer[],
+    searchBases: string[],
+  ): Promise<Omit<AdSyncResult, 'id' | 'status' | 'error'>> {
     return this.dataSource.transaction(async (manager) => {
       let created = 0;
       let reactivated = 0;
@@ -124,7 +138,7 @@ export class AdSyncService {
         if (outcome === 'reactivated') reactivated++;
       }
 
-      const archived = await this.archiveMissing(manager, computers);
+      const archived = await this.archiveMissing(manager, computers, searchBases);
 
       return {
         devicesFound: computers.length,
@@ -220,21 +234,43 @@ export class AdSyncService {
    *
    * Geloescht wird nie. Die Historie eines ausgemusterten Geraets bleibt
    * auswertbar.
+   *
+   * Hierher faellt auch, wessen Organisationseinheit aus den Einstellungen
+   * genommen wurde: Das Konto steht dann nicht mehr in der gelesenen Liste. Der
+   * Vergleich des gespeicherten DN mit den abgeglichenen Bereichen unterscheidet
+   * diesen Fall vom geloeschten Konto — er dient nur dem Grund, nicht der
+   * Auswahl.
    */
-  private async archiveMissing(manager: EntityManager, computers: AdComputer[]): Promise<number> {
+  private async archiveMissing(
+    manager: EntityManager,
+    computers: AdComputer[],
+    searchBases: string[],
+  ): Promise<number> {
     const guids = computers.map((c) => c.objectGuid);
 
     const result: Array<{ id: string }> = await manager.query(
-      `UPDATE devices SET
+      `UPDATE devices d SET
          status          = 'archived',
          archived_at     = now(),
-         archived_reason = $2,
+         archived_reason = CASE
+           WHEN d.ad_dn IS NOT NULL
+            AND coalesce(array_length($4::text[], 1), 0) > 0
+            AND NOT EXISTS (
+              SELECT 1 FROM unnest($4::text[]) AS base
+               -- Suffixvergleich statt LIKE: In einem DN koennen '%' und '_'
+               -- vorkommen, und ein Muster muesste sie erst maskieren.
+               WHERE lower(d.ad_dn) = lower(base)
+                  OR lower(right(d.ad_dn, length(base) + 1)) = lower(',' || base)
+            )
+           THEN $3
+           ELSE $2
+         END,
          updated_at      = now()
        WHERE ad_object_guid IS NOT NULL
          AND status = 'active'
          AND NOT (ad_object_guid = ANY($1::uuid[]))
        RETURNING id`,
-      [guids, ARCHIVE_REASON],
+      [guids, ARCHIVE_REASON_GONE, ARCHIVE_REASON_OUT_OF_SCOPE, searchBases],
     );
 
     return result.length;

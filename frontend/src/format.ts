@@ -123,6 +123,19 @@ export function stateBadgeClass(state: UpdateState): string {
   }
 }
 
+export function eventBadgeClass(type: UpdateEventType): string {
+  switch (type) {
+    case 'installed':
+      return 'bg-success/15 text-success border-success/30';
+    case 'failed':
+      return 'bg-destructive/15 text-destructive border-destructive/30';
+    case 'appeared':
+      return 'bg-warning/15 text-warning-foreground border-warning/40 dark:text-warning';
+    default:
+      return 'bg-muted text-muted-foreground border-transparent';
+  }
+}
+
 type Severity = 'success' | 'info' | 'warn' | 'danger' | 'secondary';
 
 export function stateSeverity(state: UpdateState): Severity {

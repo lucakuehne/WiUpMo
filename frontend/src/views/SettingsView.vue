@@ -236,6 +236,13 @@ async function save(
     if (section === 'ad') {
       Object.assign(ad, result as AdSettingsView);
       bindPassword.value = '';
+
+      toast.success('Gespeichert.', {
+        description:
+          'Ein geänderter Suchbereich löst sofort einen Abgleich aus. Geräte, die nicht mehr ' +
+          'darin liegen, werden dabei archiviert.',
+      });
+      return;
     }
 
     toast.success('Gespeichert.');

@@ -3,7 +3,7 @@ import { AlertTriangle, Download, RotateCcw, Search } from '@lucide/vue';
 import { onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { get } from '@/api/client';
-import type { DeviceListItem, Paged, UpdateSource } from '@/api/types';
+import type { DeviceListItem, DeviceStatus, Paged, UpdateSource } from '@/api/types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -43,11 +43,27 @@ const sortBy = ref('hostname');
 const sortDir = ref<'asc' | 'desc'>('asc');
 
 const search = ref('');
+
+/**
+ * Archivierte Geräte sind standardmässig ausgeblendet.
+ *
+ * Der Server filtert bewusst nicht von sich aus — für die Schnittstelle ist
+ * „alle Geräte" die richtige Vorgabe. In der Liste ist es die falsche: Wer eine
+ * Organisationseinheit aus dem Abgleich nimmt, sieht deren Geräte sonst
+ * unverändert weiter, obwohl sie längst archiviert sind.
+ */
+const status = ref<DeviceStatus | 'all'>('active');
 const updateSource = ref<UpdateSource | null>(null);
 const staleDays = ref<number | null>(null);
 const hasOpenSecurity = ref(false);
-const pendingReboot = ref(false);
-const withoutAgent = ref(false);
+
+/**
+ * Dreiwertig: `null` schränkt nicht ein, `true`/`false` fragen jeweils eine
+ * Seite ab. Beide Richtungen werden gebraucht — „welche Geräte haben den Agent
+ * noch nicht" ist die Deployment-Lücke, „welche haben ihn" die Gegenprobe.
+ */
+const pendingReboot = ref<boolean | null>(null);
+const hasAgent = ref<boolean | null>(null);
 
 const sourceOptions = (Object.keys(UPDATE_SOURCE_LABELS) as UpdateSource[]).map((value) => ({
   value,
@@ -76,8 +92,28 @@ function onSourceChange(value: unknown): void {
   onFilterChange();
 }
 
+function onStatusChange(value: unknown): void {
+  status.value = (value as DeviceStatus | 'all') || 'active';
+  onFilterChange();
+}
+
 function onStaleChange(value: unknown): void {
   staleDays.value = value === ANY || !value ? null : Number(value);
+  onFilterChange();
+}
+
+/**
+ * Wie bei den Umschaltern über den Namen statt über die Referenz — in der
+ * Vorlage werden Refs entpackt und liessen sich nicht mehr setzen.
+ */
+const triFilters = { pendingReboot, hasAgent };
+
+function triValue(value: boolean | null): string {
+  return value === null ? ANY : String(value);
+}
+
+function onTriChange(name: keyof typeof triFilters, value: unknown): void {
+  triFilters[name].value = value === ANY || !value ? null : value === 'true';
   onFilterChange();
 }
 
@@ -94,11 +130,13 @@ async function load(): Promise<void> {
       sortBy: sortBy.value,
       sortDir: sortDir.value,
       search: search.value || undefined,
+      status: status.value === 'all' ? undefined : status.value,
       updateSource: updateSource.value ?? undefined,
       staleDays: staleDays.value ?? undefined,
       hasOpenSecurity: hasOpenSecurity.value || undefined,
-      pendingReboot: pendingReboot.value || undefined,
-      withoutAgent: withoutAgent.value || undefined,
+      // Hier bewusst `??` statt `||`: `false` ist ein Filter, kein leerer Wert.
+      pendingReboot: pendingReboot.value ?? undefined,
+      hasAgent: hasAgent.value ?? undefined,
     });
 
     rows.value = result.items;
@@ -135,7 +173,7 @@ function onSearchInput(): void {
  * Refs automatisch entpackt, ein übergebener Ref käme dort als Wahrheitswert
  * an und liesse sich nicht mehr setzen.
  */
-const booleanFilters = { hasOpenSecurity, pendingReboot, withoutAgent };
+const booleanFilters = { hasOpenSecurity };
 
 function toggleFilter(name: keyof typeof booleanFilters): void {
   booleanFilters[name].value = !booleanFilters[name].value;
@@ -144,11 +182,12 @@ function toggleFilter(name: keyof typeof booleanFilters): void {
 
 function resetFilters(): void {
   search.value = '';
+  status.value = 'active';
   updateSource.value = null;
   staleDays.value = null;
   hasOpenSecurity.value = false;
-  pendingReboot.value = false;
-  withoutAgent.value = false;
+  pendingReboot.value = null;
+  hasAgent.value = null;
   onFilterChange();
 }
 
@@ -171,8 +210,8 @@ function exportCsv(): void {
     updateSource: updateSource.value ?? undefined,
     staleDays: staleDays.value ?? undefined,
     hasOpenSecurity: hasOpenSecurity.value || undefined,
-    pendingReboot: pendingReboot.value || undefined,
-    withoutAgent: withoutAgent.value || undefined,
+    pendingReboot: pendingReboot.value ?? undefined,
+    hasAgent: hasAgent.value ?? undefined,
   };
 
   for (const [key, value] of Object.entries(filters)) {
@@ -188,6 +227,9 @@ function exportCsv(): void {
 function applyQueryFilters(): void {
   const query = route.query;
 
+  if (query.status === 'archived' || query.status === 'all') {
+    status.value = query.status;
+  }
   if (typeof query.staleDays === 'string') {
     staleDays.value = Number(query.staleDays);
   }
@@ -197,8 +239,8 @@ function applyQueryFilters(): void {
   if (query.pendingReboot === '1') {
     pendingReboot.value = true;
   }
-  if (query.withoutAgent === '1') {
-    withoutAgent.value = true;
+  if (query.hasAgent === '0') {
+    hasAgent.value = false;
   }
 }
 
@@ -225,6 +267,15 @@ onMounted(() => {
           @input="onSearchInput"
         />
       </div>
+
+      <Select :model-value="status" @update:model-value="onStatusChange">
+        <SelectTrigger class="w-40"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="active">Aktiv</SelectItem>
+          <SelectItem value="archived">Archiviert</SelectItem>
+          <SelectItem value="all">Aktiv und archiviert</SelectItem>
+        </SelectContent>
+      </Select>
 
       <Select :model-value="updateSource ?? ''" @update:model-value="onSourceChange">
         <SelectTrigger class="w-48">
@@ -261,21 +312,26 @@ onMounted(() => {
         Sicherheitsupdates offen
       </Button>
 
-      <Button
-        :variant="pendingReboot ? 'default' : 'outline'"
-        size="sm"
-        @click="toggleFilter('pendingReboot')"
+      <Select
+        :model-value="triValue(pendingReboot)"
+        @update:model-value="onTriChange('pendingReboot', $event)"
       >
-        Neustart ausstehend
-      </Button>
+        <SelectTrigger class="w-52"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem :value="ANY">Neustart: egal</SelectItem>
+          <SelectItem value="true">Neustart ausstehend</SelectItem>
+          <SelectItem value="false">Kein Neustart ausstehend</SelectItem>
+        </SelectContent>
+      </Select>
 
-      <Button
-        :variant="withoutAgent ? 'default' : 'outline'"
-        size="sm"
-        @click="toggleFilter('withoutAgent')"
-      >
-        Ohne Agent
-      </Button>
+      <Select :model-value="triValue(hasAgent)" @update:model-value="onTriChange('hasAgent', $event)">
+        <SelectTrigger class="w-44"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem :value="ANY">Agent: egal</SelectItem>
+          <SelectItem value="true">Mit Agent</SelectItem>
+          <SelectItem value="false">Ohne Agent</SelectItem>
+        </SelectContent>
+      </Select>
 
       <Button variant="ghost" size="sm" @click="resetFilters">
         <RotateCcw class="size-4" />
@@ -349,7 +405,10 @@ onMounted(() => {
             @click="openDevice(row.id)"
           >
             <TableCell>
-              <div class="font-medium">{{ row.hostname }}</div>
+              <div class="flex items-center gap-2">
+                <span class="font-medium">{{ row.hostname }}</span>
+                <Badge v-if="row.status === 'archived'" variant="secondary">archiviert</Badge>
+              </div>
               <!-- Der Pfad statt des DN; der vollständige Wert bleibt als
                    Hinweistext erreichbar. -->
               <div v-if="row.adOu" class="text-muted-foreground truncate text-xs" :title="row.adOu">

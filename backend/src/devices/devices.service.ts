@@ -216,8 +216,8 @@ export class DevicesService {
       conditions.push('coalesce(o.open_security_updates, 0) > 0');
     }
 
-    if (query.withoutAgent) {
-      conditions.push('d.enrolled_at IS NULL');
+    if (query.hasAgent !== undefined) {
+      conditions.push(query.hasAgent ? 'd.enrolled_at IS NOT NULL' : 'd.enrolled_at IS NULL');
     }
 
     return conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';

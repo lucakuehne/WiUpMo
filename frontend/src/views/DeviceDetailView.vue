@@ -1,37 +1,42 @@
 <script setup lang="ts">
-import Button from 'primevue/button';
-import Card from 'primevue/card';
-import Column from 'primevue/column';
-import DataTable from 'primevue/datatable';
-import Message from 'primevue/message';
-import Tab from 'primevue/tab';
-import TabList from 'primevue/tablist';
-import TabPanel from 'primevue/tabpanel';
-import TabPanels from 'primevue/tabpanels';
-import Tabs from 'primevue/tabs';
-import Tag from 'primevue/tag';
-import { onMounted, ref } from 'vue';
+import { AlertTriangle, Archive, ArrowLeft, ArrowUpCircle, Loader2 } from '@lucide/vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { toast } from 'vue-sonner';
 import { get, post } from '@/api/client';
 import type {
   CreateUpdateJobsResult,
-  DeviceCheckin,
   DeviceDetail,
-  DeviceUpdate,
   Timeline,
   TimelineEntry,
 } from '@/api/types';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import TablePager from '@/components/TablePager.vue';
+import { formatDnPath } from '@/dn';
 import {
   EVENT_TYPE_LABELS,
   UPDATE_SOURCE_LABELS,
   UPDATE_STATE_LABELS,
-  eventSeverity,
+  eventBadgeClass,
   formatBytes,
   formatDateTime,
   formatHresult,
   formatRelative,
-  sourceSeverity,
-  stateSeverity,
+  sourceBadgeClass,
+  stateBadgeClass,
 } from '@/format';
 
 const props = defineProps<{ id: string }>();
@@ -43,6 +48,34 @@ const timeline = ref<TimelineEntry[]>([]);
 const timelineTotal = ref(0);
 const loading = ref(true);
 const error = ref<string | null>(null);
+const updating = ref(false);
+
+/**
+ * Beide Listen kommen vollständig vom Server — die eine als aktueller Stand,
+ * die andere gedeckelt auf die letzten hundert Ereignisse. Geblättert wird
+ * deshalb hier im Browser; ein zweiter Endpunkt je Seite wäre Aufwand ohne
+ * Gegenwert.
+ */
+const updatePage = ref(1);
+const updateLimit = ref(25);
+const timelinePage = ref(1);
+const timelineLimit = ref(25);
+
+const pagedUpdates = computed(() =>
+  (device.value?.updates ?? []).slice(
+    (updatePage.value - 1) * updateLimit.value,
+    updatePage.value * updateLimit.value,
+  ),
+);
+
+const pagedTimeline = computed(() =>
+  timeline.value.slice(
+    (timelinePage.value - 1) * timelineLimit.value,
+    timelinePage.value * timelineLimit.value,
+  ),
+);
+
+const latestCheckin = computed(() => device.value?.checkins[0] ?? null);
 
 async function load(): Promise<void> {
   loading.value = true;
@@ -64,9 +97,6 @@ async function load(): Promise<void> {
   }
 }
 
-const updating = ref(false);
-const notice = ref<string | null>(null);
-
 /**
  * Legt einen Auftrag auf die als aktuell markierte Version. Ohne eine solche
  * antwortet das Backend mit einem Konflikt — die Meldung sagt dann, was fehlt.
@@ -74,17 +104,21 @@ const notice = ref<string | null>(null);
 async function requestUpdate(): Promise<void> {
   updating.value = true;
   error.value = null;
-  notice.value = null;
 
   try {
     const result = await post<CreateUpdateJobsResult>('/api/agent-update-jobs', {
       deviceIds: [props.id],
     });
 
-    notice.value =
-      result.created > 0
-        ? `Auftrag auf ${result.targetVersion} angelegt. Das Gerät holt ihn beim nächsten Check-in ab.`
-        : 'Kein Auftrag nötig — das Gerät läuft bereits auf der Zielversion oder hat einen offenen Auftrag.';
+    if (result.created > 0) {
+      toast.success(`Update-Auftrag auf ${result.targetVersion} angelegt.`, {
+        description: 'Das Gerät holt ihn beim nächsten Check-in ab.',
+      });
+    } else {
+      toast.info('Kein Auftrag nötig.', {
+        description: 'Das Gerät läuft bereits auf der Zielversion oder hat einen offenen Auftrag.',
+      });
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Der Auftrag konnte nicht angelegt werden.';
   } finally {
@@ -92,246 +126,293 @@ async function requestUpdate(): Promise<void> {
   }
 }
 
+function kbUrl(article: string): string {
+  return `https://support.microsoft.com/help/${article}`;
+}
+
 onMounted(load);
 </script>
 
 <template>
-  <div class="page">
-    <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
-    <Message v-if="notice" severity="success" :closable="false">{{ notice }}</Message>
+  <div class="mx-auto max-w-[1600px] px-5 py-6">
+    <Alert v-if="error" variant="destructive" class="mb-4">
+      <AlertDescription>{{ error }}</AlertDescription>
+    </Alert>
 
-    <template v-if="device">
-      <div class="page-header">
-        <div>
-          <Button
-            icon="pi pi-arrow-left"
-            label="Geräte"
-            severity="secondary"
-            text
-            size="small"
-            @click="router.push({ name: 'devices' })"
-          />
-          <h1 style="margin-top: 0.5rem">{{ device.hostname }}</h1>
-        </div>
+    <div v-if="loading" class="space-y-4">
+      <Skeleton class="h-8 w-64" />
+      <Skeleton class="h-32 w-full" />
+      <Skeleton class="h-64 w-full" />
+    </div>
 
-        <div style="display: flex; gap: 0.5rem; align-items: center">
-          <Tag v-if="device.status === 'archived'" value="archiviert" severity="secondary" />
-          <Tag
-            v-if="device.checkins[0]"
-            :value="UPDATE_SOURCE_LABELS[device.checkins[0].updateSource]"
-            :severity="sourceSeverity(device.checkins[0].updateSource)"
-          />
-          <Tag
-            v-if="device.checkins[0]?.pendingReboot"
-            value="Neustart ausstehend"
-            severity="warn"
-          />
+    <template v-else-if="device">
+      <div class="mb-4">
+        <Button variant="ghost" size="sm" class="-ml-2" @click="router.push({ name: 'devices' })">
+          <ArrowLeft class="size-4" />
+          Geräte
+        </Button>
+
+        <div class="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <h1 class="text-xl font-semibold">{{ device.hostname }}</h1>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <Badge v-if="device.status === 'archived'" variant="secondary">archiviert</Badge>
+            <Badge
+              v-if="latestCheckin"
+              variant="outline"
+              :class="sourceBadgeClass(latestCheckin.updateSource)"
+            >
+              {{ UPDATE_SOURCE_LABELS[latestCheckin.updateSource] }}
+            </Badge>
+            <Badge v-if="latestCheckin?.pendingReboot" variant="outline" class="border-warning/40 text-warning-foreground dark:text-warning">
+              <AlertTriangle class="size-3" />
+              Neustart ausstehend
+            </Badge>
+          </div>
         </div>
       </div>
 
-      <Card style="margin-bottom: 1rem">
-        <template #content>
-          <dl class="detail-grid">
+      <!-- Der Grund steht hier, weil er in der Liste nur als Abzeichen
+           auftaucht: „archiviert" allein beantwortet nicht, ob das Konto im AD
+           gelöscht wurde oder ob nur seine OU aus dem Abgleich fiel. -->
+      <Alert v-if="device.status === 'archived'" class="mb-4">
+        <Archive class="size-4" />
+        <AlertDescription>
+          {{ device.archivedReason ?? 'Von Hand archiviert.' }}
+          <span v-if="device.archivedAt" class="text-muted-foreground">
+            ({{ formatDateTime(device.archivedAt) }})
+          </span>
+        </AlertDescription>
+      </Alert>
+
+      <Card class="mb-4">
+        <CardContent>
+          <dl class="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
             <div>
-              <dt>Betriebssystem</dt>
+              <dt class="text-muted-foreground text-xs">Betriebssystem</dt>
               <dd>{{ device.osName ?? '—' }}</dd>
             </div>
             <div>
-              <dt>Version / Build</dt>
-              <dd>{{ device.osVersion ?? '—' }} · {{ device.osBuild ?? '—' }}</dd>
+              <dt class="text-muted-foreground text-xs">Version / Build</dt>
+              <dd class="tabular">{{ device.osVersion ?? '—' }} · {{ device.osBuild ?? '—' }}</dd>
             </div>
             <div>
-              <dt>Agent-Version</dt>
-              <dd style="display: flex; align-items: center; gap: 0.5rem">
-                {{ device.agentVersion ?? '—' }}
+              <dt class="text-muted-foreground text-xs">Agent-Version</dt>
+              <dd class="flex items-center gap-2">
+                <span class="tabular">{{ device.agentVersion ?? '—' }}</span>
                 <Button
                   v-if="device.enrolledAt"
-                  label="Aktualisieren"
-                  icon="pi pi-arrow-circle-up"
-                  size="small"
-                  severity="secondary"
-                  outlined
-                  :loading="updating"
+                  variant="outline"
+                  size="sm"
+                  class="h-7"
+                  :disabled="updating"
                   @click="requestUpdate"
-                />
+                >
+                  <Loader2 v-if="updating" class="size-3.5 animate-spin" />
+                  <ArrowUpCircle v-else class="size-3.5" />
+                  Aktualisieren
+                </Button>
               </dd>
             </div>
             <div>
-              <dt>Registriert</dt>
+              <dt class="text-muted-foreground text-xs">Registriert</dt>
               <dd>{{ formatDateTime(device.enrolledAt) }}</dd>
             </div>
             <div>
-              <dt>Letzter Check-in</dt>
+              <dt class="text-muted-foreground text-xs">Letzter Check-in</dt>
               <dd :title="formatDateTime(device.lastSeenAt)">
                 {{ formatRelative(device.lastSeenAt) }}
               </dd>
             </div>
             <div>
-              <dt>Organisationseinheit</dt>
-              <dd>{{ device.adOu ?? '—' }}</dd>
+              <dt class="text-muted-foreground text-xs">Organisationseinheit</dt>
+              <!-- Als Pfad, mit dem vollständigen DN als Hinweistext. -->
+              <dd class="truncate" :title="device.adOu ?? ''">
+                {{ device.adOu ? formatDnPath(device.adOu) : '—' }}
+              </dd>
             </div>
           </dl>
-        </template>
+        </CardContent>
       </Card>
 
-      <Tabs value="updates">
-        <TabList>
-          <Tab value="updates">Updates ({{ device.updates.length }})</Tab>
-          <Tab value="timeline">Verlauf ({{ timelineTotal }})</Tab>
-          <Tab value="checkins">Check-ins ({{ device.checkins.length }})</Tab>
-        </TabList>
+      <Tabs default-value="updates">
+        <TabsList>
+          <TabsTrigger value="updates">Updates ({{ device.updates.length }})</TabsTrigger>
+          <TabsTrigger value="timeline">Verlauf ({{ timelineTotal }})</TabsTrigger>
+          <TabsTrigger value="checkins">Check-ins ({{ device.checkins.length }})</TabsTrigger>
+        </TabsList>
 
-        <TabPanels>
-          <TabPanel value="updates">
-            <DataTable
-              :value="device.updates"
-              :loading="loading"
-              size="small"
-              striped-rows
-              paginator
-              :rows="25"
-              data-key="updateId"
-            >
-              <template #empty>Für dieses Gerät sind keine Updates bekannt.</template>
+        <!-- ===================== Updates ===================== -->
+        <TabsContent value="updates">
+          <div class="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead class="w-28">Status</TableHead>
+                  <TableHead class="w-28">KB</TableHead>
+                  <TableHead>Titel</TableHead>
+                  <TableHead class="w-32">Einstufung</TableHead>
+                  <TableHead class="w-24 text-right">Grösse</TableHead>
+                  <TableHead class="w-40">Offen seit</TableHead>
+                  <TableHead class="w-32">Fehlercode</TableHead>
+                </TableRow>
+              </TableHeader>
 
-              <Column header="Status" style="width: 8rem">
-                <template #body="{ data }">
-                  <Tag
-                    :value="UPDATE_STATE_LABELS[(data as DeviceUpdate).state]"
-                    :severity="stateSeverity((data as DeviceUpdate).state)"
-                  />
-                </template>
-              </Column>
+              <TableBody>
+                <TableRow v-if="device.updates.length === 0">
+                  <TableCell :colspan="7" class="text-muted-foreground py-8 text-center">
+                    Für dieses Gerät sind keine Updates bekannt.
+                  </TableCell>
+                </TableRow>
 
-              <Column field="kbArticle" header="KB" style="width: 8rem">
-                <template #body="{ data }">
-                  <a
-                    v-if="(data as DeviceUpdate).kbArticle"
-                    :href="`https://support.microsoft.com/help/${(data as DeviceUpdate).kbArticle}`"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    KB{{ (data as DeviceUpdate).kbArticle }}
-                  </a>
-                  <span v-else class="muted">—</span>
-                </template>
-              </Column>
+                <TableRow v-for="update in pagedUpdates" :key="update.updateId">
+                  <TableCell>
+                    <Badge variant="outline" :class="stateBadgeClass(update.state)">
+                      {{ UPDATE_STATE_LABELS[update.state] }}
+                    </Badge>
+                  </TableCell>
 
-              <Column field="title" header="Titel">
-                <template #body="{ data }">
-                  <div>{{ (data as DeviceUpdate).title }}</div>
-                  <div class="muted" style="font-size: 0.8rem">
-                    {{ (data as DeviceUpdate).categories.join(', ') }}
-                  </div>
-                </template>
-              </Column>
+                  <TableCell>
+                    <a
+                      v-if="update.kbArticle"
+                      :href="kbUrl(update.kbArticle)"
+                      target="_blank"
+                      rel="noreferrer"
+                      class="text-primary hover:underline"
+                    >
+                      KB{{ update.kbArticle }}
+                    </a>
+                    <span v-else class="text-muted-foreground">—</span>
+                  </TableCell>
 
-              <Column header="Einstufung" style="width: 9rem">
-                <template #body="{ data }">
-                  <Tag
-                    v-if="(data as DeviceUpdate).isSecurity"
-                    :value="(data as DeviceUpdate).severity ?? 'Sicherheit'"
-                    severity="danger"
-                  />
-                  <span v-else class="muted">—</span>
-                </template>
-              </Column>
+                  <TableCell>
+                    <div>{{ update.title }}</div>
+                    <div v-if="update.categories.length" class="text-muted-foreground text-xs">
+                      {{ update.categories.join(', ') }}
+                    </div>
+                  </TableCell>
 
-              <Column header="Grösse" body-class="num" header-class="num" style="width: 7rem">
-                <template #body="{ data }">{{ formatBytes((data as DeviceUpdate).sizeBytes) }}</template>
-              </Column>
+                  <TableCell>
+                    <Badge
+                      v-if="update.isSecurity"
+                      variant="outline"
+                      class="bg-destructive/15 text-destructive border-destructive/30"
+                    >
+                      {{ update.severity ?? 'Sicherheit' }}
+                    </Badge>
+                    <span v-else class="text-muted-foreground">—</span>
+                  </TableCell>
 
-              <Column header="Offen seit" style="width: 11rem">
-                <template #body="{ data }">
-                  {{ formatDateTime((data as DeviceUpdate).firstAvailableAt) }}
-                </template>
-              </Column>
+                  <TableCell class="tabular text-right">
+                    {{ formatBytes(update.sizeBytes) }}
+                  </TableCell>
 
-              <Column header="Fehlercode" style="width: 9rem">
-                <template #body="{ data }">
-                  <code v-if="(data as DeviceUpdate).hresult">
-                    {{ formatHresult((data as DeviceUpdate).hresult) }}
-                  </code>
-                  <span v-else class="muted">—</span>
-                </template>
-              </Column>
-            </DataTable>
-          </TabPanel>
+                  <TableCell>{{ formatDateTime(update.firstAvailableAt) }}</TableCell>
 
-          <TabPanel value="timeline">
-            <DataTable
-              :value="timeline"
-              size="small"
-              striped-rows
-              paginator
-              :rows="25"
-              data-key="id"
-            >
-              <template #empty>Noch keine Ereignisse.</template>
+                  <TableCell>
+                    <code v-if="update.hresult" class="text-xs">
+                      {{ formatHresult(update.hresult) }}
+                    </code>
+                    <span v-else class="text-muted-foreground">—</span>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
 
-              <Column header="Zeitpunkt" style="width: 12rem">
-                <template #body="{ data }">
-                  {{ formatDateTime((data as TimelineEntry).occurredAt) }}
-                </template>
-              </Column>
+          <TablePager
+            v-model:page="updatePage"
+            v-model:limit="updateLimit"
+            :total="device.updates.length"
+          />
+        </TabsContent>
 
-              <Column header="Ereignis" style="width: 10rem">
-                <template #body="{ data }">
-                  <Tag
-                    :value="EVENT_TYPE_LABELS[(data as TimelineEntry).eventType]"
-                    :severity="eventSeverity((data as TimelineEntry).eventType)"
-                  />
-                </template>
-              </Column>
+        <!-- ===================== Verlauf ===================== -->
+        <TabsContent value="timeline">
+          <div class="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead class="w-44">Zeitpunkt</TableHead>
+                  <TableHead class="w-36">Ereignis</TableHead>
+                  <TableHead class="w-28">KB</TableHead>
+                  <TableHead>Update</TableHead>
+                </TableRow>
+              </TableHeader>
 
-              <Column field="kbArticle" header="KB" style="width: 8rem">
-                <template #body="{ data }">
-                  <span v-if="(data as TimelineEntry).kbArticle">
-                    KB{{ (data as TimelineEntry).kbArticle }}
-                  </span>
-                  <span v-else class="muted">—</span>
-                </template>
-              </Column>
+              <TableBody>
+                <TableRow v-if="timeline.length === 0">
+                  <TableCell :colspan="4" class="text-muted-foreground py-8 text-center">
+                    Noch keine Ereignisse.
+                  </TableCell>
+                </TableRow>
 
-              <Column field="title" header="Update" />
-            </DataTable>
-          </TabPanel>
+                <TableRow v-for="entry in pagedTimeline" :key="entry.id">
+                  <TableCell>{{ formatDateTime(entry.occurredAt) }}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" :class="eventBadgeClass(entry.eventType)">
+                      {{ EVENT_TYPE_LABELS[entry.eventType] }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <span v-if="entry.kbArticle">KB{{ entry.kbArticle }}</span>
+                    <span v-else class="text-muted-foreground">—</span>
+                  </TableCell>
+                  <TableCell>{{ entry.title }}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
 
-          <TabPanel value="checkins">
-            <DataTable :value="device.checkins" size="small" striped-rows data-key="id">
-              <template #empty>Noch keine Check-ins.</template>
+          <TablePager
+            v-model:page="timelinePage"
+            v-model:limit="timelineLimit"
+            :total="timeline.length"
+          />
 
-              <Column header="Erfasst">
-                <template #body="{ data }">
-                  {{ formatDateTime((data as DeviceCheckin).collectedAt) }}
-                </template>
-              </Column>
+          <p v-if="timelineTotal > timeline.length" class="text-muted-foreground px-1 text-xs">
+            Gezeigt werden die letzten {{ timeline.length }} von {{ timelineTotal }} Ereignissen.
+          </p>
+        </TabsContent>
 
-              <Column header="Eingegangen">
-                <template #body="{ data }">
-                  {{ formatDateTime((data as DeviceCheckin).reportedAt) }}
-                </template>
-              </Column>
+        <!-- ===================== Check-ins ===================== -->
+        <TabsContent value="checkins">
+          <div class="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Erfasst</TableHead>
+                  <TableHead>Eingegangen</TableHead>
+                  <TableHead>Quelle</TableHead>
+                  <TableHead>WSUS-Server</TableHead>
+                  <TableHead class="w-24">Agent</TableHead>
+                </TableRow>
+              </TableHeader>
 
-              <Column header="Quelle">
-                <template #body="{ data }">
-                  <Tag
-                    :value="UPDATE_SOURCE_LABELS[(data as DeviceCheckin).updateSource]"
-                    :severity="sourceSeverity((data as DeviceCheckin).updateSource)"
-                  />
-                </template>
-              </Column>
+              <TableBody>
+                <TableRow v-if="device.checkins.length === 0">
+                  <TableCell :colspan="5" class="text-muted-foreground py-8 text-center">
+                    Noch keine Check-ins.
+                  </TableCell>
+                </TableRow>
 
-              <Column field="wsusServerUrl" header="WSUS-Server">
-                <template #body="{ data }">
-                  <span class="muted">{{ (data as DeviceCheckin).wsusServerUrl ?? '—' }}</span>
-                </template>
-              </Column>
-
-              <Column field="agentVersion" header="Agent" />
-            </DataTable>
-          </TabPanel>
-        </TabPanels>
+                <TableRow v-for="checkin in device.checkins" :key="checkin.id">
+                  <TableCell>{{ formatDateTime(checkin.collectedAt) }}</TableCell>
+                  <TableCell>{{ formatDateTime(checkin.reportedAt) }}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" :class="sourceBadgeClass(checkin.updateSource)">
+                      {{ UPDATE_SOURCE_LABELS[checkin.updateSource] }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell class="text-muted-foreground truncate text-xs">
+                    {{ checkin.wsusServerUrl ?? '—' }}
+                  </TableCell>
+                  <TableCell class="tabular">{{ checkin.agentVersion ?? '—' }}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
       </Tabs>
     </template>
   </div>

@@ -2,7 +2,12 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { AdSyncTrigger } from '../database/enums.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { isAdConfigured } from '../settings/settings.types.js';
+import {
+  AdSettings,
+  effectiveAdFilter,
+  effectiveSearchBases,
+  isAdConfigured,
+} from '../settings/settings.types.js';
 import { AdSyncService } from './ad-sync.service.js';
 
 const INTERVAL_NAME = 'ad-sync';
@@ -20,6 +25,15 @@ const STARTUP_TIMEOUT_NAME = 'ad-sync-startup';
 export class AdSchedulerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AdSchedulerService.name);
 
+  /**
+   * Der zuletzt gesehene Suchbereich. Aendert er sich, laeuft der Abgleich
+   * sofort — siehe <see cref="reschedule"/>.
+   */
+  private lastScope: string | null = null;
+
+  /** Erst nach dem Hochlauf loesen Aenderungen einen Lauf aus. */
+  private initialized = false;
+
   constructor(
     private readonly settings: SettingsService,
     private readonly sync: AdSyncService,
@@ -36,6 +50,7 @@ export class AdSchedulerService implements OnModuleInit, OnModuleDestroy {
 
     await this.scheduleStartupRun();
     await this.reschedule();
+    this.initialized = true;
   }
 
   onModuleDestroy(): void {
@@ -58,13 +73,49 @@ export class AdSchedulerService implements OnModuleInit, OnModuleDestroy {
     this.scheduler.addTimeout(STARTUP_TIMEOUT_NAME, timeout);
   }
 
+  /**
+   * Kennzeichnet, welche Konten der Abgleich liest.
+   *
+   * Ueber die wirksamen Werte, nicht die rohen: Wer eine bereits enthaltene
+   * untergeordnete Einheit dazunimmt, aendert die gelesene Menge nicht — das
+   * soll auch keinen Lauf ausloesen.
+   */
+  private scopeSignature(config: AdSettings): string {
+    return JSON.stringify([
+      config.url,
+      [...effectiveSearchBases(config)].sort(),
+      effectiveAdFilter(config),
+    ]);
+  }
+
   private async reschedule(): Promise<void> {
     this.clear(INTERVAL_NAME, () => this.scheduler.deleteInterval(INTERVAL_NAME));
 
     const config = await this.settings.getAd();
     if (!isAdConfigured(config)) {
+      this.lastScope = null;
       this.logger.log('AD-Abgleich ist nicht konfiguriert und bleibt aus.');
       return;
+    }
+
+    /**
+     * Ein geaenderter Suchbereich wirkt sofort, nicht erst beim naechsten
+     * Intervall.
+     *
+     * Wer eine Organisationseinheit aus den Einstellungen nimmt, erwartet, dass
+     * deren Geraete danach aus der Liste verschwinden. Bis zum naechsten Tick
+     * koennen Stunden vergehen — in dieser Zeit sieht die Einstellung schlicht
+     * wirkungslos aus. Waehrend des Hochlaufs bleibt das aus: Dort uebernimmt
+     * der verzoegerte Startlauf. Eine erstmalige Konfiguration faellt dagegen
+     * hierher, denn fuer sie gab es beim Start noch nichts zu planen.
+     */
+    const scope = this.scopeSignature(config);
+    const changed = this.initialized && this.lastScope !== scope;
+    this.lastScope = scope;
+
+    if (changed) {
+      this.logger.log('Der abgeglichene Bereich hat sich geaendert — Abgleich laeuft an.');
+      void this.run();
     }
 
     const interval = setInterval(

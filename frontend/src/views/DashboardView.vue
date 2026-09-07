@@ -61,7 +61,7 @@ const tiles = computed(() => {
       value: s.devicesWithoutAgent,
       hint: 'im AD bekannt, nicht installiert',
       tone: s.devicesWithoutAgent > 0 ? 'warn' : 'ok',
-      to: { name: 'devices', query: { withoutAgent: '1' } },
+      to: { name: 'devices', query: { hasAgent: '0' } },
     },
     {
       label: 'Neustart ausstehend',

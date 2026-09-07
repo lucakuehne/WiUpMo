@@ -80,6 +80,7 @@ export class DeviceQueryDto {
   @IsOptional()
   staleDays?: number;
 
+  /** `true` nur mit ausstehendem Neustart, `false` nur ohne, weggelassen: egal. */
   @toBool()
   @IsBoolean()
   @IsOptional()
@@ -91,11 +92,14 @@ export class DeviceQueryDto {
   @IsOptional()
   hasOpenSecurity?: boolean;
 
-  /** Nur Geraete, die sich noch nie gemeldet haben — die Deployment-Luecke. */
+  /**
+   * `false` sind die Geraete, die sich noch nie gemeldet haben — die
+   * Deployment-Luecke. `true` ist die Gegenprobe, weggelassen: egal.
+   */
   @toBool()
   @IsBoolean()
   @IsOptional()
-  withoutAgent?: boolean;
+  hasAgent?: boolean;
 }
 
 export class DeviceListItemDto {
