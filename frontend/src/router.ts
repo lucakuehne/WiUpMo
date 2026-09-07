@@ -17,7 +17,10 @@ const router = createRouter({
     },
     { path: '/updates', name: 'updates', component: () => import('@/views/UpdatesView.vue') },
     { path: '/reports', name: 'reports', component: () => import('@/views/ReportsView.vue') },
-    { path: '/ad', name: 'ad', component: () => import('@/views/AdSyncView.vue') },
+    // Der AD-Abgleich hat keine eigene Seite mehr; er steht bei den
+    // Einstellungen, die ihn steuern. Ein Lesezeichen auf /ad soll dorthin
+    // finden statt auf dem Dashboard zu landen.
+    { path: '/ad', redirect: '/settings' },
     {
       path: '/agent-releases',
       name: 'releases',

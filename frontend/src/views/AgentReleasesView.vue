@@ -5,7 +5,6 @@ import Column from 'primevue/column';
 import ConfirmDialog from 'primevue/confirmdialog';
 import DataTable from 'primevue/datatable';
 import FileUpload, { type FileUploadSelectEvent } from 'primevue/fileupload';
-import InputText from 'primevue/inputtext';
 import Message from 'primevue/message';
 import Tag from 'primevue/tag';
 import Textarea from 'primevue/textarea';
@@ -31,7 +30,6 @@ const busy = ref(false);
 const error = ref<string | null>(null);
 const notice = ref<string | null>(null);
 
-const version = ref('');
 const notes = ref('');
 const file = ref<File | null>(null);
 
@@ -54,16 +52,10 @@ async function load(): Promise<void> {
 function onSelect(event: FileUploadSelectEvent): void {
   const selected = Array.isArray(event.files) ? event.files[0] : event.files;
   file.value = selected ?? null;
-
-  // Die Version aus dem Dateinamen vorschlagen, falls er sie enthält.
-  const match = /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/.exec(selected?.name ?? '');
-  if (match && !version.value) {
-    version.value = match[1];
-  }
 }
 
 async function publish(): Promise<void> {
-  if (!file.value || !version.value) {
+  if (!file.value) {
     return;
   }
 
@@ -72,8 +64,8 @@ async function publish(): Promise<void> {
   notice.value = null;
 
   try {
+    // Ohne Versionsangabe: Das Backend liest sie aus der Programmdatei.
     const form = new FormData();
-    form.append('version', version.value);
     if (notes.value) {
       form.append('notes', notes.value);
     }
@@ -82,7 +74,6 @@ async function publish(): Promise<void> {
     const created = await upload<AgentRelease>('/api/agent-releases', form);
     notice.value = `Version ${created.version} aufgenommen (SHA-256 ${created.sha256.slice(0, 16)}…).`;
 
-    version.value = '';
     notes.value = '';
     file.value = null;
     await load();
@@ -187,23 +178,16 @@ onMounted(load);
     <Card style="margin-bottom: 1rem">
       <template #title>Neue Version aufnehmen</template>
       <template #subtitle>
-        Die mit <code>dotnet publish</code> erzeugte <code>wiupmo-agent.exe</code>. Die Prüfsumme
-        wird beim Hochladen gebildet; der Agent vergleicht die heruntergeladene Datei dagegen und
-        tauscht nur bei Übereinstimmung.
+        Die mit <code>dotnet publish</code> erzeugte <code>wiupmo-agent.exe</code>. Die
+        Versionsnummer wird aus der Datei gelesen — sie muss der entsprechen, die der Agent von
+        sich meldet. Die Prüfsumme wird beim Hochladen gebildet; der Agent vergleicht die
+        heruntergeladene Datei dagegen und tauscht nur bei Übereinstimmung.
       </template>
 
       <template #content>
-        <div class="upload-grid">
-          <div class="field">
-            <label for="version">Version</label>
-            <InputText id="version" v-model="version" placeholder="0.2.0" />
-            <small class="muted">Form 1.2.3, optional mit Vorab-Kennzeichen.</small>
-          </div>
-
-          <div class="field">
-            <label for="notes">Anmerkungen</label>
-            <Textarea id="notes" v-model="notes" rows="2" auto-resize />
-          </div>
+        <div class="field" style="margin-bottom: 1rem">
+          <label for="notes">Anmerkungen</label>
+          <Textarea id="notes" v-model="notes" rows="2" auto-resize />
         </div>
 
         <FileUpload
@@ -225,7 +209,7 @@ onMounted(load);
         <Button
           label="Aufnehmen"
           icon="pi pi-upload"
-          :disabled="!file || !version"
+          :disabled="!file"
           :loading="busy"
           @click="publish"
         />
@@ -351,17 +335,3 @@ onMounted(load);
     </DataTable>
   </div>
 </template>
-
-<style scoped>
-.upload-grid {
-  display: grid;
-  grid-template-columns: minmax(12rem, 1fr) 2fr;
-  gap: 0 1.5rem;
-}
-
-@media (max-width: 50rem) {
-  .upload-grid {
-    grid-template-columns: 1fr;
-  }
-}
-</style>

@@ -26,6 +26,12 @@ public sealed class AgentCycle(
 {
     public async Task RunAsync(CancellationToken ct)
     {
+        // Ganz am Anfang und ohne Netz: Laeuft dieser Prozess in der Zielversion
+        // eines laufenden Selbst-Updates, ist der Tausch gelungen. Die Frist des
+        // Updaters ist knapp bemessen — sie darf nicht an einer langsamen
+        // Update-Suche oder einem unerreichbaren Backend verstreichen.
+        selfUpdate.ConfirmSelf();
+
         await CollectAsync(ct).ConfigureAwait(false);
         await FlushAsync(ct).ConfigureAwait(false);
     }
@@ -67,8 +73,13 @@ public sealed class AgentCycle(
     private async Task FlushAsync(CancellationToken ct)
     {
         IReadOnlyList<QueuedSnapshot> pending = queue.Peek(options.QueueMaxSnapshots);
+
         if (pending.Count == 0)
         {
+            // Eine leere Warteschlange heisst nicht, dass es nichts zu melden
+            // gibt: Ein abgeschlossenes Selbst-Update wartet moeglicherweise
+            // noch auf seine Rueckmeldung.
+            await ReportUpdateOutcomeAsync(ct).ConfigureAwait(false);
             return;
         }
 
@@ -117,6 +128,33 @@ public sealed class AgentCycle(
         {
             // Fehlendes Enrollment-Token bei noch nicht registriertem Geraet.
             logger.LogError("{Fehler}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Meldet das Ergebnis eines Selbst-Updates ohne anhaengende Warteschlange.
+    ///
+    /// Nur mit bereits vorhandener Identitaet: Eine Registrierung braucht
+    /// Angaben zum Host, die hier gar nicht vorliegen — und ein nie
+    /// registriertes Geraet hat auch keinen Auftrag bekommen.
+    /// </summary>
+    private async Task ReportUpdateOutcomeAsync(CancellationToken ct)
+    {
+        DeviceIdentity? identity = identityStore.TryLoad();
+        if (identity is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await selfUpdate.ReportPendingOutcomeAsync(identity, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is BackendException or HttpRequestException or TaskCanceledException
+                                      && !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                "Das Ergebnis des Selbst-Updates liess sich nicht melden: {Fehler}", ex.Message);
         }
     }
 

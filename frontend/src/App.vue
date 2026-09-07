@@ -1,14 +1,5 @@
 <script setup lang="ts">
-import {
-  BarChart3,
-  Box,
-  Download,
-  LineChart,
-  LogOut,
-  Monitor,
-  RefreshCw,
-  Settings,
-} from '@lucide/vue';
+import { BarChart3, Box, Download, LineChart, LogOut, Monitor, Settings } from '@lucide/vue';
 import { computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Button } from '@/components/ui/button';
@@ -30,7 +21,6 @@ const items = [
   { label: 'Geräte', icon: Monitor, to: '/devices' },
   { label: 'Updates', icon: Download, to: '/updates' },
   { label: 'Auswertungen', icon: LineChart, to: '/reports' },
-  { label: 'AD-Abgleich', icon: RefreshCw, to: '/ad' },
   { label: 'Agent-Versionen', icon: Box, to: '/agent-releases' },
   { label: 'Einstellungen', icon: Settings, to: '/settings' },
 ];

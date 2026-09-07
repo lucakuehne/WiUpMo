@@ -20,27 +20,49 @@ public sealed class SelfUpdateService(
     ILogger<SelfUpdateService> logger)
 {
     /// <summary>
-    /// Verarbeitet ein Ergebnis, das noch offen ist, weil der Dienst zwischen
-    /// Tausch und Meldung neu gestartet wurde. Laeuft bei jedem Durchlauf, weil
-    /// beim ersten Versuch das Backend unerreichbar sein kann.
+    /// Bestaetigt einen Tausch — rein lokal, ohne jeden Netzwerkzugriff.
+    ///
+    /// Dass dieser Prozess laeuft und in der Zielversion laeuft, ist der Beweis:
+    /// Der Updater darf ab hier nicht mehr zurueckdrehen, auch wenn das Backend
+    /// tagelang nicht erreichbar ist.
+    ///
+    /// Muss deshalb vor allem stehen, was fehlschlagen kann. Stand die
+    /// Bestaetigung frueher im Check-in, drehte eine gescheiterte Uebermittlung
+    /// nach Ablauf der Frist eine einwandfrei laufende Fassung zurueck — bei
+    /// einem Laptop ausserhalb des Firmennetzes und bei einem gerade neu
+    /// ausgerollten Backend gleichermassen.
     /// </summary>
-    public async Task ReportPendingOutcomeAsync(DeviceIdentity identity, CancellationToken ct)
+    public void ConfirmSelf()
     {
         UpdateMarker? marker = UpdateMarker.TryLoad(paths.MarkerPath);
-        if (marker is null)
+
+        if (marker is null
+            || marker.State != UpdateState.Verifying
+            || marker.TargetVersion != AgentVersion.Current)
         {
             return;
         }
 
-        // Wir laufen in der Zielversion — der Tausch hat geklappt. Das sofort
-        // festhalten, noch vor jedem Netzwerkzugriff: Ab hier darf der Updater
-        // nicht mehr zurueckdrehen, auch wenn das Backend tagelang nicht
-        // erreichbar ist.
-        if (marker.State == UpdateState.Verifying && marker.TargetVersion == AgentVersion.Current)
+        marker.State = UpdateState.Verified;
+        marker.Save(paths.MarkerPath);
+        logger.LogInformation("Selbst-Update auf {Version} bestaetigt.", marker.TargetVersion);
+    }
+
+    /// <summary>
+    /// Meldet ein Ergebnis, das noch offen ist, weil der Dienst zwischen Tausch
+    /// und Meldung neu gestartet wurde. Laeuft bei jedem Durchlauf, weil beim
+    /// ersten Versuch das Backend unerreichbar sein kann.
+    /// </summary>
+    public async Task ReportPendingOutcomeAsync(DeviceIdentity identity, CancellationToken ct)
+    {
+        // Noch einmal, falls der Aufrufer es nicht getan hat: Die Bestaetigung
+        // ist kostenlos und darf auf keinen Fall ausbleiben.
+        ConfirmSelf();
+
+        UpdateMarker? marker = UpdateMarker.TryLoad(paths.MarkerPath);
+        if (marker is null)
         {
-            marker.State = UpdateState.Verified;
-            marker.Save(paths.MarkerPath);
-            logger.LogInformation("Selbst-Update auf {Version} bestaetigt.", marker.TargetVersion);
+            return;
         }
 
         switch (marker.State)

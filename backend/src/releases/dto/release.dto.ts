@@ -2,18 +2,28 @@ import { ApiProperty } from '@nestjs/swagger';
 import { IsArray, IsOptional, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
 import { AgentUpdateJobState } from '../../database/enums.js';
 
+/**
+ * Semantische Version ohne Praefix, z. B. `0.2.0`.
+ *
+ * Sie wird zum Verzeichnisnamen — deshalb das strenge Muster: ein Wert wie
+ * `../etc` duerfte hier niemals durchkommen. Es gilt auch fuer die aus der
+ * Datei gelesene Version, denn auch die stammt aus einer hochgeladenen Datei.
+ */
+export const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+
 export class UploadReleaseDto {
   /**
-   * Semantische Version ohne Praefix, z. B. `0.2.0`. Sie wird zum
-   * Verzeichnisnamen — deshalb das strenge Muster: ein Wert wie `../etc`
-   * duerfte hier niemals durchkommen.
+   * Wird normalerweise nicht mitgeschickt: Sie steht in der Programmdatei und
+   * wird von dort gelesen. Nur fuer den Fall, dass eine Datei keine
+   * Versionsangabe traegt, bleibt sie angebbar.
    */
   @IsString()
-  @Matches(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, {
+  @Matches(VERSION_PATTERN, {
     message: 'Die Version muss der Form 1.2.3 bzw. 1.2.3-vorab entsprechen.',
   })
   @MaxLength(32)
-  version: string;
+  @IsOptional()
+  version?: string;
 
   @IsString()
   @IsOptional()

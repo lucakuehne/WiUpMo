@@ -13,7 +13,9 @@ import {
   AgentUpdateJobViewDto,
   CreateUpdateJobsResultDto,
   UpdateResultDto,
+  VERSION_PATTERN,
 } from './dto/release.dto.js';
+import { PeVersionError, readProductVersion } from './pe-version.js';
 
 const BINARY_NAME = 'wiupmo-agent.exe';
 
@@ -75,40 +77,96 @@ export class ReleasesService {
    * multer schreibt sie dorthin, statt 75 MB im Speicher zu halten.
    */
   async publish(
-    version: string,
+    provided: string | undefined,
     notes: string | undefined,
     temporaryPath: string,
   ): Promise<AgentReleaseDto> {
-    const existing: Array<{ id: string }> = await this.dataSource.query(
-      'SELECT id FROM agent_releases WHERE version = $1',
-      [version],
-    );
+    try {
+      const version = await this.detectVersion(temporaryPath, provided);
 
-    if (existing.length > 0) {
+      const existing: Array<{ id: string }> = await this.dataSource.query(
+        'SELECT id FROM agent_releases WHERE version = $1',
+        [version],
+      );
+
+      if (existing.length > 0) {
+        throw new ConflictException(
+          `Version ${version} ist bereits hinterlegt. Eine bestehende Version wird nicht ` +
+            'ueberschrieben — im Feld koennten Geraete darauf verweisen.',
+        );
+      }
+
+      const sha256 = await this.hashFile(temporaryPath);
+      const { size } = await stat(temporaryPath);
+
+      const target = this.binaryPath(version);
+      await mkdir(join(this.root, version), { recursive: true });
+      await rename(temporaryPath, target);
+
+      const rows: Array<{ id: string }> = await this.dataSource.query(
+        `INSERT INTO agent_releases (version, file_path, sha256, size_bytes, notes, is_current)
+         VALUES ($1, $2, $3, $4, $5, false) RETURNING id`,
+        [version, target, sha256, String(size), notes ?? null],
+      );
+
+      this.logger.log(`Agent-Release ${version} aufgenommen (${size} Bytes, sha256 ${sha256}).`);
+
+      const all = await this.list();
+      return all.find((release) => release.id === rows[0].id)!;
+    } finally {
+      // Auf jedem Weg hinaus. Nach einem erfolgreichen Verschieben ist der Pfad
+      // ohnehin leer, und ein abgebrochener Upload soll keine 75 MB im
+      // temporaeren Verzeichnis liegen lassen.
       await rm(temporaryPath, { force: true });
-      throw new ConflictException(
-        `Version ${version} existiert bereits. Eine bestehende Version wird nicht ueberschrieben — ` +
-          'im Feld koennten Geraete darauf verweisen.',
+    }
+  }
+
+  /**
+   * Die Version kommt aus der Programmdatei, nicht aus einem Eingabefeld.
+   *
+   * Getippt war sie eine Fehlerquelle mit unangenehmer Wirkung: Weicht sie von
+   * dem ab, was der Agent von sich meldet, gilt das Geraet nach dem Update
+   * weiterhin als abweichend — und bekommt beim naechsten Check-in denselben
+   * Auftrag erneut, endlos.
+   */
+  private async detectVersion(path: string, provided?: string): Promise<string> {
+    let fromFile: string;
+
+    try {
+      // Das SDK haengt an die InformationalVersion ein "+<commit>" an. Der Agent
+      // schneidet es beim Melden ab (AgentVersion.cs); hier muss dasselbe
+      // geschehen, sonst stimmen die beiden Werte nie ueberein.
+      fromFile = (await readProductVersion(path)).split('+')[0].trim();
+    } catch (error) {
+      if (!(error instanceof PeVersionError)) {
+        throw error;
+      }
+
+      // Ohne Versionsangabe in der Datei bleibt der von Hand gesetzte Wert.
+      if (provided) {
+        return provided;
+      }
+
+      throw new BadRequestException(
+        `Aus der Datei liess sich keine Version lesen (${error.message}) ` +
+          'Bitte die Version angeben oder eine Datei mit Versionsangabe hochladen.',
       );
     }
 
-    const sha256 = await this.hashFile(temporaryPath);
-    const { size } = await stat(temporaryPath);
+    if (!VERSION_PATTERN.test(fromFile)) {
+      throw new BadRequestException(
+        `Die Datei meldet die Version "${fromFile}"; erwartet wird die Form 1.2.3.`,
+      );
+    }
 
-    const target = this.binaryPath(version);
-    await mkdir(join(this.root, version), { recursive: true });
-    await rename(temporaryPath, target);
+    if (provided && provided !== fromFile) {
+      throw new BadRequestException(
+        `Die Datei meldet Version ${fromFile}, angegeben war ${provided}. ` +
+          'Massgeblich ist, was der Agent von sich meldet.',
+      );
+    }
 
-    const rows: Array<{ id: string }> = await this.dataSource.query(
-      `INSERT INTO agent_releases (version, file_path, sha256, size_bytes, notes, is_current)
-       VALUES ($1, $2, $3, $4, $5, false) RETURNING id`,
-      [version, target, sha256, String(size), notes ?? null],
-    );
-
-    this.logger.log(`Agent-Release ${version} aufgenommen (${size} Bytes, sha256 ${sha256}).`);
-
-    const all = await this.list();
-    return all.find((release) => release.id === rows[0].id)!;
+    return fromFile;
   }
 
   /**

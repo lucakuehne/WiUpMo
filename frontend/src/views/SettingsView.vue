@@ -57,6 +57,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import AdSyncLog from '@/components/AdSyncLog.vue';
 import GroupPicker from '@/components/GroupPicker.vue';
 import OuPicker from '@/components/OuPicker.vue';
 import { formatDnPath } from '@/dn';
@@ -222,6 +223,9 @@ async function load(): Promise<void> {
   }
 }
 
+/** Das Protokoll unter den AD-Einstellungen, zum Nachladen nach dem Speichern. */
+const syncLog = ref<{ reload: () => Promise<void> } | null>(null);
+
 async function save(
   section: 'ad' | 'auth' | 'thresholds' | 'retention',
   busy: Ref<boolean>,
@@ -236,6 +240,10 @@ async function save(
     if (section === 'ad') {
       Object.assign(ad, result as AdSettingsView);
       bindPassword.value = '';
+
+      // Der serverseitig ausgeloeste Lauf steht dann schon als „läuft" im
+      // Protokoll darunter.
+      void syncLog.value?.reload();
 
       toast.success('Gespeichert.', {
         description:
@@ -673,6 +681,7 @@ onMounted(load);
           <CardHeader>
             <CardTitle>Active Directory</CardTitle>
             <CardDescription>
+              Verbindung zum Verzeichnis und Auswahl der Computerkonten, die abgeglichen werden.
             </CardDescription>
           </CardHeader>
 
@@ -906,6 +915,8 @@ onMounted(load);
             </Button>
           </CardFooter>
         </Card>
+
+        <AdSyncLog v-if="active === 'ad' && !loading" ref="syncLog" class="mt-4" />
 
         <!-- ================= Agent-Registrierung ================= -->
         <Card v-if="active === 'agent' && !loading" class="xl:w-1/2">
