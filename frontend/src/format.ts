@@ -86,13 +86,7 @@ export const EVENT_TYPE_LABELS: Record<UpdateEventType, string> = {
   hidden: 'ausgeblendet',
 };
 
-/**
- * Farbklassen für die shadcn-Ansichten.
- *
- * Getrennt von den PrimeVue-Schweregraden weiter unten, solange beide
- * Bibliotheken nebeneinander laufen. Die Funktionen unten verschwinden mit der
- * letzten umgestellten Ansicht.
- */
+/** Farbklassen der Abzeichen. */
 export function sourceBadgeClass(source: UpdateSource | null): string {
   switch (source) {
     case 'wsus':
@@ -133,54 +127,6 @@ export function eventBadgeClass(type: UpdateEventType): string {
       return 'bg-warning/15 text-warning-foreground border-warning/40 dark:text-warning';
     default:
       return 'bg-muted text-muted-foreground border-transparent';
-  }
-}
-
-type Severity = 'success' | 'info' | 'warn' | 'danger' | 'secondary';
-
-export function stateSeverity(state: UpdateState): Severity {
-  switch (state) {
-    case 'available':
-      return 'warn';
-    case 'failed':
-      return 'danger';
-    case 'installed':
-      return 'success';
-    default:
-      return 'secondary';
-  }
-}
-
-/**
- * Dual Scan wird als Warnung dargestellt, nicht als neutrale Angabe: Das Geraet
- * holt sich dann trotz WSUS-Richtlinie Teile aus dem Internet — in einer
- * Migrationsauswertung ist das der Zustand, den man sehen will.
- */
-export function sourceSeverity(source: UpdateSource | null): Severity {
-  switch (source) {
-    case 'wsus':
-      return 'info';
-    case 'microsoft_update':
-      return 'success';
-    case 'intune':
-      return 'success';
-    case 'dual_scan':
-      return 'warn';
-    default:
-      return 'secondary';
-  }
-}
-
-export function eventSeverity(type: UpdateEventType): Severity {
-  switch (type) {
-    case 'installed':
-      return 'success';
-    case 'failed':
-      return 'danger';
-    case 'appeared':
-      return 'warn';
-    default:
-      return 'secondary';
   }
 }
 

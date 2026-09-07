@@ -61,6 +61,13 @@ COPY --from=build /app/dist ./dist
 # laeuft das Backend als reine API weiter.
 COPY --from=frontend /app/dist ./public
 
+# Ablage der Agent-Binaries. Sie muss im Image liegen und `node` gehoeren:
+# Haengt Docker ein noch leeres benanntes Volume ein, uebernimmt es Inhalt und
+# Eigentuemer des Verzeichnisses aus dem Image. Fehlt es hier, legt Docker den
+# Einhaengepunkt selbst an — dann gehoert er root, und der Prozess kann darin
+# nichts anlegen.
+RUN mkdir -p /app/agent-releases && chown node:node /app/agent-releases
+
 # Der Container laeuft nicht als root. Das Image von node bringt den Benutzer
 # `node` bereits mit.
 USER node

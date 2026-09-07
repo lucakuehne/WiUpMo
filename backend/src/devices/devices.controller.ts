@@ -16,7 +16,12 @@ import { Response } from 'express';
 import { SessionGuard } from '../auth/session.guard.js';
 import { DevicesService } from './devices.service.js';
 import { ArchiveDeviceDto, DeviceDetailDto, TimelineDto, TimelineQueryDto } from './dto/device-detail.dto.js';
-import { DeviceListDto, DeviceQueryDto } from './dto/device-query.dto.js';
+import {
+  DeviceListDto,
+  DeviceOuDto,
+  DeviceOuQueryDto,
+  DeviceQueryDto,
+} from './dto/device-query.dto.js';
 
 @ApiTags('devices')
 @Controller('api/devices')
@@ -44,6 +49,13 @@ export class DevicesController {
       .header('Content-Type', 'text/csv; charset=utf-8')
       .header('Content-Disposition', `attachment; filename="geraete-${stamp}.csv"`)
       .send(csv);
+  }
+
+  /** Ebenfalls vor `:id` — aus demselben Grund wie `export`. */
+  @Get('organizational-units')
+  @ApiOperation({ summary: 'Organisationseinheiten mit Geraeten, fuer die Navigation.' })
+  organizationalUnits(@Query() query: DeviceOuQueryDto): Promise<DeviceOuDto[]> {
+    return this.devices.organizationalUnits(query.status);
   }
 
   @Get(':id')

@@ -23,11 +23,7 @@ interface DnPart {
  * `split(',')` zerrisse ihn mitten im Namen.
  */
 export function splitDn(dn: string): DnPart[] {
-  return dn
-    .split(/(?<!\\),/)
-    .map((part) => part.trim())
-    .filter((part) => part !== '')
-    .map((part) => {
+  return dnSegments(dn).map((part) => {
       const equals = part.indexOf('=');
       if (equals < 0) {
         return { type: '', value: unescapeDnValue(part) };
@@ -37,6 +33,21 @@ export function splitDn(dn: string): DnPart[] {
         value: unescapeDnValue(part.slice(equals + 1).trim()),
       };
     });
+}
+
+/**
+ * Die unveränderten Bestandteile eines DN.
+ *
+ * Getrennt wie in <see cref="splitDn"/>, aber ohne Aufhebung der Maskierung:
+ * Nur so lässt sich aus einem Ausschnitt wieder ein gültiger DN
+ * zusammensetzen — was die OU-Navigation braucht, um die Zwischenebenen zu
+ * erzeugen, die in keiner Antwort einzeln vorkommen.
+ */
+export function dnSegments(dn: string): string[] {
+  return dn
+    .split(/(?<!\\),/)
+    .map((part) => part.trim())
+    .filter((part) => part !== '');
 }
 
 function unescapeDnValue(value: string): string {

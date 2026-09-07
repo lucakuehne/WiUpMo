@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { BarChart3, Box, Download, LineChart, LogOut, Monitor, Settings } from '@lucide/vue';
-import { computed, onMounted } from 'vue';
+import { computed, watchEffect } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
 import { auth, logout } from '@/auth';
+import { isDark } from '@/theme';
 
 const route = useRoute();
 const router = useRouter();
@@ -35,13 +36,12 @@ async function onLogout(): Promise<void> {
   await router.push({ name: 'login' });
 }
 
-onMounted(() => {
-  // Dunkelmodus nach Systemeinstellung; die Klasse am Wurzelelement ist das,
-  // worauf die Farbvariablen in main.css hören.
-  const media = window.matchMedia('(prefers-color-scheme: dark)');
-  const apply = (dark: boolean) => document.documentElement.classList.toggle('dark', dark);
-  apply(media.matches);
-  media.addEventListener('change', (event) => apply(event.matches));
+// Dunkelmodus nach Systemeinstellung; die Klasse am Wurzelelement ist das,
+// worauf die Farbvariablen in main.css hören. Beobachtet wird die
+// Systemeinstellung an einer Stelle (theme.ts) — die Diagramme brauchen
+// dieselbe Auskunft und können sie nicht aus CSS beziehen.
+watchEffect(() => {
+  document.documentElement.classList.toggle('dark', isDark.value);
 });
 </script>
 

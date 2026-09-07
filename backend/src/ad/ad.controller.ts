@@ -19,7 +19,13 @@ import {
   ListOusRequestDto,
   OrganizationalUnitDto,
 } from './dto/ad-probe.dto.js';
-import { AdStatusDto, AdSyncResultDto, AdSyncRunDto, SyncRunsQueryDto } from './dto/ad.dto.js';
+import {
+  AdStatusDto,
+  AdSyncResultDto,
+  AdSyncRunDto,
+  AdSyncRunsDto,
+  SyncRunsQueryDto,
+} from './dto/ad.dto.js';
 import { LdapClient } from './ldap.client.js';
 
 @ApiTags('ad')
@@ -156,9 +162,13 @@ export class AdController {
 
   @Get('sync-runs')
   @ApiOperation({ summary: 'Protokoll der bisherigen Abgleiche.' })
-  async runs(@Query() query: SyncRunsQueryDto): Promise<AdSyncRunDto[]> {
-    const rows = await this.sync.recentRuns(query.limit);
-    return rows.map(toRunDto);
+  async runs(@Query() query: SyncRunsQueryDto): Promise<AdSyncRunsDto> {
+    const [rows, total] = await Promise.all([
+      this.sync.recentRuns(query.limit, (query.page - 1) * query.limit),
+      this.sync.countRuns(),
+    ]);
+
+    return { items: rows.map(toRunDto), total, page: query.page, limit: query.limit };
   }
 }
 

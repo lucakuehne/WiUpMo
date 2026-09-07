@@ -303,14 +303,21 @@ export class AdSyncService {
     );
   }
 
-  async recentRuns(limit: number): Promise<Array<Record<string, unknown>>> {
+  async recentRuns(limit: number, offset = 0): Promise<Array<Record<string, unknown>>> {
     return this.dataSource.query(
       `SELECT id, started_at, finished_at, trigger, devices_found, devices_created,
               devices_archived, status, error
          FROM ad_sync_runs
         ORDER BY started_at DESC
-        LIMIT $1`,
-      [limit],
+        LIMIT $1 OFFSET $2`,
+      [limit, offset],
     );
+  }
+
+  async countRuns(): Promise<number> {
+    const rows: Array<{ total: string }> = await this.dataSource.query(
+      'SELECT count(*)::text AS total FROM ad_sync_runs',
+    );
+    return Number(rows[0]?.total ?? 0);
   }
 }

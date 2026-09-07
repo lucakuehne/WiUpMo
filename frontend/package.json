@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Windows Update Monitoring — Frontend (Vue 3 + PrimeVue)",
+  "description": "Windows Update Monitoring — Frontend (Vue 3 + shadcn-vue)",
   "license": "UNLICENSED",
   "scripts": {
     "dev": "vite",
@@ -14,14 +14,11 @@
   },
   "dependencies": {
     "@lucide/vue": "^1.40.0",
-    "@primeuix/themes": "^1.2.5",
     "@tailwindcss/vite": "^4.3.3",
     "@vueuse/core": "^14.4.0",
     "chart.js": "^4.5.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "primeicons": "^7.0.0",
-    "primevue": "^4.4.1",
     "reka-ui": "^2.10.4",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3",

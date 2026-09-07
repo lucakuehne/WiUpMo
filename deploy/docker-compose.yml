@@ -84,6 +84,24 @@ services:
       - dist/src/database/data-source.js
       - 'migration:run'
 
+  # Richtet den Eigentuemer des Release-Volumes, einmalig vor jedem Start.
+  #
+  # Das Image bringt das Verzeichnis mit passendem Eigentuemer mit, aber das
+  # hilft nur einem frisch angelegten Volume: Inhalt und Rechte uebernimmt
+  # Docker ausschliesslich beim allerersten Einhaengen. Ein Volume, das schon
+  # einmal als root angelegt wurde, bliebe fuer immer unbeschreibbar — und der
+  # Upload einer Agent-Version scheiterte mit EACCES.
+  #
+  # Als eigener Dienst, weil das Backend selbst nicht als root laeuft und sich
+  # die Rechte deshalb nicht selbst richten kann.
+  prepare-releases:
+    image: ${BACKEND_IMAGE:-ghcr.io/lucakuehne/wiupmo/backend:main}
+    restart: 'no'
+    user: root
+    volumes:
+      - agent-releases:/app/agent-releases
+    command: ['chown', '-R', 'node:node', '/app/agent-releases']
+
   backend:
     image: ${BACKEND_IMAGE:-ghcr.io/lucakuehne/wiupmo/backend:main}
     restart: unless-stopped
@@ -91,6 +109,8 @@ services:
       postgres:
         condition: service_healthy
       migrate:
+        condition: service_completed_successfully
+      prepare-releases:
         condition: service_completed_successfully
     environment: *backend-env
     ports:

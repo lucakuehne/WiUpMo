@@ -3,7 +3,7 @@ import { AlertTriangle, Download, RotateCcw, Search } from '@lucide/vue';
 import { onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { get } from '@/api/client';
-import type { DeviceListItem, DeviceStatus, Paged, UpdateSource } from '@/api/types';
+import type { DeviceListItem, DeviceOu, DeviceStatus, Paged, UpdateSource } from '@/api/types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import OuNavigator from '@/components/OuNavigator.vue';
 import SortHead from '@/components/SortHead.vue';
 import TablePager from '@/components/TablePager.vue';
 import { formatDnPath } from '@/dn';
@@ -54,6 +55,10 @@ const search = ref('');
  */
 const status = ref<DeviceStatus | 'all'>('active');
 const updateSource = ref<UpdateSource | null>(null);
+
+/** Gewählte Organisationseinheit einschliesslich allem darunter. */
+const ou = ref<string | null>(null);
+const units = ref<DeviceOu[]>([]);
 const staleDays = ref<number | null>(null);
 const hasOpenSecurity = ref(false);
 
@@ -95,6 +100,27 @@ function onSourceChange(value: unknown): void {
 function onStatusChange(value: unknown): void {
   status.value = (value as DeviceStatus | 'all') || 'active';
   onFilterChange();
+
+  // Die Zahlen im Baum zählen dieselbe Menge, die die Tabelle zeigt — sonst
+  // steht neben einer Einheit eine Zahl, die sich beim Anklicken ändert.
+  void loadUnits();
+}
+
+async function loadUnits(): Promise<void> {
+  try {
+    units.value = await get<DeviceOu[]>('/api/devices/organizational-units', {
+      status: status.value === 'all' ? undefined : status.value,
+    });
+  } catch {
+    // Die Navigation ist eine Hilfe, kein Muss. Fällt sie aus, bleibt die
+    // Liste vollständig bedienbar — eine rote Meldung darüber wäre unverhältnismässig.
+    units.value = [];
+  }
+}
+
+function onOuChange(value: string | null): void {
+  ou.value = value;
+  onFilterChange();
 }
 
 function onStaleChange(value: unknown): void {
@@ -131,6 +157,7 @@ async function load(): Promise<void> {
       sortDir: sortDir.value,
       search: search.value || undefined,
       status: status.value === 'all' ? undefined : status.value,
+      ou: ou.value ?? undefined,
       updateSource: updateSource.value ?? undefined,
       staleDays: staleDays.value ?? undefined,
       hasOpenSecurity: hasOpenSecurity.value || undefined,
@@ -183,6 +210,7 @@ function toggleFilter(name: keyof typeof booleanFilters): void {
 function resetFilters(): void {
   search.value = '';
   status.value = 'active';
+  ou.value = null;
   updateSource.value = null;
   staleDays.value = null;
   hasOpenSecurity.value = false;
@@ -207,6 +235,8 @@ function exportCsv(): void {
     sortBy: sortBy.value,
     sortDir: sortDir.value,
     search: search.value || undefined,
+    status: status.value === 'all' ? undefined : status.value,
+    ou: ou.value ?? undefined,
     updateSource: updateSource.value ?? undefined,
     staleDays: staleDays.value ?? undefined,
     hasOpenSecurity: hasOpenSecurity.value || undefined,
@@ -242,11 +272,15 @@ function applyQueryFilters(): void {
   if (query.hasAgent === '0') {
     hasAgent.value = false;
   }
+  if (typeof query.ou === 'string' && query.ou !== '') {
+    ou.value = query.ou;
+  }
 }
 
 onMounted(() => {
   applyQueryFilters();
   void load();
+  void loadUnits();
 });
 </script>
 
@@ -348,126 +382,154 @@ onMounted(() => {
       <AlertDescription>{{ error }}</AlertDescription>
     </Alert>
 
-    <div class="rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <SortHead field="hostname" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
-              Hostname
-            </SortHead>
-            <SortHead field="osBuild" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
-              Betriebssystem
-            </SortHead>
-            <SortHead field="updateSource" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
-              Quelle
-            </SortHead>
-            <SortHead field="openUpdates" numeric :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
-              Offen
-            </SortHead>
-            <SortHead
-              field="openSecurityUpdates"
-              numeric
-              :sort-by="sortBy"
-              :sort-dir="sortDir"
-              @sort="onSort"
-            >
-              davon Sicherheit
-            </SortHead>
-            <SortHead field="patchAgeDays" numeric :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
-              Patch-Alter
-            </SortHead>
-            <SortHead field="lastSeenAt" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
-              Letzter Check-in
-            </SortHead>
-            <TableHead class="w-20">Neustart</TableHead>
-          </TableRow>
-        </TableHeader>
+    <!-- Der Baum steht neben der Tabelle, die Filterleiste darüber: Sie gilt
+         für beides, er schränkt nur die Tabelle ein. -->
+    <div class="flex items-start gap-5">
+      <aside class="hidden w-64 shrink-0 lg:block">
+        <OuNavigator :model-value="ou" :units="units" @update:model-value="onOuChange" />
+      </aside>
 
-        <TableBody>
-          <template v-if="loading">
-            <TableRow v-for="n in 6" :key="n">
-              <TableCell v-for="column in 8" :key="column">
-                <Skeleton class="h-4 w-full" />
-              </TableCell>
-            </TableRow>
-          </template>
+      <div class="min-w-0 flex-1">
+        <div class="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <SortHead field="hostname" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
+                  Hostname
+                </SortHead>
+                <SortHead field="osBuild" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
+                  Betriebssystem
+                </SortHead>
+                <SortHead field="updateSource" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
+                  Quelle
+                </SortHead>
+                <SortHead
+                  field="openUpdates"
+                  numeric
+                  :sort-by="sortBy"
+                  :sort-dir="sortDir"
+                  @sort="onSort"
+                >
+                  Offen
+                </SortHead>
+                <SortHead
+                  field="openSecurityUpdates"
+                  numeric
+                  :sort-by="sortBy"
+                  :sort-dir="sortDir"
+                  @sort="onSort"
+                >
+                  davon Sicherheit
+                </SortHead>
+                <SortHead
+                  field="patchAgeDays"
+                  numeric
+                  :sort-by="sortBy"
+                  :sort-dir="sortDir"
+                  @sort="onSort"
+                >
+                  Patch-Alter
+                </SortHead>
+                <SortHead field="lastSeenAt" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
+                  Letzter Check-in
+                </SortHead>
+                <TableHead class="w-20">Neustart</TableHead>
+              </TableRow>
+            </TableHeader>
 
-          <TableRow v-else-if="rows.length === 0">
-            <TableCell :colspan="8" class="text-muted-foreground py-8 text-center">
-              Keine Geräte gefunden.
-            </TableCell>
-          </TableRow>
+            <TableBody>
+              <template v-if="loading">
+                <TableRow v-for="n in 6" :key="n">
+                  <TableCell v-for="column in 8" :key="column">
+                    <Skeleton class="h-4 w-full" />
+                  </TableCell>
+                </TableRow>
+              </template>
 
-          <TableRow
-            v-for="row in loading ? [] : rows"
-            :key="row.id"
-            class="cursor-pointer"
-            @click="openDevice(row.id)"
-          >
-            <TableCell>
-              <div class="flex items-center gap-2">
-                <span class="font-medium">{{ row.hostname }}</span>
-                <Badge v-if="row.status === 'archived'" variant="secondary">archiviert</Badge>
-              </div>
-              <!-- Der Pfad statt des DN; der vollständige Wert bleibt als
-                   Hinweistext erreichbar. -->
-              <div v-if="row.adOu" class="text-muted-foreground truncate text-xs" :title="row.adOu">
-                {{ formatDnPath(row.adOu) }}
-              </div>
-            </TableCell>
+              <TableRow v-else-if="rows.length === 0">
+                <TableCell :colspan="8" class="text-muted-foreground py-8 text-center">
+                  Keine Geräte gefunden.
+                </TableCell>
+              </TableRow>
 
-            <TableCell>
-              <div>{{ row.osName ?? '—' }}</div>
-              <div class="text-muted-foreground text-xs">
-                {{ row.osVersion ?? '' }}
-                <template v-if="row.osBuild">({{ row.osBuild }})</template>
-              </div>
-            </TableCell>
+              <TableRow
+                v-for="row in loading ? [] : rows"
+                :key="row.id"
+                class="cursor-pointer"
+                @click="openDevice(row.id)"
+              >
+                <TableCell>
+                  <div class="flex items-center gap-2">
+                    <span class="font-medium">{{ row.hostname }}</span>
+                    <Badge v-if="row.status === 'archived'" variant="secondary">archiviert</Badge>
+                  </div>
+                  <!-- Der Pfad statt des DN; der vollständige Wert bleibt als
+                       Hinweistext erreichbar. -->
+                  <div
+                    v-if="row.adOu"
+                    class="text-muted-foreground truncate text-xs"
+                    :title="row.adOu"
+                  >
+                    {{ formatDnPath(row.adOu) }}
+                  </div>
+                </TableCell>
 
-            <TableCell>
-              <Badge variant="outline" :class="sourceBadgeClass(row.updateSource)">
-                {{ UPDATE_SOURCE_LABELS[row.updateSource ?? 'unknown'] }}
-              </Badge>
-            </TableCell>
+                <TableCell>
+                  <div>{{ row.osName ?? '—' }}</div>
+                  <div class="text-muted-foreground text-xs">
+                    {{ row.osVersion ?? '' }}
+                    <template v-if="row.osBuild">({{ row.osBuild }})</template>
+                  </div>
+                </TableCell>
 
-            <TableCell class="tabular text-right">{{ row.openUpdates }}</TableCell>
+                <TableCell>
+                  <Badge variant="outline" :class="sourceBadgeClass(row.updateSource)">
+                    {{ UPDATE_SOURCE_LABELS[row.updateSource ?? 'unknown'] }}
+                  </Badge>
+                </TableCell>
 
-            <TableCell class="tabular text-right">
-              <span :class="row.openSecurityUpdates > 0 ? 'text-destructive font-semibold' : ''">
-                {{ row.openSecurityUpdates }}
-              </span>
-            </TableCell>
+                <TableCell class="tabular text-right">{{ row.openUpdates }}</TableCell>
 
-            <TableCell class="tabular text-right">
-              <template v-if="row.patchAgeDays === null">—</template>
-              <template v-else>{{ row.patchAgeDays }} T</template>
-            </TableCell>
+                <TableCell class="tabular text-right">
+                  <span :class="row.openSecurityUpdates > 0 ? 'text-destructive font-semibold' : ''">
+                    {{ row.openSecurityUpdates }}
+                  </span>
+                </TableCell>
 
-            <TableCell>
-              <span :title="formatDateTime(row.lastSeenAt)">
-                {{ formatRelative(row.lastSeenAt) }}
-              </span>
-              <Badge v-if="!row.enrolledAt" variant="destructive" class="ml-2">ohne Agent</Badge>
-            </TableCell>
+                <TableCell class="tabular text-right">
+                  <template v-if="row.patchAgeDays === null">—</template>
+                  <template v-else>{{ row.patchAgeDays }} T</template>
+                </TableCell>
 
-            <TableCell>
-              <AlertTriangle v-if="row.pendingReboot" class="text-warning size-4" />
-              <span v-else class="text-muted-foreground">—</span>
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
+                <TableCell>
+                  <span :title="formatDateTime(row.lastSeenAt)">
+                    {{ formatRelative(row.lastSeenAt) }}
+                  </span>
+                  <Badge v-if="!row.enrolledAt" variant="destructive" class="ml-2">
+                    ohne Agent
+                  </Badge>
+                </TableCell>
+
+                <TableCell>
+                  <AlertTriangle v-if="row.pendingReboot" class="text-warning size-4" />
+                  <span v-else class="text-muted-foreground">—</span>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+
+        <TablePager
+          v-model:page="page"
+          v-model:limit="limit"
+          :total="total"
+          @update:page="load"
+          @update:limit="
+            page = 1;
+            load();
+          "
+        />
+      </div>
     </div>
-
-    <TablePager
-      v-model:page="page"
-      v-model:limit="limit"
-      :total="total"
-      @update:page="load"
-      @update:limit="
-        page = 1;
-        load();
-      "
-    />
   </div>
 </template>

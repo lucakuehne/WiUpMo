@@ -43,6 +43,12 @@ export interface DeviceListItem {
   patchAgeDays: number | null;
 }
 
+/** Ein Knoten der OU-Navigation. Der Baum entsteht im Browser aus den DNs. */
+export interface DeviceOu {
+  dn: string;
+  devices: number;
+}
+
 export interface Paged<T> {
   items: T[];
   total: number;

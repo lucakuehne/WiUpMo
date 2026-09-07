@@ -1,16 +1,8 @@
 <script setup lang="ts">
-import Button from 'primevue/button';
-import Card from 'primevue/card';
-import Column from 'primevue/column';
-import ConfirmDialog from 'primevue/confirmdialog';
-import DataTable from 'primevue/datatable';
-import FileUpload, { type FileUploadSelectEvent } from 'primevue/fileupload';
-import Message from 'primevue/message';
-import Tag from 'primevue/tag';
-import Textarea from 'primevue/textarea';
-import { useConfirm } from 'primevue/useconfirm';
-import { onMounted, ref } from 'vue';
+import { Loader2, Send, Trash2, Upload } from '@lucide/vue';
+import { onMounted, ref, useTemplateRef } from 'vue';
 import { useRouter } from 'vue-router';
+import { toast } from 'vue-sonner';
 import { del, get, post, upload } from '@/api/client';
 import type {
   AgentRelease,
@@ -18,28 +10,62 @@ import type {
   AgentUpdateJobView,
   CreateUpdateJobsResult,
 } from '@/api/types';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
+import TablePager from '@/components/TablePager.vue';
 import { formatBytes, formatDateTime } from '@/format';
+import { usePagedList } from '@/paged';
 
 const router = useRouter();
-const confirm = useConfirm();
 
 const releases = ref<AgentRelease[]>([]);
 const jobs = ref<AgentUpdateJobView[]>([]);
 const loading = ref(true);
 const busy = ref(false);
 const error = ref<string | null>(null);
-const notice = ref<string | null>(null);
 
 const notes = ref('');
 const file = ref<File | null>(null);
+const fileInput = useTemplateRef<HTMLInputElement>('fileInput');
+
+const jobsPage = usePagedList(jobs);
 
 async function load(): Promise<void> {
   error.value = null;
+
   try {
     const [r, j] = await Promise.all([
       get<AgentRelease[]>('/api/agent-releases'),
       get<AgentUpdateJobView[]>('/api/agent-update-jobs', { limit: 100 }),
     ]);
+
     releases.value = r;
     jobs.value = j;
   } catch (e) {
@@ -49,9 +75,8 @@ async function load(): Promise<void> {
   }
 }
 
-function onSelect(event: FileUploadSelectEvent): void {
-  const selected = Array.isArray(event.files) ? event.files[0] : event.files;
-  file.value = selected ?? null;
+function onSelect(event: Event): void {
+  file.value = (event.target as HTMLInputElement).files?.[0] ?? null;
 }
 
 async function publish(): Promise<void> {
@@ -61,7 +86,6 @@ async function publish(): Promise<void> {
 
   busy.value = true;
   error.value = null;
-  notice.value = null;
 
   try {
     // Ohne Versionsangabe: Das Backend liest sie aus der Programmdatei.
@@ -72,10 +96,17 @@ async function publish(): Promise<void> {
     form.append('file', file.value);
 
     const created = await upload<AgentRelease>('/api/agent-releases', form);
-    notice.value = `Version ${created.version} aufgenommen (SHA-256 ${created.sha256.slice(0, 16)}…).`;
+
+    toast.success(`Version ${created.version} aufgenommen.`, {
+      description: `SHA-256 ${created.sha256.slice(0, 16)}…`,
+    });
 
     notes.value = '';
     file.value = null;
+    if (fileInput.value) {
+      fileInput.value.value = '';
+    }
+
     await load();
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Der Upload ist fehlgeschlagen.';
@@ -86,9 +117,10 @@ async function publish(): Promise<void> {
 
 async function setCurrent(release: AgentRelease): Promise<void> {
   busy.value = true;
+
   try {
     releases.value = await post<AgentRelease[]>(`/api/agent-releases/${release.id}/current`);
-    notice.value = `${release.version} ist jetzt die aktuelle Version.`;
+    toast.success(`${release.version} ist jetzt die aktuelle Version.`);
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Änderung fehlgeschlagen.';
   } finally {
@@ -96,50 +128,58 @@ async function setCurrent(release: AgentRelease): Promise<void> {
   }
 }
 
-function remove(release: AgentRelease): void {
-  confirm.require({
-    header: 'Version entfernen',
-    message:
-      `${release.version} samt Datei löschen? Geräte, die diese Version melden, bleiben ` +
-      'unberührt — nur ein erneutes Ausrollen ist danach nicht mehr möglich.',
-    acceptLabel: 'Entfernen',
-    rejectLabel: 'Abbrechen',
-    acceptProps: { severity: 'danger' },
-    accept: async () => {
-      try {
-        releases.value = await del<AgentRelease[]>(`/api/agent-releases/${release.id}`);
-      } catch (e) {
-        error.value = e instanceof Error ? e.message : 'Entfernen fehlgeschlagen.';
-      }
-    },
-  });
+/**
+ * Rückfragen als Dialog auf einem gemerkten Eintrag.
+ *
+ * Beide Vorgänge sind schwer zurückzunehmen: Das Entfernen löscht die Datei,
+ * das Ausrollen setzt eine ganze Flotte in Bewegung.
+ */
+const pendingRemoval = ref<AgentRelease | null>(null);
+const pendingRollOut = ref<AgentRelease | null>(null);
+
+async function remove(): Promise<void> {
+  const release = pendingRemoval.value;
+  if (!release) {
+    return;
+  }
+
+  pendingRemoval.value = null;
+
+  try {
+    releases.value = await del<AgentRelease[]>(`/api/agent-releases/${release.id}`);
+    toast.success(`${release.version} entfernt.`);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Entfernen fehlgeschlagen.';
+  }
 }
 
-function rollOut(release: AgentRelease): void {
-  confirm.require({
-    header: 'Ausrollen',
-    message:
-      `Alle aktiven Geräte, die nicht auf ${release.version} laufen, erhalten einen ` +
-      'Update-Auftrag. Sie holen ihn beim nächsten Check-in ab und tauschen sich selbst aus.',
-    acceptLabel: 'Aufträge anlegen',
-    rejectLabel: 'Abbrechen',
-    accept: async () => {
-      busy.value = true;
-      try {
-        const result = await post<CreateUpdateJobsResult>('/api/agent-update-jobs', {
-          targetVersion: release.version,
-        });
-        notice.value =
-          `${result.created} Auftrag/Aufträge auf ${result.targetVersion} angelegt` +
-          (result.skipped > 0 ? `, ${result.skipped} übersprungen (bereits ein Auftrag offen).` : '.');
-        await load();
-      } catch (e) {
-        error.value = e instanceof Error ? e.message : 'Ausrollen fehlgeschlagen.';
-      } finally {
-        busy.value = false;
-      }
-    },
-  });
+async function rollOut(): Promise<void> {
+  const release = pendingRollOut.value;
+  if (!release) {
+    return;
+  }
+
+  pendingRollOut.value = null;
+  busy.value = true;
+
+  try {
+    const result = await post<CreateUpdateJobsResult>('/api/agent-update-jobs', {
+      targetVersion: release.version,
+    });
+
+    toast.success(`${result.created} Auftrag/Aufträge auf ${result.targetVersion} angelegt.`, {
+      description:
+        result.skipped > 0
+          ? `${result.skipped} übersprungen — dort ist bereits ein Auftrag offen.`
+          : 'Die Geräte holen ihn beim nächsten Check-in ab.',
+    });
+
+    await load();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Ausrollen fehlgeschlagen.';
+  } finally {
+    busy.value = false;
+  }
 }
 
 const JOB_STATE_LABELS: Record<AgentUpdateJobState, string> = {
@@ -150,188 +190,218 @@ const JOB_STATE_LABELS: Record<AgentUpdateJobState, string> = {
   failed: 'gescheitert',
 };
 
-function jobSeverity(state: AgentUpdateJobState): 'success' | 'danger' | 'info' | 'warn' {
-  if (state === 'done') return 'success';
-  if (state === 'failed') return 'danger';
-  if (state === 'installing') return 'warn';
-  return 'info';
+function jobBadgeClass(state: AgentUpdateJobState): string {
+  switch (state) {
+    case 'done':
+      return 'bg-success/15 text-success border-success/30';
+    case 'failed':
+      return 'bg-destructive/15 text-destructive border-destructive/30';
+    case 'installing':
+      return 'bg-warning/15 text-warning-foreground border-warning/40 dark:text-warning';
+    default:
+      return 'bg-muted text-muted-foreground border-transparent';
+  }
 }
 
 onMounted(load);
 </script>
 
 <template>
-  <div class="page">
-    <ConfirmDialog />
+  <div class="mx-auto max-w-[1600px] px-5 py-6">
+    <h1 class="mb-4 text-xl font-semibold">Agent-Versionen</h1>
 
-    <div class="page-header">
-      <h1>Agent-Versionen</h1>
-    </div>
+    <Alert v-if="error" variant="destructive" class="mb-4">
+      <AlertDescription>{{ error }}</AlertDescription>
+    </Alert>
 
-    <Message v-if="error" severity="error" :closable="false" style="margin-bottom: 1rem">
-      {{ error }}
-    </Message>
-    <Message v-if="notice" severity="success" :closable="false" style="margin-bottom: 1rem">
-      {{ notice }}
-    </Message>
+    <Card class="mb-4">
+      <CardHeader>
+        <CardTitle>Neue Version aufnehmen</CardTitle>
+        <CardDescription>
+          Die mit <code>dotnet publish</code> erzeugte <code>wiupmo-agent.exe</code>. Die
+          Versionsnummer wird aus der Datei gelesen — sie muss der entsprechen, die der Agent von
+          sich meldet. Die Prüfsumme wird beim Hochladen gebildet; der Agent vergleicht die
+          heruntergeladene Datei dagegen und tauscht nur bei Übereinstimmung.
+        </CardDescription>
+      </CardHeader>
 
-    <Card style="margin-bottom: 1rem">
-      <template #title>Neue Version aufnehmen</template>
-      <template #subtitle>
-        Die mit <code>dotnet publish</code> erzeugte <code>wiupmo-agent.exe</code>. Die
-        Versionsnummer wird aus der Datei gelesen — sie muss der entsprechen, die der Agent von
-        sich meldet. Die Prüfsumme wird beim Hochladen gebildet; der Agent vergleicht die
-        heruntergeladene Datei dagegen und tauscht nur bei Übereinstimmung.
-      </template>
-
-      <template #content>
-        <div class="field" style="margin-bottom: 1rem">
-          <label for="notes">Anmerkungen</label>
-          <Textarea id="notes" v-model="notes" rows="2" auto-resize />
+      <CardContent class="space-y-4">
+        <div class="space-y-1.5">
+          <Label for="notes">Anmerkungen</Label>
+          <Textarea id="notes" v-model="notes" rows="2" class="max-w-2xl" />
         </div>
 
-        <FileUpload
-          mode="basic"
-          accept=".exe"
-          :max-file-size="300000000"
-          choose-label="Datei wählen"
-          :auto="false"
-          custom-upload
-          @select="onSelect"
-        />
+        <div class="flex flex-wrap items-center gap-3">
+          <Button variant="outline" size="sm" @click="fileInput?.click()">Datei wählen</Button>
 
-        <p v-if="file" class="muted" style="margin-top: 0.5rem">
-          {{ file.name }} · {{ formatBytes(String(file.size)) }}
-        </p>
-      </template>
+          <!-- Das eigentliche Feld bleibt verborgen: Sein Aussehen lässt sich
+               nicht gestalten, sein Verhalten braucht es aber. -->
+          <input ref="fileInput" type="file" accept=".exe" class="hidden" @change="onSelect" />
 
-      <template #footer>
-        <Button
-          label="Aufnehmen"
-          icon="pi pi-upload"
-          :disabled="!file"
-          :loading="busy"
-          @click="publish"
-        />
-      </template>
+          <span v-if="file" class="text-muted-foreground text-sm">
+            {{ file.name }} · {{ formatBytes(String(file.size)) }}
+          </span>
+          <span v-else class="text-muted-foreground text-sm">Keine Datei gewählt.</span>
+        </div>
+      </CardContent>
+
+      <CardFooter>
+        <Button :disabled="!file || busy" @click="publish">
+          <Loader2 v-if="busy" class="size-4 animate-spin" />
+          <Upload v-else class="size-4" />
+          Aufnehmen
+        </Button>
+      </CardFooter>
     </Card>
 
-    <DataTable
-      :value="releases"
-      :loading="loading"
-      size="small"
-      striped-rows
-      data-key="id"
-      style="margin-bottom: 1.5rem"
-    >
-      <template #empty>Noch keine Version hinterlegt.</template>
+    <div class="mb-6 rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Version</TableHead>
+            <TableHead class="w-28 text-right">Grösse</TableHead>
+            <TableHead class="w-44">SHA-256</TableHead>
+            <TableHead class="w-24 text-right">Geräte</TableHead>
+            <TableHead class="w-40">Aufgenommen</TableHead>
+            <TableHead>Anmerkungen</TableHead>
+            <TableHead class="w-64" />
+          </TableRow>
+        </TableHeader>
 
-      <Column header="Version">
-        <template #body="{ data }">
-          <strong>{{ (data as AgentRelease).version }}</strong>
-          <Tag
-            v-if="(data as AgentRelease).isCurrent"
-            value="aktuell"
-            severity="success"
-            style="margin-left: 0.5rem"
-          />
-        </template>
-      </Column>
+        <TableBody>
+          <TableRow v-if="!loading && releases.length === 0">
+            <TableCell :colspan="7" class="text-muted-foreground py-8 text-center">
+              Noch keine Version hinterlegt.
+            </TableCell>
+          </TableRow>
 
-      <Column header="Grösse" body-class="num" header-class="num">
-        <template #body="{ data }">{{ formatBytes((data as AgentRelease).sizeBytes) }}</template>
-      </Column>
+          <TableRow v-for="release in releases" :key="release.id">
+            <TableCell>
+              <span class="tabular font-medium">{{ release.version }}</span>
+              <Badge
+                v-if="release.isCurrent"
+                variant="outline"
+                class="bg-success/15 text-success border-success/30 ml-2"
+              >
+                aktuell
+              </Badge>
+            </TableCell>
 
-      <Column header="SHA-256">
-        <template #body="{ data }">
-          <code style="font-size: 0.75rem">{{ (data as AgentRelease).sha256.slice(0, 16) }}…</code>
-        </template>
-      </Column>
+            <TableCell class="tabular text-right">{{ formatBytes(release.sizeBytes) }}</TableCell>
+            <TableCell><code class="text-xs">{{ release.sha256.slice(0, 16) }}…</code></TableCell>
+            <TableCell class="tabular text-right">{{ release.devices }}</TableCell>
+            <TableCell>{{ formatDateTime(release.releasedAt) }}</TableCell>
+            <TableCell class="text-muted-foreground text-sm">{{ release.notes ?? '' }}</TableCell>
 
-      <Column header="Geräte" body-class="num" header-class="num">
-        <template #body="{ data }">{{ (data as AgentRelease).devices }}</template>
-      </Column>
+            <TableCell>
+              <div class="flex justify-end gap-1.5 whitespace-nowrap">
+                <Button
+                  v-if="!release.isCurrent"
+                  variant="outline"
+                  size="sm"
+                  :disabled="busy"
+                  @click="setCurrent(release)"
+                >
+                  Als aktuell
+                </Button>
+                <Button size="sm" :disabled="busy" @click="pendingRollOut = release">
+                  <Send class="size-3.5" />
+                  Ausrollen
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="text-destructive size-8"
+                  :disabled="busy"
+                  @click="pendingRemoval = release"
+                >
+                  <Trash2 class="size-4" />
+                </Button>
+              </div>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    </div>
 
-      <Column header="Aufgenommen">
-        <template #body="{ data }">{{ formatDateTime((data as AgentRelease).releasedAt) }}</template>
-      </Column>
+    <h2 class="mb-2 text-base font-semibold">Update-Aufträge</h2>
 
-      <Column field="notes" header="Anmerkungen" />
+    <div class="rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Gerät</TableHead>
+            <TableHead class="w-32">Zielversion</TableHead>
+            <TableHead class="w-40">Zustand</TableHead>
+            <TableHead class="w-40">Angelegt</TableHead>
+            <TableHead class="w-40">Abgeschlossen</TableHead>
+            <TableHead>Fehler</TableHead>
+          </TableRow>
+        </TableHeader>
 
-      <Column header="" style="width: 1%">
-        <template #body="{ data }">
-          <div style="display: flex; gap: 0.35rem; white-space: nowrap">
-            <Button
-              v-if="!(data as AgentRelease).isCurrent"
-              label="Als aktuell"
-              size="small"
-              severity="secondary"
-              outlined
-              @click="setCurrent(data as AgentRelease)"
-            />
-            <Button
-              label="Ausrollen"
-              icon="pi pi-send"
-              size="small"
-              @click="rollOut(data as AgentRelease)"
-            />
-            <Button
-              icon="pi pi-trash"
-              size="small"
-              severity="danger"
-              text
-              @click="remove(data as AgentRelease)"
-            />
-          </div>
-        </template>
-      </Column>
-    </DataTable>
+        <TableBody>
+          <TableRow v-if="!loading && jobs.length === 0">
+            <TableCell :colspan="6" class="text-muted-foreground py-8 text-center">
+              Noch keine Aufträge.
+            </TableCell>
+          </TableRow>
 
-    <h2 style="font-size: 1.05rem">Update-Aufträge</h2>
+          <TableRow
+            v-for="job in jobsPage.items"
+            :key="job.id"
+            class="cursor-pointer"
+            @click="router.push({ name: 'device', params: { id: job.deviceId } })"
+          >
+            <TableCell class="font-medium">{{ job.hostname }}</TableCell>
+            <TableCell class="tabular">{{ job.targetVersion }}</TableCell>
+            <TableCell>
+              <Badge variant="outline" :class="jobBadgeClass(job.state)">
+                {{ JOB_STATE_LABELS[job.state] }}
+              </Badge>
+            </TableCell>
+            <TableCell>{{ formatDateTime(job.createdAt) }}</TableCell>
+            <TableCell>{{ formatDateTime(job.completedAt) }}</TableCell>
+            <TableCell class="text-destructive text-xs">{{ job.error ?? '' }}</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    </div>
 
-    <DataTable :value="jobs" :loading="loading" size="small" striped-rows paginator :rows="25" data-key="id">
-      <template #empty>Noch keine Aufträge.</template>
+    <TablePager v-model:page="jobsPage.page" v-model:limit="jobsPage.limit" :total="jobsPage.total" />
 
-      <Column header="Gerät">
-        <template #body="{ data }">
-          <Button
-            :label="(data as AgentUpdateJobView).hostname"
-            link
-            size="small"
-            @click="router.push({ name: 'device', params: { id: (data as AgentUpdateJobView).deviceId } })"
-          />
-        </template>
-      </Column>
+    <!-- ===================== Rückfragen ===================== -->
+    <Dialog :open="pendingRemoval !== null" @update:open="pendingRemoval = null">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Version entfernen</DialogTitle>
+          <DialogDescription>
+            {{ pendingRemoval?.version }} samt Datei löschen? Geräte, die diese Version melden,
+            bleiben unberührt — nur ein erneutes Ausrollen ist danach nicht mehr möglich.
+          </DialogDescription>
+        </DialogHeader>
 
-      <Column field="targetVersion" header="Zielversion" />
+        <DialogFooter>
+          <Button variant="outline" @click="pendingRemoval = null">Abbrechen</Button>
+          <Button variant="destructive" @click="remove">Entfernen</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
-      <Column header="Zustand">
-        <template #body="{ data }">
-          <Tag
-            :value="JOB_STATE_LABELS[(data as AgentUpdateJobView).state]"
-            :severity="jobSeverity((data as AgentUpdateJobView).state)"
-          />
-        </template>
-      </Column>
+    <Dialog :open="pendingRollOut !== null" @update:open="pendingRollOut = null">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Ausrollen</DialogTitle>
+          <DialogDescription>
+            Alle aktiven Geräte, die nicht auf {{ pendingRollOut?.version }} laufen, erhalten einen
+            Update-Auftrag. Sie holen ihn beim nächsten Check-in ab und tauschen sich selbst aus.
+          </DialogDescription>
+        </DialogHeader>
 
-      <Column header="Angelegt">
-        <template #body="{ data }">{{ formatDateTime((data as AgentUpdateJobView).createdAt) }}</template>
-      </Column>
-
-      <Column header="Abgeschlossen">
-        <template #body="{ data }">
-          {{ formatDateTime((data as AgentUpdateJobView).completedAt) }}
-        </template>
-      </Column>
-
-      <Column header="Fehler">
-        <template #body="{ data }">
-          <span v-if="(data as AgentUpdateJobView).error" style="color: var(--p-red-500)">
-            {{ (data as AgentUpdateJobView).error }}
-          </span>
-          <span v-else class="muted">—</span>
-        </template>
-      </Column>
-    </DataTable>
+        <DialogFooter>
+          <Button variant="outline" @click="pendingRollOut = null">Abbrechen</Button>
+          <Button @click="rollOut">Aufträge anlegen</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

@@ -11,7 +11,12 @@ import {
   TimelineEntryDto,
   TimelineQueryDto,
 } from './dto/device-detail.dto.js';
-import { DeviceListDto, DeviceListItemDto, DeviceQueryDto } from './dto/device-query.dto.js';
+import {
+  DeviceListDto,
+  DeviceListItemDto,
+  DeviceOuDto,
+  DeviceQueryDto,
+} from './dto/device-query.dto.js';
 
 /**
  * Abbildung der sortierbaren Felder auf Spalten. Der Wert landet unmaskiert in
@@ -181,6 +186,39 @@ export class DevicesService {
     );
   }
 
+  /**
+   * Die Organisationseinheiten, in denen ueberhaupt Geraete liegen — als flache
+   * Liste mit der jeweils unmittelbar darin liegenden Anzahl.
+   *
+   * Bewusst aus der Datenbank und nicht aus dem Verzeichnis: Die Navigation
+   * soll zeigen, wo etwas zu sehen ist. Eine leere Einheit aus dem AD waere ein
+   * Ast, der ins Nichts fuehrt, und ein Geraet in einer nicht mehr
+   * abgeglichenen Einheit wuerde umgekehrt unerreichbar.
+   *
+   * Der Baum entsteht im Browser aus den DNs. Ihn hier zu bauen hiesse, eine
+   * Hierarchie durch die Schnittstelle zu schleusen, die in den Namen schon
+   * vollstaendig enthalten ist.
+   */
+  async organizationalUnits(status?: DeviceStatus): Promise<DeviceOuDto[]> {
+    const params = new SqlParams();
+    const conditions = ['d.ad_ou IS NOT NULL'];
+
+    if (status) {
+      conditions.push(`d.status = ${params.add(status)}`);
+    }
+
+    const rows: Array<{ ad_ou: string; devices: string }> = await this.dataSource.query(
+      `SELECT d.ad_ou, count(*)::text AS devices
+         FROM devices d
+        WHERE ${conditions.join(' AND ')}
+        GROUP BY d.ad_ou
+        ORDER BY d.ad_ou`,
+      params.values,
+    );
+
+    return rows.map((row) => ({ dn: row.ad_ou, devices: Number(row.devices) }));
+  }
+
   private buildWhere(query: DeviceQueryDto, params: SqlParams): string {
     const conditions: string[] = [];
 
@@ -191,6 +229,17 @@ export class DevicesService {
 
     if (query.status) {
       conditions.push(`d.status = ${params.add(query.status)}`);
+    }
+
+    if (query.ou) {
+      // Der gewaehlte Bereich und alles darunter. Suffixvergleich statt LIKE:
+      // In einem DN koennen '%' und '_' vorkommen, ein Muster muesste sie erst
+      // maskieren.
+      const ou = params.add(query.ou);
+      conditions.push(
+        `(lower(d.ad_ou) = lower(${ou})
+          OR lower(right(d.ad_ou, length(${ou}) + 1)) = lower(',' || ${ou}))`,
+      );
     }
 
     if (query.updateSource) {

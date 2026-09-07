@@ -229,6 +229,18 @@ sudo docker run --rm -v wiupmo_agent-releases:/data -v "$PWD:/backup" alpine \
   tar czf /backup/agent-releases.tar.gz -C /data .
 ```
 
+**Eigentümer des Volumes.** Das Backend läuft als `node`, nicht als root. Legt
+Docker den Einhängepunkt eines neuen Volumes selbst an, gehört er root — der
+Upload scheitert dann mit `EACCES: permission denied, mkdir`. Der Dienst
+`prepare-releases` im Stack richtet das bei jedem Start; er läuft als root, tut
+nichts als `chown` und beendet sich.
+
+Ohne Neuanlage des Stacks lässt es sich auch von Hand richten:
+
+```bash
+sudo docker run --rm -v wiupmo_agent-releases:/data alpine chown -R 1000:1000 /data
+```
+
 ### Von vorn anfangen
 
 Wenn der Zustand auf dem Host unklar geworden ist — halb entfernte Container,

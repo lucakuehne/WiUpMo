@@ -3,7 +3,7 @@ import { RefreshCw } from '@lucide/vue';
 import { onMounted, ref } from 'vue';
 import { toast } from 'vue-sonner';
 import { get, post } from '@/api/client';
-import type { AdStatus, AdSyncResult, AdSyncRun } from '@/api/types';
+import type { AdStatus, AdSyncResult, AdSyncRun, Paged } from '@/api/types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import TablePager from '@/components/TablePager.vue';
 import { formatDateTime } from '@/format';
 
 /**
@@ -36,6 +37,9 @@ import { formatDateTime } from '@/format';
  */
 const status = ref<AdStatus | null>(null);
 const runs = ref<AdSyncRun[]>([]);
+const total = ref(0);
+const page = ref(1);
+const limit = ref(25);
 const loading = ref(true);
 const syncing = ref(false);
 const error = ref<string | null>(null);
@@ -46,16 +50,23 @@ async function load(): Promise<void> {
   try {
     const [current, history] = await Promise.all([
       get<AdStatus>('/api/ad/status'),
-      get<AdSyncRun[]>('/api/ad/sync-runs', { limit: 25 }),
+      get<Paged<AdSyncRun>>('/api/ad/sync-runs', { page: page.value, limit: limit.value }),
     ]);
 
     status.value = current;
-    runs.value = history;
+    runs.value = history.items;
+    total.value = history.total;
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Der Stand des Abgleichs ist nicht abrufbar.';
   } finally {
     loading.value = false;
   }
+}
+
+/** Ein neuer Lauf steht oben — nach dem Abgleich gehört die erste Seite gezeigt. */
+function reset(): Promise<void> {
+  page.value = 1;
+  return load();
 }
 
 async function runSync(): Promise<void> {
@@ -77,7 +88,7 @@ async function runSync(): Promise<void> {
       });
     }
 
-    await load();
+    await reset();
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Der Abgleich konnte nicht gestartet werden.';
   } finally {
@@ -106,7 +117,7 @@ onMounted(load);
 
 // Die Einstellungen laden das Protokoll nach dem Speichern neu: Ein geänderter
 // Suchbereich stösst serverseitig sofort einen Lauf an, der dann hier steht.
-defineExpose({ reload: load });
+defineExpose({ reload: reset });
 </script>
 
 <template>
@@ -182,6 +193,17 @@ defineExpose({ reload: load });
           </TableBody>
         </Table>
       </div>
+
+      <TablePager
+        v-model:page="page"
+        v-model:limit="limit"
+        :total="total"
+        @update:page="load"
+        @update:limit="
+          page = 1;
+          load();
+        "
+      />
     </CardContent>
   </Card>
 </template>

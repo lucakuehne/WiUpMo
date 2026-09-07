@@ -68,6 +68,18 @@ export class DeviceQueryDto {
   @IsOptional()
   status?: DeviceStatus;
 
+  /**
+   * Organisationseinheit als DN, einschliesslich aller darunterliegenden.
+   *
+   * Der Unterbaum ist die einzig brauchbare Auslegung: Wer im Baum auf
+   * `OU=Clients` klickt, meint die Notebooks und Arbeitsplaetze darunter mit —
+   * direkt in einer Zwischenebene liegen selten Konten.
+   */
+  @IsString()
+  @MaxLength(512)
+  @IsOptional()
+  ou?: string;
+
   @IsEnum(UpdateSource)
   @IsOptional()
   updateSource?: UpdateSource;
@@ -100,6 +112,20 @@ export class DeviceQueryDto {
   @IsBoolean()
   @IsOptional()
   hasAgent?: boolean;
+}
+
+export class DeviceOuQueryDto {
+  @IsEnum(DeviceStatus)
+  @IsOptional()
+  status?: DeviceStatus;
+}
+
+/** Ein Knoten der OU-Navigation: der DN und die Zahl der Geraete darin. */
+export class DeviceOuDto {
+  dn: string;
+
+  /** Nur die unmittelbar in dieser Einheit liegenden; Untereinheiten zaehlen eigene. */
+  devices: number;
 }
 
 export class DeviceListItemDto {

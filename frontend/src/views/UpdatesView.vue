@@ -1,23 +1,30 @@
 <script setup lang="ts">
-import Button from 'primevue/button';
-import Column from 'primevue/column';
-import DataTable, { type DataTablePageEvent, type DataTableSortEvent } from 'primevue/datatable';
-import IconField from 'primevue/iconfield';
-import InputIcon from 'primevue/inputicon';
-import InputText from 'primevue/inputtext';
-import Message from 'primevue/message';
-import Tag from 'primevue/tag';
-import ToggleButton from 'primevue/togglebutton';
+import { ChevronDown, ChevronRight, Search } from '@lucide/vue';
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { get } from '@/api/client';
-import type { Paged, UpdateDevice, UpdateDevices, UpdateListItem } from '@/api/types';
+import type { Paged, UpdateDevices, UpdateListItem } from '@/api/types';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import SortHead from '@/components/SortHead.vue';
+import TablePager from '@/components/TablePager.vue';
 import {
   UPDATE_STATE_LABELS,
   formatBytes,
   formatDate,
   formatHresult,
-  stateSeverity,
+  stateBadgeClass,
 } from '@/format';
 
 const router = useRouter();
@@ -36,8 +43,8 @@ const search = ref('');
 const isSecurity = ref(false);
 const onlyOpen = ref(true);
 
-/** Aufgeklappte Zeilen mit ihren Geraetelisten, nachgeladen bei Bedarf. */
-const expanded = ref<Record<string, boolean>>({});
+/** Aufgeklappte Zeilen mit ihren Gerätelisten, nachgeladen bei Bedarf. */
+const expanded = ref<Set<string>>(new Set());
 const deviceLists = ref<Record<string, UpdateDevices | undefined>>({});
 
 async function load(): Promise<void> {
@@ -57,6 +64,9 @@ async function load(): Promise<void> {
 
     rows.value = result.items;
     total.value = result.total;
+
+    // Beim Seitenwechsel ist kein Eintrag mehr derselbe.
+    expanded.value = new Set();
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Der Update-Katalog konnte nicht geladen werden.';
   } finally {
@@ -65,31 +75,33 @@ async function load(): Promise<void> {
 }
 
 /**
- * Die Geraeteliste haengt an jedem Katalogeintrag, wird aber erst beim
- * Aufklappen geholt — bei einigen hundert Updates waere das Mitladen die
- * teuerste Abfrage der Seite und in den meisten Faellen umsonst.
+ * Die Geräteliste hängt an jedem Katalogeintrag, wird aber erst beim
+ * Aufklappen geholt — bei einigen hundert Updates wäre das Mitladen die
+ * teuerste Abfrage der Seite und in den meisten Fällen umsonst.
  */
-async function onExpand(update: UpdateListItem): Promise<void> {
-  if (deviceLists.value[update.id]) {
+async function toggleRow(update: UpdateListItem): Promise<void> {
+  const next = new Set(expanded.value);
+
+  if (next.has(update.id)) {
+    next.delete(update.id);
+    expanded.value = next;
     return;
   }
-  deviceLists.value = {
-    ...deviceLists.value,
-    [update.id]: await get<UpdateDevices>(`/api/updates/${update.id}/devices`),
-  };
-}
 
-function onPage(event: DataTablePageEvent): void {
-  page.value = event.page + 1;
-  limit.value = event.rows;
-  void load();
-}
+  next.add(update.id);
+  expanded.value = next;
 
-function onSort(event: DataTableSortEvent): void {
-  if (typeof event.sortField === 'string') {
-    sortBy.value = event.sortField;
-    sortDir.value = event.sortOrder === -1 ? 'desc' : 'asc';
+  if (!deviceLists.value[update.id]) {
+    deviceLists.value = {
+      ...deviceLists.value,
+      [update.id]: await get<UpdateDevices>(`/api/updates/${update.id}/devices`),
+    };
   }
+}
+
+function onSort(field: string, dir: 'asc' | 'desc'): void {
+  sortBy.value = field;
+  sortDir.value = dir;
   page.value = 1;
   void load();
 }
@@ -99,6 +111,17 @@ function onFilterChange(): void {
   void load();
 }
 
+/**
+ * Über den Namen statt über die Referenz: In der Vorlage werden Refs entpackt,
+ * ein übergebener Ref käme dort als Wahrheitswert an.
+ */
+const toggles = { onlyOpen, isSecurity };
+
+function toggleFilter(name: keyof typeof toggles): void {
+  toggles[name].value = !toggles[name].value;
+  onFilterChange();
+}
+
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
 function onSearchInput(): void {
@@ -106,189 +129,228 @@ function onSearchInput(): void {
   searchTimer = setTimeout(onFilterChange, 300);
 }
 
+function kbUrl(article: string): string {
+  return `https://support.microsoft.com/help/${article}`;
+}
+
 onMounted(load);
 </script>
 
 <template>
-  <div class="page">
-    <div class="page-header">
-      <h1>Updates</h1>
-      <span class="muted">{{ total }} Einträge</span>
+  <div class="mx-auto max-w-[1600px] px-5 py-6">
+    <div class="mb-4 flex flex-wrap items-baseline justify-between gap-3">
+      <h1 class="text-xl font-semibold">Updates</h1>
+      <span class="text-muted-foreground tabular text-sm">{{ total }} Einträge</span>
     </div>
 
-    <div class="filters">
-      <IconField>
-        <InputIcon class="pi pi-search" />
-        <InputText v-model="search" placeholder="Titel oder KB-Nummer" @input="onSearchInput" />
-      </IconField>
+    <div class="mb-3 flex flex-wrap items-center gap-2">
+      <div class="relative">
+        <Search class="text-muted-foreground absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
+        <Input
+          v-model="search"
+          placeholder="Titel oder KB-Nummer"
+          class="w-64 pl-8"
+          @input="onSearchInput"
+        />
+      </div>
 
-      <ToggleButton
-        v-model="onlyOpen"
-        on-label="Nur offene"
-        off-label="Nur offene"
-        @change="onFilterChange"
-      />
-
-      <ToggleButton
-        v-model="isSecurity"
-        on-label="Nur Sicherheit"
-        off-label="Nur Sicherheit"
-        @change="onFilterChange"
-      />
-    </div>
-
-    <Message v-if="error" severity="error" :closable="false" style="margin-bottom: 1rem">
-      {{ error }}
-    </Message>
-
-    <DataTable
-      v-model:expanded-rows="expanded"
-      :value="rows"
-      :loading="loading"
-      lazy
-      paginator
-      :rows="limit"
-      :total-records="total"
-      :rows-per-page-options="[25, 50, 100]"
-      :first="(page - 1) * limit"
-      data-key="id"
-      removable-sort
-      :sort-field="sortBy"
-      :sort-order="sortDir === 'asc' ? 1 : -1"
-      size="small"
-      striped-rows
-      @page="onPage"
-      @sort="onSort"
-      @row-expand="onExpand($event.data as UpdateListItem)"
-    >
-      <template #empty>Keine Updates gefunden.</template>
-
-      <Column expander style="width: 3rem" />
-
-      <Column field="kbArticle" header="KB" sortable style="width: 8rem">
-        <template #body="{ data }">
-          <a
-            v-if="(data as UpdateListItem).kbArticle"
-            :href="`https://support.microsoft.com/help/${(data as UpdateListItem).kbArticle}`"
-            target="_blank"
-            rel="noreferrer"
-          >
-            KB{{ (data as UpdateListItem).kbArticle }}
-          </a>
-          <span v-else class="muted">—</span>
-        </template>
-      </Column>
-
-      <Column field="title" header="Titel" sortable>
-        <template #body="{ data }">
-          <div>{{ (data as UpdateListItem).title }}</div>
-          <div class="muted" style="font-size: 0.8rem">
-            {{ (data as UpdateListItem).categories.join(', ') }}
-          </div>
-        </template>
-      </Column>
-
-      <Column field="severity" header="Einstufung" sortable style="width: 10rem">
-        <template #body="{ data }">
-          <Tag
-            v-if="(data as UpdateListItem).isSecurity"
-            :value="(data as UpdateListItem).severity ?? 'Sicherheit'"
-            severity="danger"
-          />
-          <span v-else class="muted">—</span>
-        </template>
-      </Column>
-
-      <Column header="Grösse" body-class="num" header-class="num" style="width: 7rem">
-        <template #body="{ data }">{{ formatBytes((data as UpdateListItem).sizeBytes) }}</template>
-      </Column>
-
-      <Column
-        field="affectedDevices"
-        header="offen auf"
-        sortable
-        body-class="num"
-        header-class="num"
-        style="width: 8rem"
+      <Button
+        :variant="onlyOpen ? 'default' : 'outline'"
+        size="sm"
+        @click="toggleFilter('onlyOpen')"
       >
-        <template #body="{ data }">
-          <strong>{{ (data as UpdateListItem).affectedDevices }}</strong>
-        </template>
-      </Column>
+        Nur offene
+      </Button>
 
-      <Column header="installiert" body-class="num" header-class="num" style="width: 8rem">
-        <template #body="{ data }">{{ (data as UpdateListItem).installedDevices }}</template>
-      </Column>
+      <Button
+        :variant="isSecurity ? 'default' : 'outline'"
+        size="sm"
+        @click="toggleFilter('isSecurity')"
+      >
+        Nur Sicherheit
+      </Button>
+    </div>
 
-      <Column header="gescheitert" body-class="num" header-class="num" style="width: 8rem">
-        <template #body="{ data }">
-          <span :style="(data as UpdateListItem).failedDevices > 0 ? 'color: var(--p-red-500); font-weight: 600' : ''">
-            {{ (data as UpdateListItem).failedDevices }}
-          </span>
-        </template>
-      </Column>
+    <Alert v-if="error" variant="destructive" class="mb-4">
+      <AlertDescription>{{ error }}</AlertDescription>
+    </Alert>
 
-      <Column field="firstSeenAt" header="Erstmals gesehen" sortable style="width: 11rem">
-        <template #body="{ data }">{{ formatDate((data as UpdateListItem).firstSeenAt) }}</template>
-      </Column>
+    <div class="rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead class="w-10" />
+            <SortHead field="kbArticle" class="w-28" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
+              KB
+            </SortHead>
+            <SortHead field="title" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
+              Titel
+            </SortHead>
+            <SortHead field="severity" class="w-36" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
+              Einstufung
+            </SortHead>
+            <TableHead class="w-24 text-right">Grösse</TableHead>
+            <SortHead
+              field="affectedDevices"
+              numeric
+              class="w-28"
+              :sort-by="sortBy"
+              :sort-dir="sortDir"
+              @sort="onSort"
+            >
+              offen auf
+            </SortHead>
+            <TableHead class="w-28 text-right">installiert</TableHead>
+            <TableHead class="w-28 text-right">gescheitert</TableHead>
+            <SortHead
+              field="firstSeenAt"
+              class="w-36"
+              :sort-by="sortBy"
+              :sort-dir="sortDir"
+              @sort="onSort"
+            >
+              Erstmals gesehen
+            </SortHead>
+          </TableRow>
+        </TableHeader>
 
-      <template #expansion="{ data }">
-        <div style="padding: 0.5rem 1rem">
-          <p v-if="deviceLists[(data as UpdateListItem).id]" class="muted">
-            {{ deviceLists[(data as UpdateListItem).id]!.unaffected }} registrierte Geräte haben
-            dieses Update nie angeboten bekommen.
-          </p>
+        <TableBody>
+          <template v-if="loading">
+            <TableRow v-for="n in 6" :key="n">
+              <TableCell v-for="column in 9" :key="column">
+                <Skeleton class="h-4 w-full" />
+              </TableCell>
+            </TableRow>
+          </template>
 
-          <DataTable
-            :value="deviceLists[(data as UpdateListItem).id]?.items ?? []"
-            size="small"
-            data-key="deviceId"
-          >
-            <template #empty>Kein Gerät kennt dieses Update.</template>
+          <TableRow v-else-if="rows.length === 0">
+            <TableCell :colspan="9" class="text-muted-foreground py-8 text-center">
+              Keine Updates gefunden.
+            </TableCell>
+          </TableRow>
 
-            <Column header="Gerät">
-              <template #body="{ data: row }">
-                <Button
-                  :label="(row as UpdateDevice).hostname"
-                  link
-                  size="small"
-                  @click="router.push({ name: 'device', params: { id: (row as UpdateDevice).deviceId } })"
-                />
-              </template>
-            </Column>
+          <template v-for="row in loading ? [] : rows" :key="row.id">
+            <TableRow class="cursor-pointer" @click="toggleRow(row)">
+              <TableCell>
+                <ChevronDown v-if="expanded.has(row.id)" class="text-muted-foreground size-4" />
+                <ChevronRight v-else class="text-muted-foreground size-4" />
+              </TableCell>
 
-            <Column header="Zustand">
-              <template #body="{ data: row }">
-                <Tag
-                  :value="UPDATE_STATE_LABELS[(row as UpdateDevice).state]"
-                  :severity="stateSeverity((row as UpdateDevice).state)"
-                />
-              </template>
-            </Column>
+              <TableCell @click.stop>
+                <a
+                  v-if="row.kbArticle"
+                  :href="kbUrl(row.kbArticle)"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="text-primary hover:underline"
+                >
+                  KB{{ row.kbArticle }}
+                </a>
+                <span v-else class="text-muted-foreground">—</span>
+              </TableCell>
 
-            <Column header="Offen seit">
-              <template #body="{ data: row }">
-                {{ formatDate((row as UpdateDevice).firstAvailableAt) }}
-              </template>
-            </Column>
+              <TableCell>
+                <div>{{ row.title }}</div>
+                <div v-if="row.categories.length" class="text-muted-foreground text-xs">
+                  {{ row.categories.join(', ') }}
+                </div>
+              </TableCell>
 
-            <Column header="Installiert">
-              <template #body="{ data: row }">
-                {{ formatDate((row as UpdateDevice).installedAt) }}
-              </template>
-            </Column>
+              <TableCell>
+                <Badge
+                  v-if="row.isSecurity"
+                  variant="outline"
+                  class="bg-destructive/15 text-destructive border-destructive/30"
+                >
+                  {{ row.severity ?? 'Sicherheit' }}
+                </Badge>
+                <span v-else class="text-muted-foreground">—</span>
+              </TableCell>
 
-            <Column header="Fehlercode">
-              <template #body="{ data: row }">
-                <code v-if="(row as UpdateDevice).hresult">
-                  {{ formatHresult((row as UpdateDevice).hresult) }}
-                </code>
-                <span v-else class="muted">—</span>
-              </template>
-            </Column>
-          </DataTable>
-        </div>
-      </template>
-    </DataTable>
+              <TableCell class="tabular text-right">{{ formatBytes(row.sizeBytes) }}</TableCell>
+
+              <TableCell class="tabular text-right font-semibold">
+                {{ row.affectedDevices }}
+              </TableCell>
+
+              <TableCell class="tabular text-right">{{ row.installedDevices }}</TableCell>
+
+              <TableCell class="tabular text-right">
+                <span :class="row.failedDevices > 0 ? 'text-destructive font-semibold' : ''">
+                  {{ row.failedDevices }}
+                </span>
+              </TableCell>
+
+              <TableCell>{{ formatDate(row.firstSeenAt) }}</TableCell>
+            </TableRow>
+
+            <TableRow v-if="expanded.has(row.id)" class="hover:bg-transparent">
+              <TableCell :colspan="9" class="bg-muted/30 p-4">
+                <p v-if="deviceLists[row.id]" class="text-muted-foreground mb-2 text-xs">
+                  {{ deviceLists[row.id]!.unaffected }} registrierte Geräte haben dieses Update nie
+                  angeboten bekommen.
+                </p>
+                <p v-else class="text-muted-foreground text-xs">Wird geladen …</p>
+
+                <div v-if="deviceLists[row.id]" class="rounded-md border bg-background">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Gerät</TableHead>
+                        <TableHead class="w-36">Zustand</TableHead>
+                        <TableHead class="w-32">Offen seit</TableHead>
+                        <TableHead class="w-32">Installiert</TableHead>
+                        <TableHead class="w-32">Fehlercode</TableHead>
+                      </TableRow>
+                    </TableHeader>
+
+                    <TableBody>
+                      <TableRow v-if="deviceLists[row.id]!.items.length === 0">
+                        <TableCell :colspan="5" class="text-muted-foreground py-6 text-center">
+                          Kein Gerät kennt dieses Update.
+                        </TableCell>
+                      </TableRow>
+
+                      <TableRow
+                        v-for="device in deviceLists[row.id]!.items"
+                        :key="device.deviceId"
+                        class="cursor-pointer"
+                        @click="router.push({ name: 'device', params: { id: device.deviceId } })"
+                      >
+                        <TableCell class="font-medium">{{ device.hostname }}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" :class="stateBadgeClass(device.state)">
+                            {{ UPDATE_STATE_LABELS[device.state] }}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{{ formatDate(device.firstAvailableAt) }}</TableCell>
+                        <TableCell>{{ formatDate(device.installedAt) }}</TableCell>
+                        <TableCell>
+                          <code v-if="device.hresult" class="text-xs">
+                            {{ formatHresult(device.hresult) }}
+                          </code>
+                          <span v-else class="text-muted-foreground">—</span>
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              </TableCell>
+            </TableRow>
+          </template>
+        </TableBody>
+      </Table>
+    </div>
+
+    <TablePager
+      v-model:page="page"
+      v-model:limit="limit"
+      :total="total"
+      @update:page="load"
+      @update:limit="
+        page = 1;
+        load();
+      "
+    />
   </div>
 </template>

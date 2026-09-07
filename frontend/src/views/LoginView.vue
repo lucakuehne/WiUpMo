@@ -1,19 +1,27 @@
 <script setup lang="ts">
-import Button from 'primevue/button';
-import Card from 'primevue/card';
-import InputText from 'primevue/inputtext';
-import Message from 'primevue/message';
-import Password from 'primevue/password';
+import { Eye, EyeOff, Loader2 } from '@lucide/vue';
 import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ApiError } from '@/api/client';
 import { login } from '@/auth';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 const route = useRoute();
 const router = useRouter();
 
 const username = ref('');
 const password = ref('');
+const visible = ref(false);
 const error = ref<string | null>(null);
 const busy = ref(false);
 
@@ -37,43 +45,52 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <div class="centered">
-    <Card>
-      <template #title>Anmeldung</template>
-      <template #subtitle>Windows Update Monitoring</template>
+  <div class="flex min-h-screen items-center justify-center px-5 py-10">
+    <Card class="w-full max-w-sm">
+      <CardHeader>
+        <CardTitle>Anmeldung</CardTitle>
+        <CardDescription>Windows Update Monitoring</CardDescription>
+      </CardHeader>
 
-      <template #content>
-        <form @submit.prevent="submit">
-          <div class="field">
-            <label for="username">Benutzername</label>
-            <InputText id="username" v-model="username" autocomplete="username" autofocus />
+      <CardContent>
+        <form class="space-y-4" @submit.prevent="submit">
+          <div class="space-y-1.5">
+            <Label for="username">Benutzername</Label>
+            <Input id="username" v-model="username" autocomplete="username" autofocus />
           </div>
 
-          <div class="field">
-            <label for="password">Passwort</label>
-            <Password
-              id="password"
-              v-model="password"
-              autocomplete="current-password"
-              toggle-mask
-              :feedback="false"
-              fluid
-            />
+          <div class="space-y-1.5">
+            <Label for="password">Passwort</Label>
+            <div class="relative">
+              <Input
+                id="password"
+                v-model="password"
+                :type="visible ? 'text' : 'password'"
+                autocomplete="current-password"
+                class="pr-9"
+              />
+              <button
+                type="button"
+                class="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2"
+                :aria-label="visible ? 'Passwort verbergen' : 'Passwort anzeigen'"
+                @click="visible = !visible"
+              >
+                <EyeOff v-if="visible" class="size-4" />
+                <Eye v-else class="size-4" />
+              </button>
+            </div>
           </div>
 
-          <Message v-if="error" severity="error" :closable="false" style="margin-bottom: 1rem">
-            {{ error }}
-          </Message>
+          <Alert v-if="error" variant="destructive">
+            <AlertDescription>{{ error }}</AlertDescription>
+          </Alert>
 
-          <Button
-            type="submit"
-            label="Anmelden"
-            :loading="busy"
-            :disabled="!username || !password"
-            fluid
-          />
+          <Button type="submit" class="w-full" :disabled="busy || !username || !password">
+            <Loader2 v-if="busy" class="size-4 animate-spin" />
+            Anmelden
+          </Button>
         </form>
-      </template>
+      </CardContent>
     </Card>
   </div>
 </template>

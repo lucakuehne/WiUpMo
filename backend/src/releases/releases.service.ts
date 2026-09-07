@@ -1,9 +1,17 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { mkdir, rename, rm, stat } from 'node:fs/promises';
+import { constants, createReadStream } from 'node:fs';
+import { access, copyFile, mkdir, rename, rm, stat } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { DataSource } from 'typeorm';
 import { AgentUpdateJobState } from '../database/enums.js';
@@ -20,7 +28,7 @@ import { PeVersionError, readProductVersion } from './pe-version.js';
 const BINARY_NAME = 'wiupmo-agent.exe';
 
 @Injectable()
-export class ReleasesService {
+export class ReleasesService implements OnModuleInit {
   private readonly logger = new Logger(ReleasesService.name);
   private readonly root: string;
 
@@ -29,6 +37,26 @@ export class ReleasesService {
     config: ConfigService,
   ) {
     this.root = resolve(config.get<string>('AGENT_RELEASES_DIR') ?? '/app/agent-releases');
+  }
+
+  /**
+   * Prueft die Ablage beim Start.
+   *
+   * Ohne diese Pruefung faellt ein unbeschreibbares Verzeichnis erst beim
+   * Hochladen auf — nach 75 uebertragenen Megabyte. Es ist kein Grund, den
+   * Start abzubrechen: Alles andere am Backend funktioniert weiterhin.
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      await mkdir(this.root, { recursive: true });
+      await access(this.root, constants.W_OK);
+    } catch (error) {
+      this.logger.error(
+        `Die Ablage fuer Agent-Binaries (${this.root}) ist nicht beschreibbar: ` +
+          `${error instanceof Error ? error.message : String(error)}. ` +
+          'Das Hochladen einer Agent-Version wird scheitern, solange das so bleibt.',
+      );
+    }
   }
 
   /**
@@ -100,8 +128,7 @@ export class ReleasesService {
       const { size } = await stat(temporaryPath);
 
       const target = this.binaryPath(version);
-      await mkdir(join(this.root, version), { recursive: true });
-      await rename(temporaryPath, target);
+      await this.store(temporaryPath, version, target);
 
       const rows: Array<{ id: string }> = await this.dataSource.query(
         `INSERT INTO agent_releases (version, file_path, sha256, size_bytes, notes, is_current)
@@ -118,6 +145,45 @@ export class ReleasesService {
       // ohnehin leer, und ein abgebrochener Upload soll keine 75 MB im
       // temporaeren Verzeichnis liegen lassen.
       await rm(temporaryPath, { force: true });
+    }
+  }
+
+  /**
+   * Legt die hochgeladene Datei an ihren Platz.
+   *
+   * Verschieben zuerst, Kopieren als Rueckfall: Die Datei liegt im temporaeren
+   * Verzeichnis des Containers, das Ziel in einem eingehaengten Volume. Das
+   * sind zwei Dateisysteme, und ueber deren Grenze hinweg kann `rename` nicht
+   * arbeiten — es meldet `EXDEV`.
+   */
+  private async store(temporaryPath: string, version: string, target: string): Promise<void> {
+    try {
+      await mkdir(join(this.root, version), { recursive: true });
+
+      try {
+        await rename(temporaryPath, target);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EXDEV') {
+          throw error;
+        }
+
+        // Die Quelle raeumt der aufrufende `finally`-Zweig weg.
+        await copyFile(temporaryPath, target);
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+
+      if (code === 'EACCES' || code === 'EPERM' || code === 'EROFS') {
+        this.logger.error(`Ablage nicht beschreibbar (${code}): ${this.root}`);
+
+        throw new InternalServerErrorException(
+          `Die Ablage fuer Agent-Binaries (${this.root}) ist fuer das Backend nicht ` +
+            `beschreibbar (${code}). Vermutlich gehoert das eingehaengte Volume root, ` +
+            'waehrend der Container unter einem anderen Benutzer laeuft.',
+        );
+      }
+
+      throw error;
     }
   }
 

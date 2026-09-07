@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import Card from 'primevue/card';
-import Chart from 'primevue/chart';
-import Message from 'primevue/message';
-import Skeleton from 'primevue/skeleton';
 import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, type RouteLocationRaw } from 'vue-router';
 import { get } from '@/api/client';
 import type { Summary, TrendPoint, UpdateSourcesReport } from '@/api/types';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import ChartCanvas from '@/components/ChartCanvas.vue';
+import { baseOptions, palette } from '@/chart';
 import { UPDATE_SOURCE_LABELS } from '@/format';
 
 const router = useRouter();
@@ -17,16 +18,15 @@ const sources = ref<UpdateSourcesReport | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
 
-/**
- * Farben aus den PrimeVue-Variablen statt fest verdrahtet — so stimmen sie in
- * beiden Erscheinungsbildern, hell und dunkel.
- */
-function cssVar(name: string, fallback: string): string {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return value || fallback;
+interface Tile {
+  label: string;
+  value: number;
+  hint: string;
+  tone: 'neutral' | 'ok' | 'warn' | 'danger';
+  to: RouteLocationRaw;
 }
 
-const tiles = computed(() => {
+const tiles = computed<Tile[]>(() => {
   const s = summary.value;
   if (!s) {
     return [];
@@ -80,13 +80,25 @@ const tiles = computed(() => {
   ];
 });
 
+/**
+ * Farbe nur als Rahmen links, nicht als Fläche: Sechs bunte Kacheln
+ * nebeneinander tragen keine Information mehr — auffällig soll sein, was
+ * Aufmerksamkeit braucht.
+ */
+const TONE_BORDERS: Record<Tile['tone'], string> = {
+  neutral: 'border-l-border',
+  ok: 'border-l-success/60',
+  warn: 'border-l-warning',
+  danger: 'border-l-destructive',
+};
+
 const trendData = computed(() => ({
   labels: trend.value.map((point) => point.date.slice(5)),
   datasets: [
     {
       label: 'Offene Updates (Flotte)',
       data: trend.value.map((point) => point.openUpdates),
-      borderColor: cssVar('--p-primary-500', '#3b82f6'),
+      borderColor: palette.value.series[0],
       backgroundColor: 'transparent',
       tension: 0.3,
       pointRadius: 0,
@@ -95,34 +107,34 @@ const trendData = computed(() => ({
     {
       label: 'Installiert pro Tag',
       data: trend.value.map((point) => point.installed),
-      borderColor: cssVar('--p-green-500', '#22c55e'),
-      backgroundColor: cssVar('--p-green-500', '#22c55e'),
-      type: 'bar',
+      borderColor: palette.value.series[1],
+      backgroundColor: palette.value.series[1],
+      type: 'bar' as const,
       yAxisID: 'y2',
     },
   ],
 }));
 
 const trendOptions = computed(() => ({
-  maintainAspectRatio: false,
+  ...baseOptions.value,
   interaction: { mode: 'index' as const, intersect: false },
-  plugins: { legend: { labels: { color: cssVar('--p-text-color', '#333') } } },
   scales: {
     x: {
-      ticks: { color: cssVar('--p-text-muted-color', '#888'), maxTicksLimit: 12 },
+      ticks: { color: palette.value.muted, maxTicksLimit: 12 },
       grid: { display: false },
     },
     y: {
       position: 'left' as const,
       beginAtZero: true,
-      title: { display: true, text: 'offen', color: cssVar('--p-text-muted-color', '#888') },
-      ticks: { color: cssVar('--p-text-muted-color', '#888') },
+      title: { display: true, text: 'offen', color: palette.value.muted },
+      ticks: { color: palette.value.muted },
+      grid: { color: palette.value.grid },
     },
     y2: {
       position: 'right' as const,
       beginAtZero: true,
-      title: { display: true, text: 'installiert', color: cssVar('--p-text-muted-color', '#888') },
-      ticks: { color: cssVar('--p-text-muted-color', '#888') },
+      title: { display: true, text: 'installiert', color: palette.value.muted },
+      ticks: { color: palette.value.muted },
       grid: { display: false },
     },
   },
@@ -130,27 +142,23 @@ const trendOptions = computed(() => ({
 
 const sourceData = computed(() => {
   const distribution = sources.value?.distribution ?? [];
+
   return {
     labels: distribution.map((entry) => UPDATE_SOURCE_LABELS[entry.source]),
     datasets: [
       {
         data: distribution.map((entry) => entry.devices),
-        backgroundColor: [
-          cssVar('--p-blue-500', '#3b82f6'),
-          cssVar('--p-green-500', '#22c55e'),
-          cssVar('--p-orange-500', '#f97316'),
-          cssVar('--p-purple-500', '#a855f7'),
-          cssVar('--p-surface-400', '#9ca3af'),
-        ],
+        backgroundColor: palette.value.series,
+        borderWidth: 0,
       },
     ],
   };
 });
 
 const sourceOptions = computed(() => ({
-  maintainAspectRatio: false,
+  ...baseOptions.value,
   plugins: {
-    legend: { position: 'right' as const, labels: { color: cssVar('--p-text-color', '#333') } },
+    legend: { position: 'right' as const, labels: { color: palette.value.text } },
   },
 }));
 
@@ -161,6 +169,7 @@ async function load(): Promise<void> {
       get<TrendPoint[]>('/api/reports/trend', { days: 90 }),
       get<UpdateSourcesReport>('/api/reports/update-sources'),
     ]);
+
     summary.value = s;
     trend.value = t;
     sources.value = src;
@@ -175,114 +184,57 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="page">
-    <div class="page-header">
-      <h1>Dashboard</h1>
-    </div>
+  <div class="mx-auto max-w-[1600px] px-5 py-6">
+    <h1 class="mb-4 text-xl font-semibold">Dashboard</h1>
 
-    <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
+    <Alert v-if="error" variant="destructive" class="mb-4">
+      <AlertDescription>{{ error }}</AlertDescription>
+    </Alert>
 
-    <div class="tiles">
+    <div class="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
       <template v-if="loading">
-        <Skeleton v-for="n in 6" :key="n" height="6rem" />
+        <Skeleton v-for="n in 6" :key="n" class="h-[6.5rem]" />
       </template>
 
       <Card
         v-for="tile in tiles"
         :key="tile.label"
-        :class="['tile', `tone-${tile.tone}`]"
+        class="hover:bg-accent/40 cursor-pointer border-l-4 py-4 transition-colors"
+        :class="TONE_BORDERS[tile.tone]"
         @click="router.push(tile.to)"
       >
-        <template #content>
-          <div class="tile-value">{{ tile.value }}</div>
-          <div class="tile-label">{{ tile.label }}</div>
-          <div class="tile-hint muted">{{ tile.hint }}</div>
-        </template>
+        <CardContent class="px-4">
+          <div class="tabular text-3xl leading-none font-semibold">{{ tile.value }}</div>
+          <div class="mt-1.5 text-sm">{{ tile.label }}</div>
+          <div class="text-muted-foreground mt-0.5 text-xs">{{ tile.hint }}</div>
+        </CardContent>
       </Card>
     </div>
 
-    <div class="charts">
-      <Card>
-        <template #title>Offene Updates über die Zeit</template>
-        <template #subtitle>
-          Aus dem heutigen Stand rückwärts aus der Zeitreihe rekonstruiert. Reicht die Kurve
-          weiter zurück als die Aufbewahrungsfrist, wird sie flach — dann fehlen die Ereignisse,
-          nicht die Updates.
-        </template>
-        <template #content>
-          <Chart type="line" :data="trendData" :options="trendOptions" style="height: 20rem" />
-        </template>
+    <div class="grid gap-3 xl:grid-cols-3">
+      <Card class="xl:col-span-2">
+        <CardHeader>
+          <CardTitle>Offene Updates über die Zeit</CardTitle>
+          <CardDescription>
+            Aus dem heutigen Stand rückwärts aus der Zeitreihe rekonstruiert. Reicht die Kurve
+            weiter zurück als die Aufbewahrungsfrist, wird sie flach — dann fehlen die Ereignisse,
+            nicht die Updates.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ChartCanvas type="line" :data="trendData" :options="trendOptions" />
+        </CardContent>
       </Card>
 
       <Card>
-        <template #title>Update-Quellen</template>
-        <template #subtitle>Geräte je Quelle — der Stand der WSUS-Ablösung.</template>
-        <template #content>
-          <Chart type="doughnut" :data="sourceData" :options="sourceOptions" style="height: 20rem" />
-        </template>
+        <CardHeader>
+          <CardTitle>Update-Quellen</CardTitle>
+          <CardDescription>Geräte je Quelle — der Stand der WSUS-Ablösung.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ChartCanvas type="doughnut" :data="sourceData" :options="sourceOptions" />
+        </CardContent>
       </Card>
     </div>
   </div>
 </template>
-
-<style scoped>
-.tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-  gap: 0.75rem;
-  margin-bottom: 1.25rem;
-}
-
-.tile {
-  cursor: pointer;
-  border-left: 4px solid var(--p-surface-300);
-}
-
-.tile:hover {
-  border-left-color: var(--p-primary-500);
-}
-
-.tile-value {
-  font-size: 2rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.1;
-}
-
-.tile-label {
-  font-size: 0.9rem;
-  margin-top: 0.25rem;
-}
-
-.tile-hint {
-  font-size: 0.75rem;
-  margin-top: 0.15rem;
-}
-
-/* Farbe nur als Rahmen links, nicht als Flaeche: Sechs bunte Kacheln
-   nebeneinander tragen keine Information mehr — auffaellig soll nur sein, was
-   Aufmerksamkeit braucht. */
-.tone-danger {
-  border-left-color: var(--p-red-500);
-}
-
-.tone-warn {
-  border-left-color: var(--p-orange-500);
-}
-
-.tone-ok {
-  border-left-color: var(--p-green-500);
-}
-
-.charts {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 0.75rem;
-}
-
-@media (max-width: 60rem) {
-  .charts {
-    grid-template-columns: 1fr;
-  }
-}
-</style>

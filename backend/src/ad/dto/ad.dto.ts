@@ -48,7 +48,20 @@ export class SyncRunsQueryDto {
   @Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)))
   @IsInt()
   @Min(1)
+  @IsOptional()
+  page: number = 1;
+
+  @Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)))
+  @IsInt()
+  @Min(1)
   @Max(200)
   @IsOptional()
   limit: number = 25;
+}
+
+export class AdSyncRunsDto {
+  items: AdSyncRunDto[];
+  total: number;
+  page: number;
+  limit: number;
 }
