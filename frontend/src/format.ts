@@ -86,6 +86,43 @@ export const EVENT_TYPE_LABELS: Record<UpdateEventType, string> = {
   hidden: 'ausgeblendet',
 };
 
+/**
+ * Farbklassen für die shadcn-Ansichten.
+ *
+ * Getrennt von den PrimeVue-Schweregraden weiter unten, solange beide
+ * Bibliotheken nebeneinander laufen. Die Funktionen unten verschwinden mit der
+ * letzten umgestellten Ansicht.
+ */
+export function sourceBadgeClass(source: UpdateSource | null): string {
+  switch (source) {
+    case 'wsus':
+      return 'bg-chart-1/15 text-chart-1 border-chart-1/30';
+    case 'microsoft_update':
+    case 'intune':
+      return 'bg-success/15 text-success border-success/30';
+    // Dual Scan ist als Warnung eingefärbt: Das Gerät holt sich trotz
+    // WSUS-Richtlinie Teile aus dem Internet — in einer Migrationsauswertung
+    // ist das der Zustand, den man sehen will.
+    case 'dual_scan':
+      return 'bg-warning/15 text-warning-foreground border-warning/40 dark:text-warning';
+    default:
+      return 'bg-muted text-muted-foreground border-transparent';
+  }
+}
+
+export function stateBadgeClass(state: UpdateState): string {
+  switch (state) {
+    case 'available':
+      return 'bg-warning/15 text-warning-foreground border-warning/40 dark:text-warning';
+    case 'failed':
+      return 'bg-destructive/15 text-destructive border-destructive/30';
+    case 'installed':
+      return 'bg-success/15 text-success border-success/30';
+    default:
+      return 'bg-muted text-muted-foreground border-transparent';
+  }
+}
+
 type Severity = 'success' | 'info' | 'warn' | 'danger' | 'secondary';
 
 export function stateSeverity(state: UpdateState): Severity {

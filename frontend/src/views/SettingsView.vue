@@ -735,10 +735,6 @@ onMounted(load);
                   </div>
                 </div>
 
-                <p class="text-muted-foreground -mt-2 text-xs">
-                  Konto als <code>konto@domäne</code> oder <code>DOMÄNE\konto</code>. Leserecht auf die Computerobjekte genügt.
-                </p>
-
                 <div class="space-y-2">
                   <Label>Zertifikat des Domänencontrollers</Label>
 
@@ -867,24 +863,6 @@ onMounted(load);
                     {{ filterText }}
                   </div>
 
-                  <p class="text-muted-foreground text-xs">
-                    <template v-if="ad.filterMode === 'custom'">
-                      Eigener Ausdruck.
-                    </template>
-                    <template v-else>
-                      Zusammengesetzt:
-                      {{
-                        [
-                          'alle Computerkonten',
-                          ad.excludeDisabled ? 'ohne deaktivierte' : null,
-                          ad.excludeServers ? 'ohne Server' : null,
-                        ]
-                          .filter(Boolean)
-                          .join(', ')
-                      }}.
-                    </template>
-                    Die Verbindungsprüfung zeigt, wie viele Konten er trifft.
-                  </p>
                 </div>
               </section>
             </div>

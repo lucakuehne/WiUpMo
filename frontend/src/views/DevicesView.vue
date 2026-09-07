@@ -1,31 +1,40 @@
 <script setup lang="ts">
-import Button from 'primevue/button';
-import Column from 'primevue/column';
-import DataTable, { type DataTablePageEvent, type DataTableSortEvent } from 'primevue/datatable';
-import IconField from 'primevue/iconfield';
-import InputIcon from 'primevue/inputicon';
-import InputText from 'primevue/inputtext';
-import Message from 'primevue/message';
-import Select from 'primevue/select';
-import Tag from 'primevue/tag';
-import ToggleButton from 'primevue/togglebutton';
+import { AlertTriangle, Download, RotateCcw, Search } from '@lucide/vue';
 import { onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { get } from '@/api/client';
 import type { DeviceListItem, Paged, UpdateSource } from '@/api/types';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
-  UPDATE_SOURCE_LABELS,
-  formatDateTime,
-  formatRelative,
-  sourceSeverity,
-} from '@/format';
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import SortHead from '@/components/SortHead.vue';
+import TablePager from '@/components/TablePager.vue';
+import { formatDnPath } from '@/dn';
+import { UPDATE_SOURCE_LABELS, formatDateTime, formatRelative, sourceBadgeClass } from '@/format';
 
 const route = useRoute();
 const router = useRouter();
 
 const rows = ref<DeviceListItem[]>([]);
 const total = ref(0);
-const loading = ref(false);
+const loading = ref(true);
 const error = ref<string | null>(null);
 
 const page = ref(1);
@@ -46,19 +55,39 @@ const sourceOptions = (Object.keys(UPDATE_SOURCE_LABELS) as UpdateSource[]).map(
 }));
 
 const staleOptions = [
-  { value: 3, label: 'seit 3 Tagen' },
-  { value: 7, label: 'seit 7 Tagen' },
-  { value: 14, label: 'seit 14 Tagen' },
-  { value: 30, label: 'seit 30 Tagen' },
+  { value: '3', label: 'seit 3 Tagen' },
+  { value: '7', label: 'seit 7 Tagen' },
+  { value: '14', label: 'seit 14 Tagen' },
+  { value: '30', label: 'seit 30 Tagen' },
 ];
+
+/**
+ * Platzhalter für „keine Einschränkung".
+ *
+ * Reka lässt eine leere Zeichenkette als Auswahlwert nicht zu — die steht dort
+ * für „nichts gewählt" und würde den Platzhaltertext zurückholen. Der Wert
+ * muss deshalb an genau einer Stelle wieder herausgefiltert werden, sonst geht
+ * er als Filter ans Backend und wird dort als ungültig abgewiesen.
+ */
+const ANY = ' ';
+
+function onSourceChange(value: unknown): void {
+  updateSource.value = value === ANY || !value ? null : (value as UpdateSource);
+  onFilterChange();
+}
+
+function onStaleChange(value: unknown): void {
+  staleDays.value = value === ANY || !value ? null : Number(value);
+  onFilterChange();
+}
 
 async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
 
   try {
-    // Serverseitig filtern, sortieren und blaettern — die Tabelle laedt
-    // niemals die ganze Flotte in den Browser.
+    // Serverseitig filtern, sortieren und blättern — die Tabelle lädt niemals
+    // die ganze Flotte in den Browser.
     const result = await get<Paged<DeviceListItem>>('/api/devices', {
       page: page.value,
       limit: limit.value,
@@ -81,22 +110,14 @@ async function load(): Promise<void> {
   }
 }
 
-function onPage(event: DataTablePageEvent): void {
-  page.value = event.page + 1;
-  limit.value = event.rows;
-  void load();
-}
-
-function onSort(event: DataTableSortEvent): void {
-  if (typeof event.sortField === 'string') {
-    sortBy.value = event.sortField;
-    sortDir.value = event.sortOrder === -1 ? 'desc' : 'asc';
-  }
+function onSort(field: string, dir: 'asc' | 'desc'): void {
+  sortBy.value = field;
+  sortDir.value = dir;
   page.value = 1;
   void load();
 }
 
-/** Jede Filteraenderung springt zurueck auf Seite 1 — sonst zeigt die Tabelle Leere. */
+/** Jede Filteränderung springt zurück auf Seite 1 — sonst zeigt die Tabelle Leere. */
 function onFilterChange(): void {
   page.value = 1;
   void load();
@@ -107,6 +128,18 @@ let searchTimer: ReturnType<typeof setTimeout> | undefined;
 function onSearchInput(): void {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(onFilterChange, 300);
+}
+
+/**
+ * Angesprochen über den Namen, nicht über die Referenz: In der Vorlage werden
+ * Refs automatisch entpackt, ein übergebener Ref käme dort als Wahrheitswert
+ * an und liesse sich nicht mehr setzen.
+ */
+const booleanFilters = { hasOpenSecurity, pendingReboot, withoutAgent };
+
+function toggleFilter(name: keyof typeof booleanFilters): void {
+  booleanFilters[name].value = !booleanFilters[name].value;
+  onFilterChange();
 }
 
 function resetFilters(): void {
@@ -176,171 +209,206 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="page">
-    <div class="page-header">
-      <h1>Geräte</h1>
-      <span class="muted">{{ total }} Geräte</span>
+  <div class="mx-auto max-w-[1600px] px-5 py-6">
+    <div class="mb-4 flex flex-wrap items-baseline justify-between gap-3">
+      <h1 class="text-xl font-semibold">Geräte</h1>
+      <span class="text-muted-foreground tabular text-sm">{{ total }} Geräte</span>
     </div>
 
-    <div class="filters">
-      <IconField>
-        <InputIcon class="pi pi-search" />
-        <InputText v-model="search" placeholder="Hostname oder OU" @input="onSearchInput" />
-      </IconField>
+    <div class="mb-3 flex flex-wrap items-center gap-2">
+      <div class="relative">
+        <Search class="text-muted-foreground absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
+        <Input
+          v-model="search"
+          placeholder="Hostname oder OU"
+          class="w-56 pl-8"
+          @input="onSearchInput"
+        />
+      </div>
+
+      <Select :model-value="updateSource ?? ''" @update:model-value="onSourceChange">
+        <SelectTrigger class="w-48">
+          <SelectValue placeholder="Update-Quelle" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem :value="ANY">Alle Quellen</SelectItem>
+          <SelectItem v-for="option in sourceOptions" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
 
       <Select
-        v-model="updateSource"
-        :options="sourceOptions"
-        option-label="label"
-        option-value="value"
-        placeholder="Update-Quelle"
-        show-clear
-        @change="onFilterChange"
-      />
-
-      <Select
-        v-model="staleDays"
-        :options="staleOptions"
-        option-label="label"
-        option-value="value"
-        placeholder="Kein Check-in"
-        show-clear
-        @change="onFilterChange"
-      />
-
-      <ToggleButton
-        v-model="hasOpenSecurity"
-        on-label="Sicherheitsupdates offen"
-        off-label="Sicherheitsupdates offen"
-        @change="onFilterChange"
-      />
-
-      <ToggleButton
-        v-model="pendingReboot"
-        on-label="Neustart ausstehend"
-        off-label="Neustart ausstehend"
-        @change="onFilterChange"
-      />
-
-      <ToggleButton
-        v-model="withoutAgent"
-        on-label="Ohne Agent"
-        off-label="Ohne Agent"
-        @change="onFilterChange"
-      />
-
-      <Button label="Zurücksetzen" severity="secondary" text size="small" @click="resetFilters" />
+        :model-value="staleDays === null ? '' : String(staleDays)"
+        @update:model-value="onStaleChange"
+      >
+        <SelectTrigger class="w-44">
+          <SelectValue placeholder="Kein Check-in" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem :value="ANY">Egal</SelectItem>
+          <SelectItem v-for="option in staleOptions" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
 
       <Button
-        label="Export"
-        icon="pi pi-download"
-        severity="secondary"
-        outlined
-        size="small"
-        style="margin-left: auto"
-        @click="exportCsv"
-      />
+        :variant="hasOpenSecurity ? 'default' : 'outline'"
+        size="sm"
+        @click="toggleFilter('hasOpenSecurity')"
+      >
+        Sicherheitsupdates offen
+      </Button>
+
+      <Button
+        :variant="pendingReboot ? 'default' : 'outline'"
+        size="sm"
+        @click="toggleFilter('pendingReboot')"
+      >
+        Neustart ausstehend
+      </Button>
+
+      <Button
+        :variant="withoutAgent ? 'default' : 'outline'"
+        size="sm"
+        @click="toggleFilter('withoutAgent')"
+      >
+        Ohne Agent
+      </Button>
+
+      <Button variant="ghost" size="sm" @click="resetFilters">
+        <RotateCcw class="size-4" />
+        Zurücksetzen
+      </Button>
+
+      <Button variant="outline" size="sm" class="ml-auto" @click="exportCsv">
+        <Download class="size-4" />
+        Export
+      </Button>
     </div>
 
-    <Message v-if="error" severity="error" :closable="false" style="margin-bottom: 1rem">
-      {{ error }}
-    </Message>
+    <Alert v-if="error" variant="destructive" class="mb-4">
+      <AlertDescription>{{ error }}</AlertDescription>
+    </Alert>
 
-    <DataTable
-      :value="rows"
-      :loading="loading"
-      lazy
-      paginator
-      :rows="limit"
-      :total-records="total"
-      :rows-per-page-options="[25, 50, 100]"
-      :first="(page - 1) * limit"
-      data-key="id"
-      removable-sort
-      :sort-field="sortBy"
-      :sort-order="sortDir === 'asc' ? 1 : -1"
-      size="small"
-      striped-rows
-      row-hover
-      @page="onPage"
-      @sort="onSort"
-      @row-click="openDevice(($event.data as DeviceListItem).id)"
-    >
-      <template #empty>Keine Geräte gefunden.</template>
+    <div class="rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <SortHead field="hostname" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
+              Hostname
+            </SortHead>
+            <SortHead field="osBuild" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
+              Betriebssystem
+            </SortHead>
+            <SortHead field="updateSource" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
+              Quelle
+            </SortHead>
+            <SortHead field="openUpdates" numeric :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
+              Offen
+            </SortHead>
+            <SortHead
+              field="openSecurityUpdates"
+              numeric
+              :sort-by="sortBy"
+              :sort-dir="sortDir"
+              @sort="onSort"
+            >
+              davon Sicherheit
+            </SortHead>
+            <SortHead field="patchAgeDays" numeric :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
+              Patch-Alter
+            </SortHead>
+            <SortHead field="lastSeenAt" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
+              Letzter Check-in
+            </SortHead>
+            <TableHead class="w-20">Neustart</TableHead>
+          </TableRow>
+        </TableHeader>
 
-      <Column field="hostname" header="Hostname" sortable>
-        <template #body="{ data }">
-          <strong>{{ (data as DeviceListItem).hostname }}</strong>
-          <div v-if="(data as DeviceListItem).adOu" class="muted" style="font-size: 0.8rem">
-            {{ (data as DeviceListItem).adOu }}
-          </div>
-        </template>
-      </Column>
+        <TableBody>
+          <template v-if="loading">
+            <TableRow v-for="n in 6" :key="n">
+              <TableCell v-for="column in 8" :key="column">
+                <Skeleton class="h-4 w-full" />
+              </TableCell>
+            </TableRow>
+          </template>
 
-      <Column field="osBuild" header="Betriebssystem" sortable>
-        <template #body="{ data }">
-          <div>{{ (data as DeviceListItem).osName ?? '—' }}</div>
-          <div class="muted" style="font-size: 0.8rem">
-            {{ (data as DeviceListItem).osVersion ?? '' }}
-            {{ (data as DeviceListItem).osBuild ? `(${(data as DeviceListItem).osBuild})` : '' }}
-          </div>
-        </template>
-      </Column>
+          <TableRow v-else-if="rows.length === 0">
+            <TableCell :colspan="8" class="text-muted-foreground py-8 text-center">
+              Keine Geräte gefunden.
+            </TableCell>
+          </TableRow>
 
-      <Column field="updateSource" header="Quelle" sortable>
-        <template #body="{ data }">
-          <Tag
-            :value="UPDATE_SOURCE_LABELS[(data as DeviceListItem).updateSource ?? 'unknown']"
-            :severity="sourceSeverity((data as DeviceListItem).updateSource)"
-          />
-        </template>
-      </Column>
+          <TableRow
+            v-for="row in loading ? [] : rows"
+            :key="row.id"
+            class="cursor-pointer"
+            @click="openDevice(row.id)"
+          >
+            <TableCell>
+              <div class="font-medium">{{ row.hostname }}</div>
+              <!-- Der Pfad statt des DN; der vollständige Wert bleibt als
+                   Hinweistext erreichbar. -->
+              <div v-if="row.adOu" class="text-muted-foreground truncate text-xs" :title="row.adOu">
+                {{ formatDnPath(row.adOu) }}
+              </div>
+            </TableCell>
 
-      <Column field="openUpdates" header="Offen" sortable body-class="num" header-class="num">
-        <template #body="{ data }">{{ (data as DeviceListItem).openUpdates }}</template>
-      </Column>
+            <TableCell>
+              <div>{{ row.osName ?? '—' }}</div>
+              <div class="text-muted-foreground text-xs">
+                {{ row.osVersion ?? '' }}
+                <template v-if="row.osBuild">({{ row.osBuild }})</template>
+              </div>
+            </TableCell>
 
-      <Column
-        field="openSecurityUpdates"
-        header="davon Sicherheit"
-        sortable
-        body-class="num"
-        header-class="num"
-      >
-        <template #body="{ data }">
-          <span :style="(data as DeviceListItem).openSecurityUpdates > 0 ? 'color: var(--p-red-500); font-weight: 600' : ''">
-            {{ (data as DeviceListItem).openSecurityUpdates }}
-          </span>
-        </template>
-      </Column>
+            <TableCell>
+              <Badge variant="outline" :class="sourceBadgeClass(row.updateSource)">
+                {{ UPDATE_SOURCE_LABELS[row.updateSource ?? 'unknown'] }}
+              </Badge>
+            </TableCell>
 
-      <Column field="patchAgeDays" header="Patch-Alter" sortable body-class="num" header-class="num">
-        <template #body="{ data }">
-          <span v-if="(data as DeviceListItem).patchAgeDays === null">—</span>
-          <span v-else>{{ (data as DeviceListItem).patchAgeDays }} T</span>
-        </template>
-      </Column>
+            <TableCell class="tabular text-right">{{ row.openUpdates }}</TableCell>
 
-      <Column field="lastSeenAt" header="Letzter Check-in" sortable>
-        <template #body="{ data }">
-          <span :title="formatDateTime((data as DeviceListItem).lastSeenAt)">
-            {{ formatRelative((data as DeviceListItem).lastSeenAt) }}
-          </span>
-          <Tag
-            v-if="!(data as DeviceListItem).enrolledAt"
-            value="ohne Agent"
-            severity="danger"
-            style="margin-left: 0.5rem"
-          />
-        </template>
-      </Column>
+            <TableCell class="tabular text-right">
+              <span :class="row.openSecurityUpdates > 0 ? 'text-destructive font-semibold' : ''">
+                {{ row.openSecurityUpdates }}
+              </span>
+            </TableCell>
 
-      <Column header="Neustart">
-        <template #body="{ data }">
-          <i v-if="(data as DeviceListItem).pendingReboot" class="pi pi-exclamation-triangle" style="color: var(--p-orange-500)" />
-          <span v-else class="muted">—</span>
-        </template>
-      </Column>
-    </DataTable>
+            <TableCell class="tabular text-right">
+              <template v-if="row.patchAgeDays === null">—</template>
+              <template v-else>{{ row.patchAgeDays }} T</template>
+            </TableCell>
+
+            <TableCell>
+              <span :title="formatDateTime(row.lastSeenAt)">
+                {{ formatRelative(row.lastSeenAt) }}
+              </span>
+              <Badge v-if="!row.enrolledAt" variant="destructive" class="ml-2">ohne Agent</Badge>
+            </TableCell>
+
+            <TableCell>
+              <AlertTriangle v-if="row.pendingReboot" class="text-warning size-4" />
+              <span v-else class="text-muted-foreground">—</span>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+    </div>
+
+    <TablePager
+      v-model:page="page"
+      v-model:limit="limit"
+      :total="total"
+      @update:page="load"
+      @update:limit="
+        page = 1;
+        load();
+      "
+    />
   </div>
 </template>
