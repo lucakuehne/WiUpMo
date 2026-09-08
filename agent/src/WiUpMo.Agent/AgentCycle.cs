@@ -113,7 +113,7 @@ public sealed class AgentCycle(
                 }
 
                 Settle(schub, response);
-                schedule.Apply(response.CheckIntervalHours);
+                schedule.Apply(response.CheckIntervalMinutes);
                 verbleibend -= schub.Count;
                 letzte = response;
             }

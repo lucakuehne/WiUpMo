@@ -376,8 +376,8 @@ export interface AgentSettingsView {
   /** Wird bewusst ausgeliefert — man braucht es bei jeder Agent-Installation. */
   enrollmentToken: string;
 
-  /** Abstand zwischen zwei regulären Meldungen, in Stunden. */
-  checkIntervalHours: number;
+  /** Abstand zwischen zwei regulären Meldungen, in Minuten. */
+  checkIntervalMinutes: number;
 }
 
 export interface AdGroup {

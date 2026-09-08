@@ -15,9 +15,9 @@ public sealed class Worker(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation(
-            "WiUpMo-Agent {Version} gestartet. Backend {Backend}, Intervall {Stunden} h, " +
+            "WiUpMo-Agent {Version} gestartet. Backend {Backend}, Intervall {Minuten} min, " +
             "{Wartend} Snapshot(s) in der Warteschlange.",
-            AgentVersion.Current, options.BackendUrl, schedule.Interval.TotalHours, queue.Count());
+            AgentVersion.Current, options.BackendUrl, schedule.Interval.TotalMinutes, queue.Count());
 
         trigger.Start();
 

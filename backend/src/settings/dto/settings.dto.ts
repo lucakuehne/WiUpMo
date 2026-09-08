@@ -5,7 +5,6 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
-  IsNumber,
   IsOptional,
   IsString,
   Matches,
@@ -15,8 +14,8 @@ import {
   MinLength,
 } from 'class-validator';
 import {
-  MAX_CHECK_INTERVAL_HOURS,
-  MIN_CHECK_INTERVAL_HOURS,
+  MAX_CHECK_INTERVAL_MINUTES,
+  MIN_CHECK_INTERVAL_MINUTES,
 } from '../settings.types.js';
 
 const toInt = () =>
@@ -35,15 +34,13 @@ export class EnrollmentTokenDto {
 }
 
 export class AgentSettingsDto {
-  /**
-   * Bruchteile sind zugelassen — 0.5 sind dreissig Minuten. Deshalb `IsNumber`
-   * statt `IsInt`.
-   */
-  @IsNumber()
-  @Min(MIN_CHECK_INTERVAL_HOURS)
-  @Max(MAX_CHECK_INTERVAL_HOURS)
+  /** In Minuten, ganzzahlig — von einer Viertelstunde bis zu einer Woche. */
+  @toInt()
+  @IsInt()
+  @Min(MIN_CHECK_INTERVAL_MINUTES)
+  @Max(MAX_CHECK_INTERVAL_MINUTES)
   @IsOptional()
-  checkIntervalHours?: number;
+  checkIntervalMinutes?: number;
 }
 
 export class AgentSettingsViewDto {
@@ -53,7 +50,7 @@ export class AgentSettingsViewDto {
    */
   enrollmentToken: string;
 
-  checkIntervalHours: number;
+  checkIntervalMinutes: number;
 }
 
 export class AuthSettingsDto {

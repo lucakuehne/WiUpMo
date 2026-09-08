@@ -32,7 +32,7 @@ export class CheckinController {
     return {
       results: [result],
       agentUpdate: await this.releases.claimJob(device.id),
-      checkIntervalHours: (await this.settings.getAgent()).checkIntervalHours,
+      checkIntervalMinutes: (await this.settings.getAgent()).checkIntervalMinutes,
     };
   }
 
@@ -64,7 +64,7 @@ export class CheckinController {
     return {
       results,
       agentUpdate: await this.releases.claimJob(device.id),
-      checkIntervalHours: (await this.settings.getAgent()).checkIntervalHours,
+      checkIntervalMinutes: (await this.settings.getAgent()).checkIntervalMinutes,
     };
   }
 }

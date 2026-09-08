@@ -96,7 +96,7 @@ export interface AgentSettings {
   enrollmentToken: string;
 
   /**
-   * Abstand zwischen zwei regulaeren Durchlaeufen eines Agents.
+   * Abstand zwischen zwei regulaeren Durchlaeufen eines Agents, in Minuten.
    *
    * Der Agent bringt denselben Wert als eigene Einstellung mit; der hier
    * gesetzte geht bei jedem Check-in mit und hat Vorrang. Anders liesse sich
@@ -109,26 +109,26 @@ export interface AgentSettings {
    * es hier bewusst nicht gibt: Der Agent spricht das Backend an, nie
    * umgekehrt.
    */
-  checkIntervalHours: number;
+  checkIntervalMinutes: number;
 }
 
 /** Untergrenze, damit hier nicht versehentlich "test" landet. */
 export const MIN_ENROLLMENT_TOKEN_LENGTH = 16;
 
 /**
- * Grenzen des Melde-Intervalls.
+ * Grenzen des Melde-Intervalls, in Minuten.
  *
  * Nach unten eine Viertelstunde: Jeder Durchlauf enthaelt eine vollstaendige
  * Update-Suche, die auf einem traegen Rechner Minuten dauert und Platte und
  * Netz belastet. Nach oben eine Woche — laenger, und die Auswertungen
  * beschreiben einen Zustand, den es so nicht mehr gibt.
  */
-export const MIN_CHECK_INTERVAL_HOURS = 0.25;
-export const MAX_CHECK_INTERVAL_HOURS = 168;
+export const MIN_CHECK_INTERVAL_MINUTES = 15;
+export const MAX_CHECK_INTERVAL_MINUTES = 10_080;
 
 export const DEFAULT_AGENT: AgentSettings = {
   enrollmentToken: '',
-  checkIntervalHours: 4,
+  checkIntervalMinutes: 240,
 };
 
 export interface AdSettings {

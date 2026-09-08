@@ -142,7 +142,7 @@ const bindPassword = ref('');
 
 const url = reactive<LdapUrlParts>({ host: '', port: LDAPS_PORT, secure: true });
 
-const agent = reactive<AgentSettingsView>({ enrollmentToken: '', checkIntervalHours: 4 });
+const agent = reactive<AgentSettingsView>({ enrollmentToken: '', checkIntervalMinutes: 240 });
 const authSettings = reactive<AuthSettings>({
   localEnabled: true,
   ldapEnabled: false,
@@ -316,9 +316,32 @@ function currentAdPayload(): Record<string, unknown> {
 }
 
 const saveAd = () => void save('ad', savingAd, currentAdPayload());
+/**
+ * „= 4 Stunden" neben dem Feld. Minuten sind der genauere Wert, aber bei 720
+ * rechnet niemand gern im Kopf nach, was das in Tagen ist.
+ */
+const intervalHint = computed(() => {
+  const minutes = agent.checkIntervalMinutes;
+
+  if (!Number.isFinite(minutes) || minutes < 60) {
+    return '';
+  }
+
+  const hours = minutes / 60;
+  if (hours < 24) {
+    return `= ${formatNumber(hours)} h`;
+  }
+
+  return `= ${formatNumber(hours / 24)} Tage`;
+});
+
+function formatNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace('.', ',');
+}
+
 // Nur das Intervall: Das Token hat einen eigenen Weg, der auch eines erzeugen kann.
 const saveAgent = () =>
-  void save('agent', savingAgent, { checkIntervalHours: agent.checkIntervalHours });
+  void save('agent', savingAgent, { checkIntervalMinutes: agent.checkIntervalMinutes });
 const saveAuth = () => void save('auth', savingAuth, { ...authSettings });
 const saveThresholds = () => void save('thresholds', savingThresholds, { ...thresholds });
 const saveRetention = () => void save('retention', savingRetention, { ...retention });
@@ -1005,16 +1028,19 @@ onMounted(load);
 
           <CardContent>
             <div class="space-y-1.5">
-              <Label for="interval">Stunden</Label>
-              <Input
-                id="interval"
-                v-model.number="agent.checkIntervalHours"
-                type="number"
-                min="0.25"
-                max="168"
-                step="0.25"
-                class="w-40"
-              />
+              <Label for="interval">Minuten</Label>
+              <div class="flex items-center gap-3">
+                <Input
+                  id="interval"
+                  v-model.number="agent.checkIntervalMinutes"
+                  type="number"
+                  min="15"
+                  max="10080"
+                  step="15"
+                  class="w-40"
+                />
+                <span class="text-muted-foreground text-sm">{{ intervalHint }}</span>
+              </div>
               <p class="text-muted-foreground text-xs">
                 Zwischen 15 Minuten und einer Woche. Der Wert geht mit jeder Check-in-Antwort an die
                 Geräte und ersetzt dort die örtliche Einstellung — wirksam wird er entsprechend erst

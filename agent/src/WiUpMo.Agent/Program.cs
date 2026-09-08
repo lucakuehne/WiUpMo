@@ -44,7 +44,7 @@ internal static class Program
         ["--enrollment-token"] = "Agent:EnrollmentToken",
         ["--data-directory"] = "Agent:DataDirectory",
         ["--search-online"] = "Agent:SearchOnline",
-        ["--interval-hours"] = "Agent:CheckIntervalHours",
+        ["--interval-minutes"] = "Agent:CheckIntervalMinutes",
     };
 
     public static async Task<int> Main(string[] args)

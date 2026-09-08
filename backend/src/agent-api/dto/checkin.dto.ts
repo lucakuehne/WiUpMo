@@ -54,12 +54,12 @@ export class CheckinResponseDto {
   agentUpdate: AgentUpdateJobDto | null = null;
 
   /**
-   * Der zentral eingestellte Abstand bis zum naechsten Durchlauf, in Stunden.
+   * Der zentral eingestellte Abstand bis zum naechsten Durchlauf, in Minuten.
    *
    * Geht bei jeder Antwort mit, nicht nur bei Aenderungen: Der Agent hat keinen
    * Zustand darueber, was das Backend zuletzt gesagt hat, und ein Feld, das nur
    * manchmal da ist, waere die unzuverlaessigere Loesung. Aeltere Agents
    * ignorieren das Feld und bleiben bei ihrer eigenen Einstellung.
    */
-  checkIntervalHours: number;
+  checkIntervalMinutes: number;
 }

@@ -112,11 +112,38 @@ Frontend unter **Einstellungen** gepflegt, nicht hier. Nach Bedarf zusätzlich:
 
 Dann **Deploy the stack**.
 
+### 3a. Stack neu anlegen, ohne die Daten zu verlieren
+
+Muss der Stack einmal neu angelegt werden, entscheidet sich alles an zwei
+Werten. Beide **vor** dem Entfernen des alten Stacks notieren:
+
+1. **Denselben Stack-Namen verwenden.** Compose stellt den Projektnamen den
+   Volumes voran; aus `wiupmo` werden `wiupmo_postgres-data` und
+   `wiupmo_agent-releases`. Ein anderer Name erzeugt leere Volumes — Datenbank
+   weg, Geräte weg, Historie weg. Die alten Volumes lägen dann noch da, nur
+   benutzt sie niemand mehr.
+2. **Dasselbe `DB_PASSWORD` verwenden.** PostgreSQL setzt das Passwort nur beim
+   allerersten Start aus `POSTGRES_PASSWORD`; danach steht es in der Datenbank.
+   Ein neu erzeugtes Passwort führt an einem bestehenden Volume zu
+   `password authentication failed`.
+
+Portainer löscht beim Entfernen eines Stacks die Container, nicht die benannten
+Volumes. Nachsehen lohnt sich trotzdem — vorher wie nachher:
+
+```bash
+sudo docker volume ls --filter name=wiupmo
+```
+
+Steht dort `wiupmo_postgres-data`, ist der Datenbestand da und der neue Stack
+übernimmt ihn, sobald Name und Passwort stimmen.
+
 ### 4. Prüfen
 
-Der Stack zeigt drei Container. Dass `wiupmo-migrate-1` als *exited* dasteht,
-ist der Normalfall und kein Fehler — der Dienst läuft die Migrationen einmal
-durch und beendet sich. Sein Protokoll muss `migration:run` ohne Fehler zeigen.
+Der Stack zeigt vier Container. Dass `wiupmo-migrate-1` und
+`wiupmo-prepare-releases-1` als *exited* dastehen, ist der Normalfall und kein
+Fehler — beide laufen einmal durch und beenden sich. Das Protokoll von `migrate`
+muss `migration:run` ohne Fehler zeigen, `prepare-releases` beendet sich mit
+Code 0.
 
 ```bash
 curl http://<host>:3000/health
@@ -240,6 +267,32 @@ Ohne Neuanlage des Stacks lässt es sich auch von Hand richten:
 ```bash
 sudo docker run --rm -v wiupmo_agent-releases:/data alpine chown -R 1000:1000 /data
 ```
+
+### „A stack with the normalized name 'wiupmo' already exists"
+
+Portainer hält den Namen noch für belegt. Meist liegt es nicht an einem Eintrag
+in der Stack-Liste, sondern an Containern auf dem Host, die das Compose-Label
+des Projekts tragen — Portainer erkennt sie als *external stack* und
+beansprucht den Namen dafür. Genau der Zustand entsteht, wenn der Stack einmal
+mit `docker compose up` ausserhalb von Portainer gestartet wurde.
+
+Aufräumen ohne Datenverlust — die Volumes bleiben ausdrücklich stehen:
+
+```bash
+# Was den Namen belegt
+sudo docker ps -a --filter label=com.docker.compose.project=wiupmo
+
+# Container weg, Netz weg — Volumes NICHT anfassen
+sudo docker ps -a --filter label=com.docker.compose.project=wiupmo -q | xargs -r sudo docker rm -f
+sudo docker network rm wiupmo_default
+
+# Zur Kontrolle: die beiden Volumes muessen noch da sein
+sudo docker volume ls --filter name=wiupmo
+```
+
+Danach in Portainer die Stack-Liste neu laden. Zeigt sie den Namen weiterhin,
+steht dort noch ein echter Eintrag — den über **Remove** entfernen; auch das
+lässt die benannten Volumes unberührt.
 
 ### Von vorn anfangen
 

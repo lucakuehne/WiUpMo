@@ -59,30 +59,52 @@ export class ReportsService {
     const { staleAgentDays, criticalOpenDays } = await this.settings.getThresholds();
 
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      /*
+       * Bis auf die Bestandszahlen zaehlt jede Kennzahl ausschliesslich aktive
+       * Geraete.
+       *
+       * Das war nicht immer so, und es fiel auf, sobald das Archivieren
+       * wirklich griff: "71 mit Agent" neben "30 ohne Agent" bei 79 aktiven
+       * Geraeten — die 71 enthielten die archivierten mit. Genauso zaehlten
+       * offene Sicherheitsupdates, kritische Faelle und ausstehende Neustarts
+       * ueber archivierte Geraete hinweg. Jede Kachel verlinkt in die
+       * Geraeteliste, und die zeigt aktive; eine Zahl, die dort nicht
+       * wiederzufinden ist, ist schlimmer als keine.
+       */
       `WITH ${OPEN_STATES}, ${LATEST_CHECKIN}
        SELECT
          count(*)                                                           AS devices_total,
          count(*) FILTER (WHERE d.status = 'active')                        AS devices_active,
          count(*) FILTER (WHERE d.status = 'archived')                      AS devices_archived,
-         count(*) FILTER (WHERE d.enrolled_at IS NOT NULL)                  AS devices_enrolled,
-         count(*) FILTER (WHERE d.enrolled_at IS NULL AND d.status = 'active') AS devices_without_agent,
+         count(*) FILTER (WHERE d.status = 'active' AND d.enrolled_at IS NOT NULL)
+                                                                            AS devices_enrolled,
+         count(*) FILTER (WHERE d.status = 'active' AND d.enrolled_at IS NULL)
+                                                                            AS devices_without_agent,
          count(*) FILTER (
-           WHERE d.enrolled_at IS NOT NULL
-             AND d.status = 'active'
+           WHERE d.status = 'active'
+             AND d.enrolled_at IS NOT NULL
              AND (d.last_seen_at IS NULL OR d.last_seen_at < now() - make_interval(days => $1))
          )                                                                  AS stale_agents,
-         count(*) FILTER (WHERE coalesce(o.open_security_updates, 0) > 0)   AS devices_with_open_security,
          count(*) FILTER (
-           WHERE o.oldest_security_open_at < now() - make_interval(days => $2)
+           WHERE d.status = 'active' AND coalesce(o.open_security_updates, 0) > 0
+         )                                                                  AS devices_with_open_security,
+         count(*) FILTER (
+           WHERE d.status = 'active'
+             AND o.oldest_security_open_at < now() - make_interval(days => $2)
          )                                                                  AS devices_critical,
-         count(*) FILTER (WHERE coalesce(c.pending_reboot, false))          AS devices_pending_reboot,
-         coalesce(sum(o.open_updates), 0)                                   AS open_updates_total,
-         coalesce(sum(o.open_security_updates), 0)                          AS open_security_total,
+         count(*) FILTER (
+           WHERE d.status = 'active' AND coalesce(c.pending_reboot, false)
+         )                                                                  AS devices_pending_reboot,
+         coalesce(sum(o.open_updates) FILTER (WHERE d.status = 'active'), 0) AS open_updates_total,
+         coalesce(sum(o.open_security_updates) FILTER (WHERE d.status = 'active'), 0)
+                                                                            AS open_security_total,
          -- Median statt Mittelwert: Ein einzelnes vergessenes Geraet mit
          -- 400 Tagen Patch-Alter wuerde einen Durchschnitt unbrauchbar machen.
          percentile_cont(0.5) WITHIN GROUP (
            ORDER BY date_part('day', now() - o.oldest_open_at)
-         ) FILTER (WHERE o.oldest_open_at IS NOT NULL)                      AS median_patch_age
+         ) FILTER (
+           WHERE d.status = 'active' AND o.oldest_open_at IS NOT NULL
+         )                                                                  AS median_patch_age
          FROM devices d
          LEFT JOIN open_states    o ON o.device_id = d.id
          LEFT JOIN latest_checkin c ON c.device_id = d.id`,
@@ -221,6 +243,9 @@ export class ReportsService {
          JOIN devices d ON d.id = current.device_id
         WHERE current.rn = 1
           AND current.update_source <> previous.update_source
+          -- Wie ueberall sonst nur aktive Geraete: Ein Quellenwechsel auf einem
+          -- archivierten Geraet ist kein Migrationsfortschritt.
+          AND d.status = 'active'
         ORDER BY current.collected_at DESC
         LIMIT 100`,
     );

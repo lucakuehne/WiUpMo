@@ -172,10 +172,10 @@ public sealed class CheckinResponse
 
     /// <summary>
     /// Der zentral eingestellte Abstand bis zum naechsten Durchlauf, in
-    /// Stunden. <c>null</c> bei einem Backend, das das Feld noch nicht kennt —
+    /// Minuten. <c>null</c> bei einem Backend, das das Feld noch nicht kennt —
     /// dann gilt weiter die oertliche Einstellung.
     /// </summary>
-    public double? CheckIntervalHours { get; init; }
+    public int? CheckIntervalMinutes { get; init; }
 }
 
 public sealed class UpdateResultRequest

@@ -53,7 +53,9 @@ liegen Geräteidentität und Protokolle.
 
 Im Dienstbetrieb läuft ein Durchlauf:
 
-- **alle 4 Stunden** (`CheckIntervalHours`),
+- **alle 240 Minuten** — der Wert kommt aus den Einstellungen des Backends und
+  geht mit jeder Check-in-Antwort mit; `CheckIntervalMinutes` ist nur der
+  Rückfall, bis sich das Gerät zum ersten Mal gemeldet hat,
 - **einmalig 2 Minuten nach Dienststart** (`StartupDelaySeconds`) — nicht sofort,
   weil eine Update-Suche während des Systemhochlaufs mit allem anderen um Platte
   und Netz konkurriert,
@@ -93,7 +95,7 @@ Drei Quellen, die einander in dieser Reihenfolge überschreiben:
 | `Agent:BackendUrl` | `--backend-url` | — | Basisadresse des Backends. Pflicht. |
 | `Agent:EnrollmentToken` | `--enrollment-token` | — | Nur bis zur erstmaligen Registrierung nötig. |
 | `Agent:DataDirectory` | `--data-directory` | `%ProgramData%\WiUpMo` | |
-| `Agent:CheckIntervalHours` | `--interval-hours` | 4 | Abstand regulärer Durchläufe. |
+| `Agent:CheckIntervalMinutes` | `--interval-minutes` | 240 | Abstand regulärer Durchläufe. Wird vom Wert aus den Backend-Einstellungen überstimmt, sobald einer vorliegt. |
 | `Agent:StartupDelaySeconds` | — | 120 | Wartezeit nach Dienststart. |
 | `Agent:NetworkDebounceMinutes` | — | 5 | Mindestabstand netzwerkausgelöster Durchläufe. |
 | `Agent:QueueMaxSnapshots` | — | 200 | Obergrenze der Warteschlange. |

@@ -24,7 +24,7 @@ public sealed class CheckinSchedule(
     SnapshotQueue queue,
     ILogger<CheckinSchedule> logger)
 {
-    private const string Key = "checkin_interval_hours";
+    private const string Key = "checkin_interval_minutes";
 
     /// <summary>
     /// Grenzen wie im Backend. Sie stehen hier ein zweites Mal, weil ein
@@ -32,46 +32,47 @@ public sealed class CheckinSchedule(
     /// immer — den Agent sonst dauerhaft verstummen liesse. Eine Zahl, die von
     /// aussen kommt, wird nicht ungeprueft zum Taktgeber.
     /// </summary>
-    private const double MinHours = 0.25;
-    private const double MaxHours = 168;
+    private const int MinMinutes = 15;
+    private const int MaxMinutes = 10_080;
 
-    public TimeSpan Interval => TimeSpan.FromHours(Stored() ?? options.CheckIntervalHours);
+    public TimeSpan Interval => TimeSpan.FromMinutes(Stored() ?? options.CheckIntervalMinutes);
 
     /// <summary>Uebernimmt die Vorgabe aus einer Check-in-Antwort.</summary>
-    public void Apply(double? fromBackend)
+    public void Apply(int? fromBackend)
     {
-        if (fromBackend is not { } vorgabe || double.IsNaN(vorgabe))
+        if (fromBackend is not { } vorgabe)
         {
             return;
         }
 
-        double begrenzt = Math.Clamp(vorgabe, MinHours, MaxHours);
+        int begrenzt = Math.Clamp(vorgabe, MinMinutes, MaxMinutes);
 
-        if (Math.Abs(begrenzt - vorgabe) > 0.001)
+        if (begrenzt != vorgabe)
         {
             logger.LogWarning(
-                "Das Backend gab {Vorgabe} h vor; verwendet werden {Verwendet} h.", vorgabe, begrenzt);
+                "Das Backend gab {Vorgabe} min vor; verwendet werden {Verwendet} min.",
+                vorgabe, begrenzt);
         }
 
-        double? bisher = Stored();
-        if (bisher is { } alt && Math.Abs(alt - begrenzt) < 0.001)
+        int? bisher = Stored();
+        if (bisher == begrenzt)
         {
             return;
         }
 
-        queue.SetMeta(Key, begrenzt.ToString("R", CultureInfo.InvariantCulture));
+        queue.SetMeta(Key, begrenzt.ToString(CultureInfo.InvariantCulture));
 
         logger.LogInformation(
-            "Melde-Intervall vom Backend uebernommen: {Stunden} h (vorher {Vorher} h).",
-            begrenzt, bisher ?? options.CheckIntervalHours);
+            "Melde-Intervall vom Backend uebernommen: {Minuten} min (vorher {Vorher} min).",
+            begrenzt, bisher ?? options.CheckIntervalMinutes);
     }
 
-    private double? Stored()
+    private int? Stored()
     {
         return queue.GetMeta(Key) is string wert
-            && double.TryParse(wert, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed)
-            && parsed >= MinHours
-            && parsed <= MaxHours
+            && int.TryParse(wert, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed)
+            && parsed >= MinMinutes
+            && parsed <= MaxMinutes
             ? parsed
             : null;
     }
