@@ -4,6 +4,10 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
+// Direkte Abhaengigkeit im package.json, obwohl @nestjs/platform-express das
+// Paket ohnehin mitbringt: Unter pnpm ist eine nur transitiv vorhandene
+// Abhaengigkeit zur Laufzeit nicht aufloesbar. Der Typ-Import kam durch, der
+// Laufzeit-Import brach den Start ab.
 import { json, urlencoded } from 'express';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
