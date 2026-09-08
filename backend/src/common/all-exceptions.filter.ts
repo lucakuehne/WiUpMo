@@ -39,6 +39,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return;
     }
 
+    // Fehler des Body-Parsers sind Aussagen ueber die Anfrage, nicht ueber den
+    // Server. Als 500 mit Kennung ausgeliefert sahen sie aus wie ein Defekt und
+    // fuellten das Protokoll mit Stapelspuren, die nichts erklaeren.
+    const parseError = describeBodyParserError(exception);
+    if (parseError) {
+      this.logger.warn(`${request.method} ${request.url}: ${parseError.message}`);
+      response.status(parseError.status).json({
+        statusCode: parseError.status,
+        message: parseError.message,
+      });
+      return;
+    }
+
     const reference = randomUUID().slice(0, 8);
     const message = exception instanceof Error ? exception.stack ?? exception.message : String(exception);
 
@@ -49,5 +62,30 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message: `Unerwarteter Fehler. Kennung ${reference} — sie steht so im Protokoll des Backends.`,
       reference,
     });
+  }
+}
+
+/**
+ * Erkennt die Fehler von `body-parser` an ihrem `type`-Feld. Nur diese vier
+ * Faelle, bewusst keine allgemeine Regel "alles mit 4xx durchreichen": Die
+ * Meldungen fremder Bibliotheken sind nicht darauf geprueft, ob sie Interna
+ * preisgeben.
+ */
+function describeBodyParserError(exception: unknown): { status: number; message: string } | null {
+  if (typeof exception !== 'object' || exception === null || !('type' in exception)) {
+    return null;
+  }
+
+  switch ((exception as { type: unknown }).type) {
+    case 'entity.too.large':
+      return { status: 413, message: 'Die Anfrage ist zu gross.' };
+    case 'entity.parse.failed':
+      return { status: 400, message: 'Der Anfragekoerper ist kein gueltiges JSON.' };
+    case 'encoding.unsupported':
+      return { status: 415, message: 'Die Zeichenkodierung wird nicht unterstuetzt.' };
+    case 'request.aborted':
+      return { status: 400, message: 'Die Anfrage wurde abgebrochen.' };
+    default:
+      return null;
   }
 }
