@@ -58,6 +58,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import AdSyncLog from '@/components/AdSyncLog.vue';
+import AgentReleases from '@/components/AgentReleases.vue';
 import GroupPicker from '@/components/GroupPicker.vue';
 import OuPicker from '@/components/OuPicker.vue';
 import { formatDnPath } from '@/dn';
@@ -77,6 +78,7 @@ import {
 const sections = [
   { id: 'ad', label: 'Active Directory' },
   { id: 'agent', label: 'Agent-Registrierung' },
+  { id: 'releases', label: 'Agent-Versionen' },
   { id: 'auth', label: 'Anmeldung' },
   { id: 'thresholds', label: 'Schwellwerte' },
   { id: 'retention', label: 'Aufbewahrung' },
@@ -957,6 +959,11 @@ onMounted(load);
             </Button>
           </CardFooter>
         </Card>
+
+        <!-- ================= Agent-Versionen ================= -->
+        <!-- Ohne Bindung an `loading`: Der Abschnitt holt seine Daten selbst
+             und hängt an keiner Einstellung. -->
+        <AgentReleases v-if="active === 'releases'" />
 
         <!-- ================= Anmeldung ================= -->
         <Card v-if="active === 'auth' && !loading" class="xl:w-1/2">

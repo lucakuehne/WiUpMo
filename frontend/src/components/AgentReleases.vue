@@ -43,6 +43,13 @@ import TablePager from '@/components/TablePager.vue';
 import { formatBytes, formatDateTime } from '@/format';
 import { usePagedList } from '@/paged';
 
+/**
+ * Agent-Versionen und Update-Aufträge.
+ *
+ * Als Abschnitt der Einstellungen statt als eigene Seite: Das Hinterlegen einer
+ * Version ist eine Einrichtungsaufgabe, keine tägliche Arbeit — und sie gehört
+ * neben das Enrollment-Token, mit dem sie zusammenspielt.
+ */
 const router = useRouter();
 
 const releases = ref<AgentRelease[]>([]);
@@ -207,14 +214,12 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="mx-auto max-w-[1600px] px-5 py-6">
-    <h1 class="mb-4 text-xl font-semibold">Agent-Versionen</h1>
-
-    <Alert v-if="error" variant="destructive" class="mb-4">
+  <div class="space-y-4">
+    <Alert v-if="error" variant="destructive">
       <AlertDescription>{{ error }}</AlertDescription>
     </Alert>
 
-    <Card class="mb-4">
+    <Card>
       <CardHeader>
         <CardTitle>Neue Version aufnehmen</CardTitle>
         <CardDescription>
@@ -254,120 +259,150 @@ onMounted(load);
       </CardFooter>
     </Card>
 
-    <div class="mb-6 rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Version</TableHead>
-            <TableHead class="w-28 text-right">Grösse</TableHead>
-            <TableHead class="w-44">SHA-256</TableHead>
-            <TableHead class="w-24 text-right">Geräte</TableHead>
-            <TableHead class="w-40">Aufgenommen</TableHead>
-            <TableHead>Anmerkungen</TableHead>
-            <TableHead class="w-64" />
-          </TableRow>
-        </TableHeader>
+    <Card>
+      <CardHeader>
+        <CardTitle>Hinterlegte Versionen</CardTitle>
+        <CardDescription>
+          „Aktuell" ist die Version, auf die ein Auftrag ohne ausdrückliche Angabe zielt.
+          „Ausrollen" legt Aufträge für alle aktiven Geräte an, die nicht darauf laufen.
+        </CardDescription>
+      </CardHeader>
 
-        <TableBody>
-          <TableRow v-if="!loading && releases.length === 0">
-            <TableCell :colspan="7" class="text-muted-foreground py-8 text-center">
-              Noch keine Version hinterlegt.
-            </TableCell>
-          </TableRow>
+      <CardContent>
+        <div class="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Version</TableHead>
+                <TableHead class="w-28 text-right">Grösse</TableHead>
+                <TableHead class="w-44">SHA-256</TableHead>
+                <TableHead class="w-24 text-right">Geräte</TableHead>
+                <TableHead class="w-40">Aufgenommen</TableHead>
+                <TableHead>Anmerkungen</TableHead>
+                <TableHead class="w-64" />
+              </TableRow>
+            </TableHeader>
 
-          <TableRow v-for="release in releases" :key="release.id">
-            <TableCell>
-              <span class="tabular font-medium">{{ release.version }}</span>
-              <Badge
-                v-if="release.isCurrent"
-                variant="outline"
-                class="bg-success/15 text-success border-success/30 ml-2"
+            <TableBody>
+              <TableRow v-if="!loading && releases.length === 0">
+                <TableCell :colspan="7" class="text-muted-foreground py-8 text-center">
+                  Noch keine Version hinterlegt.
+                </TableCell>
+              </TableRow>
+
+              <TableRow v-for="release in releases" :key="release.id">
+                <TableCell>
+                  <span class="tabular font-medium">{{ release.version }}</span>
+                  <Badge
+                    v-if="release.isCurrent"
+                    variant="outline"
+                    class="bg-success/15 text-success border-success/30 ml-2"
+                  >
+                    aktuell
+                  </Badge>
+                </TableCell>
+
+                <TableCell class="tabular text-right">
+                  {{ formatBytes(release.sizeBytes) }}
+                </TableCell>
+                <TableCell><code class="text-xs">{{ release.sha256.slice(0, 16) }}…</code></TableCell>
+                <TableCell class="tabular text-right">{{ release.devices }}</TableCell>
+                <TableCell>{{ formatDateTime(release.releasedAt) }}</TableCell>
+                <TableCell class="text-muted-foreground text-sm">
+                  {{ release.notes ?? '' }}
+                </TableCell>
+
+                <TableCell>
+                  <div class="flex justify-end gap-1.5 whitespace-nowrap">
+                    <Button
+                      v-if="!release.isCurrent"
+                      variant="outline"
+                      size="sm"
+                      :disabled="busy"
+                      @click="setCurrent(release)"
+                    >
+                      Als aktuell
+                    </Button>
+                    <Button size="sm" :disabled="busy" @click="pendingRollOut = release">
+                      <Send class="size-3.5" />
+                      Ausrollen
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="text-destructive size-8"
+                      :disabled="busy"
+                      @click="pendingRemoval = release"
+                    >
+                      <Trash2 class="size-4" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <CardTitle>Update-Aufträge</CardTitle>
+        <CardDescription>
+          Ein Auftrag wird beim nächsten Check-in des Geräts abgeholt. Bis dahin bleibt er offen.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent>
+        <div class="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Gerät</TableHead>
+                <TableHead class="w-32">Zielversion</TableHead>
+                <TableHead class="w-40">Zustand</TableHead>
+                <TableHead class="w-40">Angelegt</TableHead>
+                <TableHead class="w-40">Abgeschlossen</TableHead>
+                <TableHead>Fehler</TableHead>
+              </TableRow>
+            </TableHeader>
+
+            <TableBody>
+              <TableRow v-if="!loading && jobs.length === 0">
+                <TableCell :colspan="6" class="text-muted-foreground py-8 text-center">
+                  Noch keine Aufträge.
+                </TableCell>
+              </TableRow>
+
+              <TableRow
+                v-for="job in jobsPage.items"
+                :key="job.id"
+                class="cursor-pointer"
+                @click="router.push({ name: 'device', params: { id: job.deviceId } })"
               >
-                aktuell
-              </Badge>
-            </TableCell>
+                <TableCell class="font-medium">{{ job.hostname }}</TableCell>
+                <TableCell class="tabular">{{ job.targetVersion }}</TableCell>
+                <TableCell>
+                  <Badge variant="outline" :class="jobBadgeClass(job.state)">
+                    {{ JOB_STATE_LABELS[job.state] }}
+                  </Badge>
+                </TableCell>
+                <TableCell>{{ formatDateTime(job.createdAt) }}</TableCell>
+                <TableCell>{{ formatDateTime(job.completedAt) }}</TableCell>
+                <TableCell class="text-destructive text-xs">{{ job.error ?? '' }}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
 
-            <TableCell class="tabular text-right">{{ formatBytes(release.sizeBytes) }}</TableCell>
-            <TableCell><code class="text-xs">{{ release.sha256.slice(0, 16) }}…</code></TableCell>
-            <TableCell class="tabular text-right">{{ release.devices }}</TableCell>
-            <TableCell>{{ formatDateTime(release.releasedAt) }}</TableCell>
-            <TableCell class="text-muted-foreground text-sm">{{ release.notes ?? '' }}</TableCell>
-
-            <TableCell>
-              <div class="flex justify-end gap-1.5 whitespace-nowrap">
-                <Button
-                  v-if="!release.isCurrent"
-                  variant="outline"
-                  size="sm"
-                  :disabled="busy"
-                  @click="setCurrent(release)"
-                >
-                  Als aktuell
-                </Button>
-                <Button size="sm" :disabled="busy" @click="pendingRollOut = release">
-                  <Send class="size-3.5" />
-                  Ausrollen
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="text-destructive size-8"
-                  :disabled="busy"
-                  @click="pendingRemoval = release"
-                >
-                  <Trash2 class="size-4" />
-                </Button>
-              </div>
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
-    </div>
-
-    <h2 class="mb-2 text-base font-semibold">Update-Aufträge</h2>
-
-    <div class="rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Gerät</TableHead>
-            <TableHead class="w-32">Zielversion</TableHead>
-            <TableHead class="w-40">Zustand</TableHead>
-            <TableHead class="w-40">Angelegt</TableHead>
-            <TableHead class="w-40">Abgeschlossen</TableHead>
-            <TableHead>Fehler</TableHead>
-          </TableRow>
-        </TableHeader>
-
-        <TableBody>
-          <TableRow v-if="!loading && jobs.length === 0">
-            <TableCell :colspan="6" class="text-muted-foreground py-8 text-center">
-              Noch keine Aufträge.
-            </TableCell>
-          </TableRow>
-
-          <TableRow
-            v-for="job in jobsPage.items"
-            :key="job.id"
-            class="cursor-pointer"
-            @click="router.push({ name: 'device', params: { id: job.deviceId } })"
-          >
-            <TableCell class="font-medium">{{ job.hostname }}</TableCell>
-            <TableCell class="tabular">{{ job.targetVersion }}</TableCell>
-            <TableCell>
-              <Badge variant="outline" :class="jobBadgeClass(job.state)">
-                {{ JOB_STATE_LABELS[job.state] }}
-              </Badge>
-            </TableCell>
-            <TableCell>{{ formatDateTime(job.createdAt) }}</TableCell>
-            <TableCell>{{ formatDateTime(job.completedAt) }}</TableCell>
-            <TableCell class="text-destructive text-xs">{{ job.error ?? '' }}</TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
-    </div>
-
-    <TablePager v-model:page="jobsPage.page" v-model:limit="jobsPage.limit" :total="jobsPage.total" />
+        <TablePager
+          v-model:page="jobsPage.page"
+          v-model:limit="jobsPage.limit"
+          :total="jobsPage.total"
+          :page-sizes="[10, 25, 50]"
+        />
+      </CardContent>
+    </Card>
 
     <!-- ===================== Rückfragen ===================== -->
     <Dialog :open="pendingRemoval !== null" @update:open="pendingRemoval = null">

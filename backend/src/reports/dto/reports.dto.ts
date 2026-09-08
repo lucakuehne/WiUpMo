@@ -136,6 +136,23 @@ export class TrendPointDto {
   installed: number;
 }
 
+/**
+ * Ein Tag der Agent-Abdeckung. Die drei Zahlen ergeben zusammen den Bestand an
+ * diesem Tag — sie ueberschneiden sich nicht.
+ */
+export class AgentTrendPointDto {
+  date: string;
+
+  /** Im AD bekannt, aber (noch) ohne Agent. */
+  withoutAgent: number;
+
+  /** Agent registriert und innerhalb der Frist gemeldet. */
+  activeAgents: number;
+
+  /** Agent registriert, aber laenger als die Frist stumm. */
+  silentAgents: number;
+}
+
 export class TrendQueryDto {
   @toInt()
   @IsInt()

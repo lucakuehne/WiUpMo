@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRouter, type RouteLocationRaw } from 'vue-router';
 import { get } from '@/api/client';
-import type { Summary, TrendPoint, UpdateSourcesReport } from '@/api/types';
+import type { AgentTrendPoint, Summary, TrendPoint, UpdateSourcesReport } from '@/api/types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -15,6 +15,7 @@ const router = useRouter();
 
 const summary = ref<Summary | null>(null);
 const trend = ref<TrendPoint[]>([]);
+const agentTrend = ref<AgentTrendPoint[]>([]);
 const sources = ref<UpdateSourcesReport | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -141,6 +142,54 @@ const trendOptions = computed(() => ({
   },
 }));
 
+/**
+ * Gestapelt, nicht nebeneinander: Die drei Werte sind Teile desselben
+ * Bestandes. Die Gesamthöhe zeigt die Flotte, und wie sich die Fläche von rot
+ * über gelb nach grün verschiebt, ist genau der Fortschritt des Rollouts.
+ *
+ * Reihenfolge von unten: aktiv, stumm, ohne Agent — das Erfreuliche als
+ * Sockel, das zu Erledigende obenauf.
+ */
+const agentTrendData = computed(() => ({
+  labels: agentTrend.value.map((point) => point.date.slice(5)),
+  datasets: [
+    {
+      label: 'Mit Agent, meldet sich',
+      data: agentTrend.value.map((point) => point.activeAgents),
+      backgroundColor: palette.value.series[1],
+    },
+    {
+      label: `Mit Agent, stumm (> ${summary.value?.staleAgentDays ?? 14} T)`,
+      data: agentTrend.value.map((point) => point.silentAgents),
+      backgroundColor: palette.value.series[2],
+    },
+    {
+      label: 'Ohne Agent',
+      data: agentTrend.value.map((point) => point.withoutAgent),
+      backgroundColor: palette.value.series[5],
+    },
+  ],
+}));
+
+const agentTrendOptions = computed(() => ({
+  ...baseOptions.value,
+  interaction: { mode: 'index' as const, intersect: false },
+  scales: {
+    x: {
+      stacked: true,
+      ticks: { color: palette.value.muted, maxTicksLimit: 12 },
+      grid: { display: false },
+    },
+    y: {
+      stacked: true,
+      beginAtZero: true,
+      title: { display: true, text: 'Geräte', color: palette.value.muted },
+      ticks: { color: palette.value.muted, precision: 0 },
+      grid: { color: palette.value.grid },
+    },
+  },
+}));
+
 const sourceData = computed(() => {
   const distribution = sources.value?.distribution ?? [];
 
@@ -165,14 +214,19 @@ const sourceOptions = computed(() => ({
 
 async function load(): Promise<void> {
   try {
-    const [s, t, src] = await Promise.all([
+    const [s, t, a, src] = await Promise.all([
       get<Summary>('/api/reports/summary'),
       get<TrendPoint[]>('/api/reports/trend', { days: 90 }),
+      // 30 Tage, nicht 90: Die Einstufung „stumm" hängt an der
+      // Check-in-Historie, und die unterliegt der Aufbewahrungsfrist. Innerhalb
+      // eines Monats ist der Verlauf belastbar.
+      get<AgentTrendPoint[]>('/api/reports/agent-trend', { days: 30 }),
       get<UpdateSourcesReport>('/api/reports/update-sources'),
     ]);
 
     summary.value = s;
     trend.value = t;
+    agentTrend.value = a;
     sources.value = src;
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Das Dashboard konnte nicht geladen werden.';
@@ -237,6 +291,21 @@ onMounted(load);
         </CardHeader>
         <CardContent>
           <ChartCanvas type="doughnut" :data="sourceData" :options="sourceOptions" />
+        </CardContent>
+      </Card>
+
+      <Card class="xl:col-span-3">
+        <CardHeader>
+          <CardTitle>Agent-Abdeckung über die Zeit</CardTitle>
+          <CardDescription>
+            Der Bestand an jedem Tag, aufgeteilt nach Zustand — aus den Zeitpunkten am Gerät und
+            der Check-in-Historie gemessen, nicht geschätzt. Gezeigt werden 30 Tage: Weiter zurück
+            liesse sich „stumm" nicht mehr belegen, weil die Check-ins der Aufbewahrungsfrist
+            unterliegen.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ChartCanvas type="bar" :data="agentTrendData" :options="agentTrendOptions" height="18rem" />
         </CardContent>
       </Card>
     </div>

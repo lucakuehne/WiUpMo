@@ -21,11 +21,9 @@ const router = createRouter({
     // Einstellungen, die ihn steuern. Ein Lesezeichen auf /ad soll dorthin
     // finden statt auf dem Dashboard zu landen.
     { path: '/ad', redirect: '/settings' },
-    {
-      path: '/agent-releases',
-      name: 'releases',
-      component: () => import('@/views/AgentReleasesView.vue'),
-    },
+    // Wie /ad: Die Agent-Versionen stehen jetzt bei den Einstellungen. Ein
+    // Lesezeichen soll dorthin finden statt auf dem Dashboard zu landen.
+    { path: '/agent-releases', redirect: '/settings' },
     { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

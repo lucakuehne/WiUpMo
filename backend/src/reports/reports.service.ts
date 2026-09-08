@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import { UpdateSource } from '../database/enums.js';
 import { SettingsService } from '../settings/settings.service.js';
 import {
+  AgentTrendPointDto,
   ComplianceDeviceDto,
   FailureGroupDto,
   MissingAgentDto,
@@ -402,6 +403,78 @@ export class ReportsService {
     }
 
     return points.reverse();
+  }
+
+  /**
+   * Verlauf der Agent-Abdeckung: ohne Agent, mit Agent, mit Agent aber stumm.
+   *
+   * Anders als beim Update-Verlauf braucht es hier keine Rueckrechnung — die
+   * Zeitpunkte stehen an den Geraeten selbst (`created_at`, `enrolled_at`,
+   * `archived_at`), und ob ein Geraet an einem Tag gemeldet hat, sagt die
+   * Check-in-Historie. Der Verlauf ist damit gemessen und nicht geschaetzt.
+   *
+   * Eine Einschraenkung bleibt: Die Check-ins unterliegen der Aufbewahrungsfrist.
+   * Reicht die Anfrage weiter zurueck, gilt ein Geraet fuer den aelteren Teil
+   * als stumm, weil sein Nachweis geloescht wurde. Innerhalb der Frist ist das
+   * unschaedlich — ein fehlender Nachweis heisst dort, dass die letzte Meldung
+   * aelter war als die Frist, und damit war das Geraet tatsaechlich stumm.
+   */
+  async agentTrend(days: number): Promise<AgentTrendPointDto[]> {
+    const { staleAgentDays } = await this.settings.getThresholds();
+
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      `WITH tage AS (
+         SELECT generate_series(
+                  current_date - make_interval(days => $1::int - 1),
+                  current_date,
+                  interval '1 day'
+                )::date AS tag
+       ),
+       bestand AS (
+         SELECT id,
+                created_at::date  AS angelegt,
+                enrolled_at::date AS registriert,
+                archived_at::date AS archiviert
+           FROM devices
+       )
+       SELECT t.tag,
+              count(*) FILTER (
+                WHERE b.registriert IS NULL OR b.registriert > t.tag
+              ) AS ohne_agent,
+              count(*) FILTER (
+                WHERE b.registriert IS NOT NULL AND b.registriert <= t.tag
+                  AND letzte.tag IS NOT NULL
+                  AND letzte.tag >= t.tag - $2::int
+              ) AS aktiv,
+              count(*) FILTER (
+                WHERE b.registriert IS NOT NULL AND b.registriert <= t.tag
+                  AND (letzte.tag IS NULL OR letzte.tag < t.tag - $2::int)
+              ) AS stumm
+         FROM tage t
+         JOIN bestand b
+           ON b.angelegt <= t.tag
+          AND (b.archiviert IS NULL OR b.archiviert > t.tag)
+         -- Der Vergleich laeuft gegen die Spalte selbst, nicht gegen
+         -- 'collected_at::date': Nur so bleibt idx_device_checkins_device_collected
+         -- benutzbar, und das max() wird zu einem rueckwaerts laufenden
+         -- Indexzugriff statt zu einem Durchlauf der ganzen Historie.
+         LEFT JOIN LATERAL (
+           SELECT max(c.collected_at)::date AS tag
+             FROM device_checkins c
+            WHERE c.device_id = b.id
+              AND c.collected_at < (t.tag + 1)::timestamptz
+         ) letzte ON true
+        GROUP BY t.tag
+        ORDER BY t.tag`,
+      [days, staleAgentDays],
+    );
+
+    return rows.map((row) => ({
+      date: (row.tag as Date).toISOString().slice(0, 10),
+      withoutAgent: num(row.ohne_agent),
+      activeAgents: num(row.aktiv),
+      silentAgents: num(row.stumm),
+    }));
   }
 }
 

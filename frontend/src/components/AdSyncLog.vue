@@ -39,7 +39,11 @@ const status = ref<AdStatus | null>(null);
 const runs = ref<AdSyncRun[]>([]);
 const total = ref(0);
 const page = ref(1);
-const limit = ref(25);
+
+// Zehn statt der üblichen fünfundzwanzig: Das Protokoll steht unter den
+// Einstellungen, nicht auf einer eigenen Seite — es soll den Blick auf die
+// letzten Läufe geben, ohne das Formular darüber wegzuschieben.
+const limit = ref(10);
 const loading = ref(true);
 const syncing = ref(false);
 const error = ref<string | null>(null);
@@ -198,6 +202,7 @@ defineExpose({ reload: reset });
         v-model:page="page"
         v-model:limit="limit"
         :total="total"
+        :page-sizes="[10, 25, 50]"
         @update:page="load"
         @update:limit="
           page = 1;

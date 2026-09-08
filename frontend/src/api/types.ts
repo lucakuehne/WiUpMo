@@ -183,6 +183,14 @@ export interface CreateUpdateJobsResult {
   targetVersion: string;
 }
 
+/** Ein Tag der Agent-Abdeckung; die drei Zahlen ergeben zusammen den Bestand. */
+export interface AgentTrendPoint {
+  date: string;
+  withoutAgent: number;
+  activeAgents: number;
+  silentAgents: number;
+}
+
 export interface Summary {
   devicesTotal: number;
   devicesActive: number;
