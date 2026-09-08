@@ -9,14 +9,17 @@ name: Backend-Image
 on:
   push:
     branches: [main]
-    # Ein Commit am Agent oder an der Dokumentation soll keinen Image-Build
-    # ausloesen. Der Agent hat seinen eigenen Release-Zyklus.
+    # Eine Aenderung an der Dokumentation soll keinen Build ausloesen, eine am
+    # Quelltext schon — und zwar auch am Agent: Sein Binary wird in dasselbe
+    # Image gebaut, damit das Backend es beim Start selbst aufnehmen kann.
     paths:
       - 'backend/**'
       # Das Frontend wird in dasselbe Image gebaut und vom Backend
       # ausgeliefert — eine Aenderung dort braucht also ebenfalls ein neues Image.
       - 'frontend/**'
+      - 'agent/**'
       - 'deploy/Dockerfile'
+      - 'NuGet.config'
       - '.github/workflows/backend-image.yml'
     tags: ['backend/v*']
   workflow_dispatch:

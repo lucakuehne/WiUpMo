@@ -39,6 +39,21 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
 COPY frontend/ ./
 RUN pnpm build
 
+# --- Agent -------------------------------------------------------------------
+# Das Agent-Binary wandert ins Image, damit es nicht bei jedem Release von Hand
+# hochgeladen werden muss: Das Backend nimmt es beim Start selbst auf.
+#
+# Gebaut wird fuer win-x64 auf einem Linux-Container. Das ist beim .NET-SDK
+# vorgesehen — ausfuehren laesst sich das Ergebnis hier nicht, erzeugen schon.
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS agent
+WORKDIR /src
+# Die Paketquelle des Projekts, damit der Wiederherstellungsschritt nicht von
+# der Konfiguration des Bauers abhaengt.
+COPY NuGet.config ./
+COPY agent/ ./agent/
+RUN dotnet publish agent/src/WiUpMo.Agent/WiUpMo.Agent.csproj \
+      -c Release -r win-x64 -o /agent-publish
+
 # --- Laufzeit ----------------------------------------------------------------
 # Nur Produktivabhaengigkeiten, kein Quelltext, kein pnpm-Store.
 FROM node:24-alpine AS runtime
@@ -60,6 +75,10 @@ COPY --from=build /app/dist ./dist
 # ServeStaticModule in app.module.ts). Fehlt es — etwa in der Entwicklung —,
 # laeuft das Backend als reine API weiter.
 COPY --from=frontend /app/dist ./public
+
+# Nur die EXE, nicht das ganze Publish-Verzeichnis: Sie ist eigenstaendig, alles
+# andere daneben sind Symboldateien und die Konfigurationsvorlage.
+COPY --from=agent /agent-publish/wiupmo-agent.exe ./agent/wiupmo-agent.exe
 
 # Ablage der Agent-Binaries. Sie muss im Image liegen und `node` gehoeren:
 # Haengt Docker ein noch leeres benanntes Volume ein, uebernimmt es Inhalt und

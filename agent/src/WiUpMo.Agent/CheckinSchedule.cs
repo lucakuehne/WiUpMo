@@ -32,8 +32,8 @@ public sealed class CheckinSchedule(
     /// immer — den Agent sonst dauerhaft verstummen liesse. Eine Zahl, die von
     /// aussen kommt, wird nicht ungeprueft zum Taktgeber.
     /// </summary>
-    private const int MinMinutes = 15;
-    private const int MaxMinutes = 10_080;
+    private const int MinMinutes = 5;
+    private const int MaxMinutes = 360;
 
     public TimeSpan Interval => TimeSpan.FromMinutes(Stored() ?? options.CheckIntervalMinutes);
 

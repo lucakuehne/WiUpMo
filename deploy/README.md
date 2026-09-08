@@ -244,6 +244,20 @@ System sein, an dem eine ganze Geräteflotte hängt.
 
 ### Agent-Versionen
 
+Das Image bringt den passenden Agent mit: Die Bauanleitung übersetzt ihn in
+einer eigenen Stufe für `win-x64` und legt ihn unter `/app/agent/` ab. Beim
+Start nimmt das Backend ihn auf, sofern seine Version noch nicht hinterlegt ist
+— ein Upload von Hand entfällt damit für den Regelfall.
+
+Ausgerollt wird deswegen nichts: Welche Version auf die Flotte geht, bleibt eine
+bewusste Entscheidung unter **Einstellungen → Agent-Versionen**. Die einzige
+Ausnahme ist die Erstinstallation — solange gar keine Version als aktuell
+markiert ist, wird die mitgelieferte gesetzt.
+
+`AGENT_BUNDLED_BINARY` zeigt auf die Datei; leer gesetzt schaltet die Aufnahme
+ab. Der Upload über die Oberfläche bleibt daneben bestehen, etwa für eine
+Vorabversion oder einen Rücksprung.
+
 Die hochgeladenen Agent-Binaries liegen im Volume `wiupmo_agent-releases`,
 nicht in der Datenbank. Ein `pg_dump` sichert sie also **nicht**. Sie sind
 ersetzbar — ein Release lässt sich jederzeit neu hochladen —, aber die

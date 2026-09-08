@@ -62,7 +62,9 @@ const notes = ref('');
 const file = ref<File | null>(null);
 const fileInput = useTemplateRef<HTMLInputElement>('fileInput');
 
-const jobsPage = usePagedList(jobs);
+// Zehn: Die Auftragsliste steht unter zwei anderen Karten, sie soll die Seite
+// nicht in die Länge ziehen.
+const jobsPage = usePagedList(jobs, 10);
 
 async function load(): Promise<void> {
   error.value = null;

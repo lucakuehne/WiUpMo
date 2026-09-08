@@ -31,18 +31,23 @@ const BINARY_NAME = 'wiupmo-agent.exe';
 export class ReleasesService implements OnModuleInit {
   private readonly logger = new Logger(ReleasesService.name);
   private readonly root: string;
+  private readonly bundled: string;
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     config: ConfigService,
   ) {
     this.root = resolve(config.get<string>('AGENT_RELEASES_DIR') ?? '/app/agent-releases');
+
+    // Leer setzen schaltet die Aufnahme ab — fuer den Fall, dass jemand
+    // ausschliesslich selbst gebaute Binaries verteilen will.
+    this.bundled = (config.get<string>('AGENT_BUNDLED_BINARY') ?? '/app/agent/wiupmo-agent.exe').trim();
   }
 
   /**
-   * Prueft die Ablage beim Start.
+   * Prueft die Ablage beim Start und nimmt das mitgelieferte Binary auf.
    *
-   * Ohne diese Pruefung faellt ein unbeschreibbares Verzeichnis erst beim
+   * Ohne die Pruefung faellt ein unbeschreibbares Verzeichnis erst beim
    * Hochladen auf — nach 75 uebertragenen Megabyte. Es ist kein Grund, den
    * Start abzubrechen: Alles andere am Backend funktioniert weiterhin.
    */
@@ -55,6 +60,77 @@ export class ReleasesService implements OnModuleInit {
         `Die Ablage fuer Agent-Binaries (${this.root}) ist nicht beschreibbar: ` +
           `${error instanceof Error ? error.message : String(error)}. ` +
           'Das Hochladen einer Agent-Version wird scheitern, solange das so bleibt.',
+      );
+      return;
+    }
+
+    await this.adoptBundled();
+  }
+
+  /**
+   * Nimmt das im Image mitgelieferte Agent-Binary auf, sofern seine Version
+   * noch nicht hinterlegt ist.
+   *
+   * Damit entfaellt der Upload von Hand: Wer das Backend aktualisiert, hat den
+   * passenden Agent bereits im Haus. Ausgerollt wird trotzdem nicht von selbst
+   * — welche Version auf die Flotte geht, bleibt eine bewusste Entscheidung.
+   * Die eine Ausnahme ist die Erstinstallation: Solange gar keine Version als
+   * aktuell markiert ist, waere das Zoegern sinnlos.
+   *
+   * Fehler bleiben hier folgenlos. Ein Backend, das wegen eines fehlenden
+   * Binaries nicht startet, waere die schlechtere Eigenschaft.
+   */
+  private async adoptBundled(): Promise<void> {
+    if (this.bundled === '') {
+      return;
+    }
+
+    try {
+      await access(this.bundled, constants.R_OK);
+    } catch {
+      // Kein mitgeliefertes Binary — bei einem Image ohne Agent-Stufe und in
+      // der Entwicklung der Normalfall.
+      return;
+    }
+
+    try {
+      const version = (await readProductVersion(this.bundled)).split('+')[0].trim();
+
+      if (!VERSION_PATTERN.test(version)) {
+        this.logger.warn(`Mitgeliefertes Agent-Binary meldet die Version "${version}" — uebergangen.`);
+        return;
+      }
+
+      const existing: Array<{ id: string }> = await this.dataSource.query(
+        'SELECT id FROM agent_releases WHERE version = $1',
+        [version],
+      );
+
+      if (existing.length > 0) {
+        return;
+      }
+
+      const target = this.binaryPath(version);
+      await mkdir(join(this.root, version), { recursive: true });
+      // Kopieren, nicht verschieben: Die Quelle gehoert dem Image und muss
+      // einen Neustart des Containers ueberstehen.
+      await copyFile(this.bundled, target);
+
+      const sha256 = await this.hashFile(target);
+      const { size } = await stat(target);
+
+      await this.dataSource.query(
+        `INSERT INTO agent_releases (version, file_path, sha256, size_bytes, notes, is_current)
+         VALUES ($1, $2, $3, $4, $5, NOT EXISTS (SELECT 1 FROM agent_releases WHERE is_current))
+         ON CONFLICT (version) DO NOTHING`,
+        [version, target, sha256, String(size), 'Mit dem Backend-Image ausgeliefert.'],
+      );
+
+      this.logger.log(`Mitgelieferte Agent-Version ${version} aufgenommen.`);
+    } catch (error) {
+      this.logger.warn(
+        'Das mitgelieferte Agent-Binary konnte nicht aufgenommen werden: ' +
+          `${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }

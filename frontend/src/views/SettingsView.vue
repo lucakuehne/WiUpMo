@@ -62,7 +62,7 @@ import AdSyncLog from '@/components/AdSyncLog.vue';
 import AgentReleases from '@/components/AgentReleases.vue';
 import GroupPicker from '@/components/GroupPicker.vue';
 import OuPicker from '@/components/OuPicker.vue';
-import { formatDnPath } from '@/dn';
+import { domainOfDn, formatDnPath } from '@/dn';
 import {
   adjustPortForScheme,
   buildLdapUrl,
@@ -564,24 +564,43 @@ type DnMode = 'upn' | 'netbios' | 'custom';
 
 const dnMode = ref<DnMode>('upn');
 
-const dnModeOptions = computed(() => {
-  const dns = probe.value?.domainDnsName ?? 'firma.local';
-  const netbios = probe.value?.domainNetbiosName ?? 'FIRMA';
+/**
+ * Der Domänenname für die Namensformen.
+ *
+ * Bevorzugt aus der Verbindungsprüfung, ersatzweise aus der Suchwurzel: Aus
+ * `DC=firma,DC=local` wird `firma.local`. Vorher stand hier ein
+ * Platzhaltertext, der ungeprüft in die Vorlage wanderte — wer die Prüfung
+ * nicht laufen liess, speicherte am Ende `{username}@firma.local` und bekam
+ * bei jeder Anmeldung ein „Benutzername oder Passwort ist falsch".
+ */
+const domainDns = computed(() => probe.value?.domainDnsName ?? domainOfDn(ad.baseDn) ?? '');
 
-  return [
-    { value: 'upn', label: `Benutzerprinzipalname (benutzer@${dns})` },
-    { value: 'netbios', label: `Vorangestellte Domäne (${netbios}\\benutzer)` },
-    { value: 'custom', label: 'Eigene Vorlage' },
-  ];
-});
+/** Der NetBIOS-Name ist üblicherweise der erste Bestandteil in Grossbuchstaben. */
+const domainNetbios = computed(
+  () => probe.value?.domainNetbiosName ?? domainDns.value.split('.')[0]?.toUpperCase() ?? '',
+);
+
+const dnModeOptions = computed(() => [
+  {
+    value: 'upn',
+    label: `Benutzerprinzipalname (benutzer@${domainDns.value || 'firma.local'})`,
+    disabled: domainDns.value === '',
+  },
+  {
+    value: 'netbios',
+    label: `Vorangestellte Domäne (${domainNetbios.value || 'FIRMA'}\\benutzer)`,
+    disabled: domainNetbios.value === '',
+  },
+  { value: 'custom', label: 'Eigene Vorlage', disabled: false },
+]);
 
 function applyDnMode(mode: DnMode): void {
   dnMode.value = mode;
 
-  if (mode === 'upn') {
-    authSettings.userDnTemplate = `{username}@${probe.value?.domainDnsName ?? 'firma.local'}`;
-  } else if (mode === 'netbios') {
-    authSettings.userDnTemplate = `${probe.value?.domainNetbiosName ?? 'FIRMA'}\\{username}`;
+  if (mode === 'upn' && domainDns.value !== '') {
+    authSettings.userDnTemplate = `{username}@${domainDns.value}`;
+  } else if (mode === 'netbios' && domainNetbios.value !== '') {
+    authSettings.userDnTemplate = `${domainNetbios.value}\\{username}`;
   }
 }
 
@@ -590,6 +609,16 @@ function detectDnMode(template: string): DnMode {
   if (/^[^\\]+\\\{username\}$/.test(template)) return 'netbios';
   return 'custom';
 }
+
+/**
+ * Ein blosser Anmeldename genügt Active Directory nicht: Ein Bind braucht den
+ * Benutzerprinzipalnamen oder die vorangestellte Domäne. Die Vorgabe
+ * `{username}` ist damit für AD unbrauchbar — sie steht so nur da, weil sie für
+ * einen beliebigen LDAP-Server die neutrale Wahl ist.
+ */
+const dnTemplateIncomplete = computed(
+  () => authSettings.ldapEnabled && authSettings.userDnTemplate.trim() === '{username}',
+);
 
 // --- Aufbewahrung ----------------------------------------------------------
 
@@ -977,85 +1006,96 @@ onMounted(load);
 
         <AdSyncLog v-if="active === 'ad' && !loading" ref="syncLog" class="mt-4" />
 
-        <!-- ================= Agent-Registrierung ================= -->
-        <Card v-if="active === 'agent' && !loading" class="xl:w-1/2">
-          <CardHeader>
-            <CardTitle>Agent-Registrierung</CardTitle>
-            <CardDescription>
-              Dieses Token legt ein Agent beim erstmaligen Start vor. Danach arbeitet jedes Gerät
-              mit einem eigenen, serverseitig erzeugten Secret.
-            </CardDescription>
-          </CardHeader>
+        <!-- ================= Agent ================= -->
+        <div
+          v-if="active === 'agent' && !loading"
+          class="grid items-start gap-4 xl:grid-cols-2"
+        >
+          <Card>
+            <CardHeader>
+              <CardTitle>Agent-Registrierung</CardTitle>
+              <CardDescription>
+                Dieses Token legt ein Agent beim erstmaligen Start vor. Danach arbeitet jedes Gerät
+                mit einem eigenen, serverseitig erzeugten Secret.
+              </CardDescription>
+            </CardHeader>
 
-          <CardContent class="space-y-4">
-            <div class="space-y-1.5">
-              <Label for="token">Enrollment-Token</Label>
-              <div class="flex gap-2">
-                <Input id="token" :model-value="agent.enrollmentToken" readonly class="font-mono" />
-                <Button variant="secondary" size="icon" @click="copyToken">
-                  <Check v-if="copied" class="size-4" />
-                  <span v-else class="i">⧉</span>
-                </Button>
+            <CardContent class="space-y-4">
+              <div class="space-y-1.5">
+                <Label for="token">Enrollment-Token</Label>
+                <div class="flex gap-2">
+                  <Input
+                    id="token"
+                    :model-value="agent.enrollmentToken"
+                    readonly
+                    class="font-mono"
+                  />
+                  <Button variant="secondary" size="icon" @click="copyToken">
+                    <Check v-if="copied" class="size-4" />
+                    <span v-else class="i">⧉</span>
+                  </Button>
+                </div>
+                <p class="text-muted-foreground text-xs">
+                  Ein neues Token betrifft nur Neuinstallationen — bereits registrierte Geräte
+                  laufen unverändert weiter. Rotieren ist deshalb billig.
+                </p>
               </div>
-              <p class="text-muted-foreground text-xs">
-                Ein neues Token betrifft nur Neuinstallationen — bereits registrierte Geräte laufen
-                unverändert weiter. Rotieren ist deshalb billig.
-              </p>
-            </div>
 
-            <div class="bg-muted overflow-x-auto rounded-md p-3 font-mono text-xs">
-              wiupmo-agent.exe --install --backend-url {{ backendUrl }} --enrollment-token
-              {{ agent.enrollmentToken }}
-            </div>
-          </CardContent>
-
-          <CardFooter>
-            <Button variant="secondary" :disabled="rotating" @click="rotateToken">
-              <RefreshCw class="size-4" :class="rotating ? 'animate-spin' : ''" />
-              Neues Token erzeugen
-            </Button>
-          </CardFooter>
-        </Card>
-
-        <Card v-if="active === 'agent' && !loading" class="mt-4 xl:w-1/2">
-          <CardHeader>
-            <CardTitle>Melde-Intervall</CardTitle>
-            <CardDescription>
-              Abstand zwischen zwei regulären Durchläufen. Zusätzlich meldet sich ein Agent, sobald
-              sich am Netzwerk etwas ändert — beim VPN-Aufbau also sofort.
-            </CardDescription>
-          </CardHeader>
-
-          <CardContent>
-            <div class="space-y-1.5">
-              <Label for="interval">Minuten</Label>
-              <div class="flex items-center gap-3">
-                <Input
-                  id="interval"
-                  v-model.number="agent.checkIntervalMinutes"
-                  type="number"
-                  min="15"
-                  max="10080"
-                  step="15"
-                  class="w-40"
-                />
-                <span class="text-muted-foreground text-sm">{{ intervalHint }}</span>
+              <div class="bg-muted overflow-x-auto rounded-md p-3 font-mono text-xs">
+                wiupmo-agent.exe --install --backend-url {{ backendUrl }} --enrollment-token
+                {{ agent.enrollmentToken }}
               </div>
-              <p class="text-muted-foreground text-xs">
-                Zwischen 15 Minuten und einer Woche. Der Wert geht mit jeder Check-in-Antwort an die
-                Geräte und ersetzt dort die örtliche Einstellung — wirksam wird er entsprechend erst
-                beim nächsten Durchlauf, im ungünstigsten Fall also nach dem bisherigen Abstand.
-              </p>
-            </div>
-          </CardContent>
+            </CardContent>
 
-          <CardFooter>
-            <Button :disabled="savingAgent" @click="saveAgent">
-              <Loader2 v-if="savingAgent" class="size-4 animate-spin" />
-              Speichern
-            </Button>
-          </CardFooter>
-        </Card>
+            <CardFooter>
+              <Button variant="secondary" :disabled="rotating" @click="rotateToken">
+                <RefreshCw class="size-4" :class="rotating ? 'animate-spin' : ''" />
+                Neues Token erzeugen
+              </Button>
+            </CardFooter>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Melde-Intervall</CardTitle>
+              <CardDescription>
+                Abstand zwischen zwei regulären Durchläufen. Zusätzlich meldet sich ein Agent,
+                sobald sich am Netzwerk etwas ändert — beim VPN-Aufbau also sofort.
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent>
+              <div class="space-y-1.5">
+                <Label for="interval">Minuten</Label>
+                <div class="flex items-center gap-3">
+                  <Input
+                    id="interval"
+                    v-model.number="agent.checkIntervalMinutes"
+                    type="number"
+                    min="5"
+                    max="360"
+                    step="5"
+                    class="w-40"
+                  />
+                  <span class="text-muted-foreground text-sm">{{ intervalHint }}</span>
+                </div>
+                <p class="text-muted-foreground text-xs">
+                  Zwischen 5 Minuten und 6 Stunden. Der Wert geht mit jeder Check-in-Antwort an die
+                  Geräte und ersetzt dort die örtliche Einstellung — wirksam wird er entsprechend
+                  erst beim nächsten Durchlauf, im ungünstigsten Fall also nach dem bisherigen
+                  Abstand.
+                </p>
+              </div>
+            </CardContent>
+
+            <CardFooter>
+              <Button :disabled="savingAgent" @click="saveAgent">
+                <Loader2 v-if="savingAgent" class="size-4 animate-spin" />
+                Speichern
+              </Button>
+            </CardFooter>
+          </Card>
+        </div>
 
         <!-- ================= Agent-Versionen ================= -->
         <!-- Ohne Bindung an `loading`: Der Abschnitt holt seine Daten selbst
@@ -1114,7 +1154,12 @@ onMounted(load);
               <Select :model-value="dnMode" @update:model-value="applyDnMode($event as DnMode)">
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem v-for="option in dnModeOptions" :key="option.value" :value="option.value">
+                  <SelectItem
+                    v-for="option in dnModeOptions"
+                    :key="option.value"
+                    :value="option.value"
+                    :disabled="option.disabled"
+                  >
                     {{ option.label }}
                   </SelectItem>
                 </SelectContent>
@@ -1127,6 +1172,18 @@ onMounted(load);
                   Ergibt: <code>{{ authSettings.userDnTemplate }}</code>
                 </template>
               </p>
+
+              <Alert v-if="dnTemplateIncomplete" class="border-warning/40">
+                <AlertDescription>
+                  <code>{username}</code> allein genügt einem Active Directory nicht — es nimmt
+                  einen blossen Anmeldenamen bei der Anmeldung nicht an. Wähle oben eine
+                  Namensform; die Domäne wird dann angehängt, und der Benutzer tippt weiterhin nur
+                  seinen Namen.
+                  <template v-if="domainDns === ''">
+                    Dafür fehlt noch die Suchwurzel unter „Active Directory".
+                  </template>
+                </AlertDescription>
+              </Alert>
             </div>
 
             <div v-if="authSettings.ldapEnabled && dnMode === 'custom'" class="space-y-1.5">

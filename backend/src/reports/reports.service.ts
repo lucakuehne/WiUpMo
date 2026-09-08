@@ -381,15 +381,49 @@ export class ReportsService {
    */
   async trend(days: number): Promise<TrendPointDto[]> {
     const current: Array<{ open: string }> = await this.dataSource.query(
-      `SELECT count(*)::text AS open FROM device_update_states WHERE state = 'available'`,
+      `SELECT count(*)::text AS open
+         FROM device_update_states s
+         JOIN devices d ON d.id = s.device_id
+        WHERE s.state = 'available' AND d.status = 'active'`,
     );
 
+    /**
+     * Nur echte Zustandswechsel zaehlen.
+     *
+     * Die Zeitreihe enthaelt mehr als Uebergaenge: Jeder Historieneintrag eines
+     * Geraets wird als `installed` festgehalten, auch fuer Updates, die hier nie
+     * als offen gefuehrt wurden — beim ersten Check-in sind das bis zu 90 Tage
+     * Installationsgeschichte auf einen Schlag. Zaehlte man die als
+     * "aufgeloest", rechnete die Rueckwaertsrechnung sie der Vergangenheit als
+     * offene Updates zu, und die Kurve stieg ins Absurde: 162 offene an einem
+     * Tag, 27 am naechsten, bei 26 Installationen dazwischen.
+     *
+     * Der Vorgaengerzustand je Geraet und Update entscheidet deshalb: Aufgeloest
+     * wird nur, was vorher als aufgetaucht vermerkt war. Umgekehrt zaehlt ein
+     * zweites `appeared` ohne zwischenzeitliche Aufloesung nicht doppelt.
+     */
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
-      `SELECT date_trunc('day', occurred_at)::date AS day,
-              count(*) FILTER (WHERE event_type = 'appeared')                        AS appeared,
-              count(*) FILTER (WHERE event_type = 'installed')                       AS installed,
-              count(*) FILTER (WHERE event_type IN ('installed', 'disappeared', 'hidden')) AS resolved
-         FROM device_update_events
+      `WITH ereignisse AS (
+         SELECT e.event_type,
+                e.occurred_at,
+                lag(e.event_type) OVER (
+                  PARTITION BY e.device_id, e.update_id ORDER BY e.occurred_at, e.id
+                ) AS vorher
+           FROM device_update_events e
+           JOIN devices d ON d.id = e.device_id AND d.status = 'active'
+       )
+       SELECT date_trunc('day', occurred_at)::date AS day,
+              count(*) FILTER (
+                WHERE event_type = 'appeared' AND vorher IS DISTINCT FROM 'appeared'
+              ) AS appeared,
+              -- Fuer den Balken zaehlt jede gemeldete Installation, auch die aus
+              -- der Historie: Sie hat an diesem Tag stattgefunden.
+              count(*) FILTER (WHERE event_type = 'installed') AS installed,
+              count(*) FILTER (
+                WHERE event_type IN ('installed', 'disappeared', 'hidden')
+                  AND vorher = 'appeared'
+              ) AS resolved
+         FROM ereignisse
         WHERE occurred_at >= now() - make_interval(days => $1)
         GROUP BY 1
         ORDER BY 1`,

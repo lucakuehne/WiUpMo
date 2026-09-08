@@ -118,13 +118,14 @@ export const MIN_ENROLLMENT_TOKEN_LENGTH = 16;
 /**
  * Grenzen des Melde-Intervalls, in Minuten.
  *
- * Nach unten eine Viertelstunde: Jeder Durchlauf enthaelt eine vollstaendige
+ * Nach unten fuenf Minuten: Jeder Durchlauf enthaelt eine vollstaendige
  * Update-Suche, die auf einem traegen Rechner Minuten dauert und Platte und
- * Netz belastet. Nach oben eine Woche — laenger, und die Auswertungen
- * beschreiben einen Zustand, den es so nicht mehr gibt.
+ * Netz belastet — enger waere der Agent dauernd beschaeftigt. Nach oben sechs
+ * Stunden; laenger, und die Auswertungen beschreiben einen Zustand, den es so
+ * nicht mehr gibt.
  */
-export const MIN_CHECK_INTERVAL_MINUTES = 15;
-export const MAX_CHECK_INTERVAL_MINUTES = 10_080;
+export const MIN_CHECK_INTERVAL_MINUTES = 5;
+export const MAX_CHECK_INTERVAL_MINUTES = 360;
 
 export const DEFAULT_AGENT: AgentSettings = {
   enrollmentToken: '',

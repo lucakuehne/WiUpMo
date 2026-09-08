@@ -122,6 +122,22 @@ const trendData = computed(() => ({
       type: 'bar' as const,
       yAxisID: 'y2',
     },
+    /**
+     * Auch das Auftauchen gehört ins Bild.
+     *
+     * Ohne diesen Balken bewegt sich die Kurve scheinbar grundlos: Sie steigt
+     * mit neu angebotenen Updates und fällt nicht nur durch Installationen,
+     * sondern auch, wenn Updates abgelöst werden oder verschwinden. Wer nur die
+     * Installationen sieht, rechnet zwangsläufig falsch nach.
+     */
+    {
+      label: 'Neu aufgetaucht',
+      data: trend.value.map((point) => point.appeared),
+      borderColor: palette.value.series[2],
+      backgroundColor: palette.value.series[2],
+      type: 'bar' as const,
+      yAxisID: 'y2',
+    },
   ],
 }));
 
@@ -286,9 +302,10 @@ onMounted(load);
         <CardHeader>
           <CardTitle>Offene Updates über die Zeit</CardTitle>
           <CardDescription>
-            Aus dem heutigen Stand rückwärts aus der Zeitreihe rekonstruiert. Reicht die Kurve
-            weiter zurück als die Aufbewahrungsfrist, wird sie flach — dann fehlen die Ereignisse,
-            nicht die Updates.
+            Aus dem heutigen Stand rückwärts aus der Zeitreihe rekonstruiert. Die Kurve fällt nicht
+            nur durch Installationen — ein Update verschwindet auch, wenn es abgelöst oder
+            ausgeblendet wird. Reicht die Kurve weiter zurück als die Aufbewahrungsfrist, wird sie
+            flach; dann fehlen die Ereignisse, nicht die Updates.
           </CardDescription>
         </CardHeader>
         <CardContent>
