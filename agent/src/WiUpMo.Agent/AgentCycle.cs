@@ -65,7 +65,7 @@ public sealed class AgentCycle(
     }
 
     /// <summary>
-    /// Uebermittelt die gesamte Warteschlange. Fehler beim Senden werden
+    /// Uebermittelt die Warteschlange, in Schueben. Fehler beim Senden werden
     /// protokolliert, aber nicht weitergereicht: ein unerreichbares Backend ist
     /// der Normalfall bei einem Laptop, kein Grund den Dienst zu beenden. Die
     /// Snapshots bleiben liegen und gehen beim naechsten Mal mit.
@@ -83,28 +83,38 @@ public sealed class AgentCycle(
             return;
         }
 
+        int verbleibend = pending.Count;
+
         try
         {
             DeviceIdentity identity = await EnsureIdentityAsync(pending[^1].Snapshot.Host, ct)
                 .ConfigureAwait(false);
 
-            CheckinResponse response;
-            try
-            {
-                response = await SendAsync(identity, pending, ct).ConfigureAwait(false);
-            }
-            catch (BackendException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
-            {
-                // Secret gesperrt oder Geraet im Backend entfernt. Einmal neu
-                // registrieren und dieselben Snapshots erneut senden — die
-                // snapshotId bleibt gleich, ein doppelter Empfang ist deshalb
-                // unschaedlich.
-                logger.LogWarning("Das Backend hat die Geraeteidentitaet abgelehnt, neue Registrierung.");
-                identity = await EnrollAsync(pending[^1].Snapshot.Host, ct).ConfigureAwait(false);
-                response = await SendAsync(identity, pending, ct).ConfigureAwait(false);
-            }
+            CheckinResponse? letzte = null;
 
-            Settle(pending, response);
+            foreach (IReadOnlyList<QueuedSnapshot> schub in Batches(pending))
+            {
+                CheckinResponse response;
+
+                try
+                {
+                    response = await SendAsync(identity, schub, ct).ConfigureAwait(false);
+                }
+                catch (BackendException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    // Secret gesperrt oder Geraet im Backend entfernt. Einmal neu
+                    // registrieren und dieselben Snapshots erneut senden — die
+                    // snapshotId bleibt gleich, ein doppelter Empfang ist deshalb
+                    // unschaedlich.
+                    logger.LogWarning("Das Backend hat die Geraeteidentitaet abgelehnt, neue Registrierung.");
+                    identity = await EnrollAsync(schub[^1].Snapshot.Host, ct).ConfigureAwait(false);
+                    response = await SendAsync(identity, schub, ct).ConfigureAwait(false);
+                }
+
+                Settle(schub, response);
+                verbleibend -= schub.Count;
+                letzte = response;
+            }
 
             // Erst das Ergebnis eines laufenden Updates abschliessen, dann
             // einen neuen Auftrag annehmen — und beides erst, nachdem die
@@ -112,22 +122,76 @@ public sealed class AgentCycle(
             // vollen Warteschlange wuerde im Fehlerfall beides mitnehmen.
             await selfUpdate.ReportPendingOutcomeAsync(identity, ct).ConfigureAwait(false);
 
-            if (response.AgentUpdate is { } job)
+            if (letzte?.AgentUpdate is { } job)
             {
                 await selfUpdate.PrepareAsync(identity, job, ct).ConfigureAwait(false);
             }
+        }
+        catch (BackendException ex) when (ex.StatusCode == HttpStatusCode.Forbidden)
+        {
+            /**
+             * Das Geraet ist im Backend archiviert — meist, weil es nicht mehr
+             * im abgeglichenen Bereich des Verzeichnisses liegt.
+             *
+             * Anders als bei 401 ist das kein Grund, sich neu zu registrieren:
+             * Die Identitaet stimmt, sie ist nur nicht mehr erwuenscht. Die
+             * gepufferten Snapshots werden verworfen, sonst laeuft die
+             * Warteschlange bis an ihre Grenze und der Dienst schleppt Daten
+             * mit, die niemand haben will. Kommt das Geraet zurueck, geht es
+             * beim naechsten Durchlauf ohne Zutun weiter.
+             */
+            logger.LogWarning(
+                "Das Backend fuehrt dieses Geraet als archiviert; {Anzahl} Snapshots werden verworfen. {Meldung}",
+                verbleibend, ex.Message);
+
+            queue.Remove([.. pending.Select(p => p.Id)]);
         }
         catch (Exception ex) when (ex is BackendException or HttpRequestException or TaskCanceledException
                                       && !ct.IsCancellationRequested)
         {
             logger.LogWarning(
                 "Uebermittlung fehlgeschlagen, {Anzahl} Snapshots bleiben in der Warteschlange: {Fehler}",
-                pending.Count, ex.Message);
+                verbleibend, ex.Message);
         }
         catch (InvalidOperationException ex)
         {
             // Fehlendes Enrollment-Token bei noch nicht registriertem Geraet.
             logger.LogError("{Fehler}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Zerlegt die Warteschlange in Schuebe, die das Backend annimmt.
+    ///
+    /// Begrenzt wird zuerst nach Groesse, dann nach Stueckzahl. Ein einzelner
+    /// Snapshot, der die Byte-Grenze allein schon reisst, geht trotzdem als
+    /// eigener Schub hinaus: Ihn zurueckzuhalten hiesse, die Warteschlange
+    /// dahinter dauerhaft zu blockieren — und ob er durchkommt, entscheidet
+    /// ohnehin erst das Backend.
+    /// </summary>
+    private IEnumerable<IReadOnlyList<QueuedSnapshot>> Batches(IReadOnlyList<QueuedSnapshot> pending)
+    {
+        var schub = new List<QueuedSnapshot>();
+        int bytes = 0;
+
+        foreach (QueuedSnapshot eintrag in pending)
+        {
+            if (schub.Count > 0
+                && (bytes + eintrag.PayloadBytes > options.BatchMaxBytes
+                    || schub.Count >= options.BatchMaxSnapshots))
+            {
+                yield return schub;
+                schub = [];
+                bytes = 0;
+            }
+
+            schub.Add(eintrag);
+            bytes += eintrag.PayloadBytes;
+        }
+
+        if (schub.Count > 0)
+        {
+            yield return schub;
         }
     }
 

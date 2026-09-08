@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
@@ -6,7 +7,12 @@ using WiUpMo.Agent.Contracts;
 
 namespace WiUpMo.Agent.Storage;
 
-public sealed record QueuedSnapshot(long Id, Snapshot Snapshot);
+/// <summary>
+/// Ein Eintrag der Warteschlange. <paramref name="PayloadBytes"/> ist die
+/// Groesse der gespeicherten JSON-Darstellung — sie liegt hier ohnehin vor und
+/// erspart es, die Groesse eines Schubs vor dem Senden erst auszurechnen.
+/// </summary>
+public sealed record QueuedSnapshot(long Id, Snapshot Snapshot, int PayloadBytes);
 
 /// <summary>
 /// Dauerhafte Warteschlange unter <c>%ProgramData%\WiUpMo\queue.db</c>.
@@ -138,7 +144,7 @@ public sealed class SnapshotQueue(AgentOptions options, ILogger<SnapshotQueue> l
                 continue;
             }
 
-            result.Add(new QueuedSnapshot(id, snapshot));
+            result.Add(new QueuedSnapshot(id, snapshot, Encoding.UTF8.GetByteCount(payload)));
         }
 
         return result;

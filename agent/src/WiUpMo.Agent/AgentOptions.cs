@@ -71,6 +71,23 @@ public sealed class AgentOptions
 
     public int QueueMaxAgeDays { get; set; } = 30;
 
+    /// <summary>
+    /// Obergrenzen fuer einen einzelnen Nachreicheschub.
+    ///
+    /// Die ganze Warteschlange in einer Anfrage zu schicken war der Fehler:
+    /// Ein Geraet, das laenger nicht erreichbar war, kam damit auf mehrere
+    /// Megabyte und lief in die Koerpergrenze des Servers. Die Anfrage
+    /// scheiterte, die Warteschlange blieb stehen und wurde beim naechsten
+    /// Durchlauf noch groesser — sie hat sich nie wieder erholt.
+    ///
+    /// Die Byte-Grenze zaehlt dabei mehr als die Stueckzahl: Ein einzelner
+    /// erster Snapshot mit 90 Tagen Historie ist groesser als zwanzig spaetere
+    /// zusammen.
+    /// </summary>
+    public int BatchMaxBytes { get; set; } = 1_000_000;
+
+    public int BatchMaxSnapshots { get; set; } = 25;
+
     /// <summary>Aufbewahrung der Protokolldateien in Tagen.</summary>
     public int LogRetentionDays { get; set; } = 14;
 }

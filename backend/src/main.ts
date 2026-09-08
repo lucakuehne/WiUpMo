@@ -1,16 +1,45 @@
 import 'reflect-metadata';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
+import { json, urlencoded } from 'express';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AppModule } from './app.module.js';
 import { AllExceptionsFilter } from './common/all-exceptions.filter.js';
 
+/**
+ * Obergrenze fuer einen Nachreicheschub aus der Offline-Warteschlange.
+ *
+ * Die Vorgabe von Express liegt bei 100 kB und reicht hier bei weitem nicht:
+ * Ein Geraet, das laenger nicht erreichbar war, schickt bis zu 200 gepufferte
+ * Snapshots auf einmal, und der erste davon enthaelt bis zu 90 Tage
+ * Update-Historie. Neuere Agents zerlegen das selbst in kleinere Schuebe — die
+ * grosszuegige Grenze gilt den bereits verteilten, die das noch nicht tun.
+ */
+const CHECKIN_BODY_LIMIT = '32mb';
+
+/**
+ * Fuer alles andere bleibt es eng. Die Einstellungen, die Anmeldung und die
+ * Auftraege sind Kilobyte-Sachen; die einzige grosse Nutzlast ist der Upload
+ * eines Agent-Binaries, und der laeuft als multipart an dieser Stelle vorbei.
+ */
+const DEFAULT_BODY_LIMIT = '1mb';
+
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  // Ohne die eingebauten Parser: Sie liessen sich nur global einstellen, und
+  // die 32 MB sollen ausschliesslich fuer den Check-in gelten.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
   const logger = new Logger('Bootstrap');
+
+  // Reihenfolge entscheidet: body-parser ueberspringt eine Anfrage, deren
+  // Koerper bereits gelesen wurde. Die enge Grenze darf deshalb erst danach
+  // kommen. Der Pfad passt als Praefix auch auf /checkin/batch.
+  app.use('/api/agent/v1/checkin', json({ limit: CHECKIN_BODY_LIMIT }));
+  app.use(json({ limit: DEFAULT_BODY_LIMIT }));
+  app.use(urlencoded({ extended: true, limit: DEFAULT_BODY_LIMIT }));
 
   // Das Sitzungstoken kommt als HttpOnly-Cookie; ohne diesen Leser ist
   // request.cookies undefiniert und jede Anmeldung liefe ins Leere.

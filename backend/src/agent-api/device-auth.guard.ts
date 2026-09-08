@@ -1,6 +1,7 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -65,8 +66,16 @@ export class DeviceAuthGuard implements CanActivate {
     }
 
     if (device.status === DeviceStatus.Archived) {
-      // Getrennte Meldung: hier ist das Secret korrekt, das Geraet aber gesperrt.
-      throw new UnauthorizedException('Geraet ist archiviert.');
+      /**
+       * 403, nicht 401 — und das ist keine Feinheit.
+       *
+       * Das Secret stimmt, das Geraet ist nur gesperrt. Ein 401 heisst fuer den
+       * Agent "Identitaet abgelehnt", und er registriert sich daraufhin neu;
+       * die Registrierung wiederum reaktivierte das Geraet. Damit hoben sich
+       * AD-Abgleich und Agent gegenseitig auf: archivieren, reaktivieren,
+       * archivieren — bei jedem Durchlauf.
+       */
+      throw new ForbiddenException('Geraet ist archiviert.');
     }
 
     request[AUTHENTICATED_DEVICE] = device;

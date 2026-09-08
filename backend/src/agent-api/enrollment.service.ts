@@ -2,6 +2,7 @@ import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { DataSource, IsNull } from 'typeorm';
+import { isAdArchiveReason } from '../database/archive-reasons.js';
 import { Device, DeviceSecret } from '../database/entities/index.js';
 import { DeviceStatus } from '../database/enums.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -82,11 +83,26 @@ export class EnrollmentService {
         device.adObjectGuid = dto.host.adObjectGuid ?? device.adObjectGuid;
         device.agentVersion = dto.agentVersion;
         device.enrolledAt = device.enrolledAt ?? new Date();
-        // Ein Geraet, das sich wieder meldet, ist offensichtlich wieder da.
+        /**
+         * Ein Geraet, das sich wieder meldet, ist offensichtlich wieder da —
+         * ausser der AD-Abgleich hat es archiviert.
+         *
+         * Dann steht es nicht mehr im ueberwachten Bereich des Verzeichnisses,
+         * und das ist eine Entscheidung, die hier nicht zurueckgenommen werden
+         * darf: Der naechste Abgleich archivierte es ohnehin wieder, und
+         * zwischen beiden entstuende genau die Endlosschleife, die es zu
+         * vermeiden gilt. Zurueck kommt es ueber das Verzeichnis oder von Hand.
+         */
         if (device.status === DeviceStatus.Archived) {
-          device.status = DeviceStatus.Active;
-          device.archivedAt = null;
-          device.archivedReason = null;
+          if (isAdArchiveReason(device.archivedReason)) {
+            this.logger.log(
+              `${device.hostname} bleibt archiviert: ${device.archivedReason ?? ''}`,
+            );
+          } else {
+            device.status = DeviceStatus.Active;
+            device.archivedAt = null;
+            device.archivedReason = null;
+          }
         }
         await devices.save(device);
 

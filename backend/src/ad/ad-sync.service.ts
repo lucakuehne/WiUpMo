@@ -1,6 +1,10 @@
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
+import {
+  ARCHIVE_REASON_GONE,
+  ARCHIVE_REASON_OUT_OF_SCOPE,
+} from '../database/archive-reasons.js';
 import { AdSyncStatus, AdSyncTrigger, DeviceStatus } from '../database/enums.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { effectiveSearchBases, isAdConfigured } from '../settings/settings.types.js';
@@ -24,10 +28,10 @@ export interface AdSyncResult {
  * — es wurde verschoben oder eine Organisationseinheit wurde aus den
  * Einstellungen genommen. Wer die Geraeteliste liest, soll das auseinander
  * halten koennen, ohne im AD nachzusehen.
+ *
+ * Die Texte liegen in <c>archive-reasons.ts</c>, weil die Registrierung sie
+ * ebenfalls auswerten muss.
  */
-const ARCHIVE_REASON_GONE = 'Im Active Directory nicht mehr vorhanden.';
-const ARCHIVE_REASON_OUT_OF_SCOPE =
-  'Liegt nicht mehr in den abgeglichenen Bereichen des Verzeichnisses.';
 
 @Injectable()
 export class AdSyncService {
