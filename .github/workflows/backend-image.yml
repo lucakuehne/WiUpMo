@@ -26,6 +26,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  # Wird im ersten Schritt durch die kleingeschriebene Fassung ersetzt; hier
+  # steht sie nur als Vorgabe, falls der Schritt einmal entfaellt.
   IMAGE_NAME: ${{ github.repository }}/backend
 
 jobs:
@@ -37,6 +39,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      # Registry-Namen muessen kleingeschrieben sein, der Repository-Name ist es
+      # nicht ("lucakuehne/WiUpMo"). Die metadata-action erledigt das fuer ihre
+      # Tags selbst; die Cache-Referenz unten wird von Hand zusammengesetzt und
+      # scheiterte daran mit "repository name must be lowercase".
+      - name: Image-Namen kleinschreiben
+        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}/backend" >> "$GITHUB_ENV"
 
       - uses: docker/setup-buildx-action@v3
 
