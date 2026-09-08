@@ -50,9 +50,16 @@ WORKDIR /src
 # Die Paketquelle des Projekts, damit der Wiederherstellungsschritt nicht von
 # der Konfiguration des Bauers abhaengt.
 COPY NuGet.config ./
+
+# Erst nur die Projektdatei und wiederherstellen: Diese Ebene bleibt gueltig,
+# solange sich die Abhaengigkeiten nicht aendern — ein Commit am Quelltext des
+# Agents laedt dann keine Pakete erneut.
+COPY agent/src/WiUpMo.Agent/WiUpMo.Agent.csproj agent/src/WiUpMo.Agent/
+RUN dotnet restore agent/src/WiUpMo.Agent/WiUpMo.Agent.csproj -r win-x64
+
 COPY agent/ ./agent/
 RUN dotnet publish agent/src/WiUpMo.Agent/WiUpMo.Agent.csproj \
-      -c Release -r win-x64 -o /agent-publish
+      -c Release -r win-x64 --no-restore -o /agent-publish
 
 # --- Laufzeit ----------------------------------------------------------------
 # Nur Produktivabhaengigkeiten, kein Quelltext, kein pnpm-Store.

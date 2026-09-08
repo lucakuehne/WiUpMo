@@ -67,5 +67,19 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Der Cache liegt in der Registry, nicht im Cache-Dienst von GitHub.
+          #
+          # Mit `type=gha,mode=max` blieb der Lauf in der Export-Phase stehen
+          # ("writing layer"): Seit der Agent-Stufe wandert das gesamte .NET-SDK
+          # mit durch, und die Cache-Schnittstelle von GitHub kommt bei dieser
+          # Menge nicht mit. Die Registry, in die das Image ohnehin geht, kommt
+          # damit muehelos zurecht — die Anmeldung steht schon.
+          #
+          # `mode=max` bleibt damit moeglich und ist hier auch noetig: Nur so
+          # ueberspringen spaetere Laeufe die Agent-Stufe, wenn sich am Agent
+          # nichts geaendert hat.
+          #
+          # `ignore-error`, damit ein Problem beim Cache nicht den ganzen Lauf
+          # scheitern laesst — das Image ist dann bereits gebaut und hochgeladen.
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max,ignore-error=true

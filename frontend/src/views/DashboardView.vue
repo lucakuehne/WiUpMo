@@ -214,10 +214,32 @@ const agentTrendOptions = computed(() => ({
   },
 }));
 
-/** Für den Anteilsbalken je Version. */
-const agentVersionTotal = computed(() =>
-  agentVersions.value.reduce((sum, entry) => sum + entry.devices, 0),
-);
+/**
+ * Die aktuelle Version bekommt Grün, die übrigen die Reihenfolge der Palette.
+ *
+ * Das ist die einzige Aussage, die im Kreis überhaupt zu treffen ist: Wie gross
+ * ist der Anteil, der schon dort ist, wo er hin soll. Welche Nummer welcher
+ * Rest trägt, sagt die Liste darunter.
+ */
+const agentVersionData = computed(() => ({
+  labels: agentVersions.value.map((entry) => entry.version ?? 'unbekannt'),
+  datasets: [
+    {
+      data: agentVersions.value.map((entry) => entry.devices),
+      backgroundColor: agentVersions.value.map((entry, index) =>
+        entry.isCurrent ? palette.value.series[1] : palette.value.series[(index % 4) + 2],
+      ),
+      borderWidth: 0,
+    },
+  ],
+}));
+
+const agentVersionOptions = computed(() => ({
+  ...baseOptions.value,
+  plugins: {
+    legend: { position: 'bottom' as const, labels: { color: palette.value.text, boxWidth: 12 } },
+  },
+}));
 
 const sourceData = computed(() => {
   const distribution = sources.value?.distribution ?? [];
@@ -334,39 +356,41 @@ onMounted(load);
           </CardDescription>
         </CardHeader>
 
-        <CardContent class="space-y-2">
+        <CardContent class="space-y-3">
           <p v-if="agentVersions.length === 0" class="text-muted-foreground text-sm">
             Noch kein Gerät hat eine Version gemeldet.
           </p>
 
-          <div v-for="entry in agentVersions" :key="entry.version ?? 'unbekannt'" class="space-y-1">
-            <div class="flex items-baseline justify-between gap-2 text-sm">
-              <span class="flex items-center gap-2">
-                <span class="tabular font-medium">{{ entry.version ?? 'unbekannt' }}</span>
-                <Badge
-                  v-if="entry.isCurrent"
-                  variant="outline"
-                  class="bg-success/15 text-success border-success/30"
-                >
-                  aktuell
-                </Badge>
-              </span>
-              <span class="text-muted-foreground tabular">{{ entry.devices }}</span>
-            </div>
+          <template v-else>
+            <ChartCanvas
+              type="doughnut"
+              :data="agentVersionData"
+              :options="agentVersionOptions"
+              height="13rem"
+            />
 
-            <!-- Der Balken statt eines zweiten Diagramms: Bei zwei bis vier
-                 Versionen trägt eine Grafik nichts, was die Zahl nicht schon
-                 sagt — der Anteil dagegen ist auf einen Blick lesbar. -->
-            <div class="bg-muted h-1.5 overflow-hidden rounded-full">
+            <!-- Die Liste bleibt: Der Kreis zeigt den Anteil, die genaue Zahl
+                 und welche Version die aktuelle ist steht hier. -->
+            <div class="space-y-1">
               <div
-                class="h-full rounded-full"
-                :class="entry.isCurrent ? 'bg-success' : 'bg-muted-foreground/50'"
-                :style="{
-                  width: `${agentVersionTotal > 0 ? (entry.devices / agentVersionTotal) * 100 : 0}%`,
-                }"
-              />
+                v-for="entry in agentVersions"
+                :key="entry.version ?? 'unbekannt'"
+                class="flex items-baseline justify-between gap-2 text-sm"
+              >
+                <span class="flex items-center gap-2">
+                  <span class="tabular font-medium">{{ entry.version ?? 'unbekannt' }}</span>
+                  <Badge
+                    v-if="entry.isCurrent"
+                    variant="outline"
+                    class="bg-success/15 text-success border-success/30"
+                  >
+                    aktuell
+                  </Badge>
+                </span>
+                <span class="text-muted-foreground tabular">{{ entry.devices }}</span>
+              </div>
             </div>
-          </div>
+          </template>
         </CardContent>
       </Card>
 

@@ -89,7 +89,10 @@ export class ReleasesService implements OnModuleInit {
       await access(this.bundled, constants.R_OK);
     } catch {
       // Kein mitgeliefertes Binary — bei einem Image ohne Agent-Stufe und in
-      // der Entwicklung der Normalfall.
+      // der Entwicklung der Normalfall. Trotzdem eine Zeile wert: Ohne sie ist
+      // der haeufigste Fall ("warum erscheint keine Version?") der einzige, der
+      // gar nichts hinterlaesst.
+      this.logger.log(`Kein mitgeliefertes Agent-Binary unter ${this.bundled}.`);
       return;
     }
 

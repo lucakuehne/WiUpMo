@@ -199,14 +199,26 @@ const JOB_STATE_LABELS: Record<AgentUpdateJobState, string> = {
   failed: 'gescheitert',
 };
 
+/**
+ * Jeder Zustand mit eigener Farbe, keiner grau.
+ *
+ * Zuvor fielen „offen" und „zugestellt" auf denselben neutralen Ton, und weil
+ * das die beiden häufigsten sind, sah die Liste farblos aus. Der Fortschritt
+ * eines Auftrags läuft von blau über violett und gelb nach grün — beim
+ * Überfliegen erkennt man den Stand an der Farbe, nicht erst am Wort.
+ */
 function jobBadgeClass(state: AgentUpdateJobState): string {
   switch (state) {
+    case 'pending':
+      return 'bg-chart-1/15 text-chart-1 border-chart-1/30';
+    case 'delivered':
+      return 'bg-chart-4/15 text-chart-4 border-chart-4/30';
+    case 'installing':
+      return 'bg-warning/15 text-warning-foreground border-warning/40 dark:text-warning';
     case 'done':
       return 'bg-success/15 text-success border-success/30';
     case 'failed':
       return 'bg-destructive/15 text-destructive border-destructive/30';
-    case 'installing':
-      return 'bg-warning/15 text-warning-foreground border-warning/40 dark:text-warning';
     default:
       return 'bg-muted text-muted-foreground border-transparent';
   }
