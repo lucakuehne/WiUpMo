@@ -94,13 +94,41 @@ export interface AgentSettings {
    * registrierte Geraet arbeitet danach mit einem eigenen Secret.
    */
   enrollmentToken: string;
+
+  /**
+   * Abstand zwischen zwei regulaeren Durchlaeufen eines Agents.
+   *
+   * Der Agent bringt denselben Wert als eigene Einstellung mit; der hier
+   * gesetzte geht bei jedem Check-in mit und hat Vorrang. Anders liesse sich
+   * der Takt einer Flotte nur ueber eine erneute Verteilung der
+   * `appsettings.json` aendern.
+   *
+   * Wirksam wird eine Aenderung erst beim naechsten Check-in — bei einer
+   * Verlaengerung also nach dem bisherigen Takt, bei einer Verkuerzung
+   * ebenfalls. Sofort umschalten liesse sich nur mit einer Gegenrichtung, die
+   * es hier bewusst nicht gibt: Der Agent spricht das Backend an, nie
+   * umgekehrt.
+   */
+  checkIntervalHours: number;
 }
 
 /** Untergrenze, damit hier nicht versehentlich "test" landet. */
 export const MIN_ENROLLMENT_TOKEN_LENGTH = 16;
 
+/**
+ * Grenzen des Melde-Intervalls.
+ *
+ * Nach unten eine Viertelstunde: Jeder Durchlauf enthaelt eine vollstaendige
+ * Update-Suche, die auf einem traegen Rechner Minuten dauert und Platte und
+ * Netz belastet. Nach oben eine Woche — laenger, und die Auswertungen
+ * beschreiben einen Zustand, den es so nicht mehr gibt.
+ */
+export const MIN_CHECK_INTERVAL_HOURS = 0.25;
+export const MAX_CHECK_INTERVAL_HOURS = 168;
+
 export const DEFAULT_AGENT: AgentSettings = {
   enrollmentToken: '',
+  checkIntervalHours: 4,
 };
 
 export interface AdSettings {

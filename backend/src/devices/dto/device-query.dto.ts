@@ -32,6 +32,7 @@ export const DEVICE_SORT_FIELDS = [
   'openSecurityUpdates',
   'patchAgeDays',
   'updateSource',
+  'agentVersion',
 ] as const;
 
 export type DeviceSortField = (typeof DEVICE_SORT_FIELDS)[number];

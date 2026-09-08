@@ -13,6 +13,7 @@ import {
   X,
 } from '@lucide/vue';
 import { computed, onMounted, reactive, ref, watch, type Ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { toast } from 'vue-sonner';
 import { get, post, put } from '@/api/client';
 import type {
@@ -86,7 +87,25 @@ const sections = [
 
 type SectionId = (typeof sections)[number]['id'];
 
-const active = ref<SectionId>('ad');
+/**
+ * Der Abschnitt steht im Pfad, nicht in einer Variablen.
+ *
+ * Damit lässt sich auf einen Abschnitt verlinken, der Zurück-Knopf tut das
+ * Erwartete, und ein Neuladen bleibt dort, wo man war. Ein unbekannter Wert
+ * fällt still auf den ersten Abschnitt zurück — eine Fehlerseite für einen
+ * vertippten Anker wäre unverhältnismässig.
+ */
+const route = useRoute();
+const router = useRouter();
+
+const active = computed<SectionId>(() => {
+  const value = route.params.section;
+  return sections.some((section) => section.id === value) ? (value as SectionId) : 'ad';
+});
+
+function show(id: SectionId): void {
+  void router.push({ name: 'settings', params: { section: id } });
+}
 
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -123,7 +142,7 @@ const bindPassword = ref('');
 
 const url = reactive<LdapUrlParts>({ host: '', port: LDAPS_PORT, secure: true });
 
-const agent = reactive<AgentSettingsView>({ enrollmentToken: '' });
+const agent = reactive<AgentSettingsView>({ enrollmentToken: '', checkIntervalHours: 4 });
 const authSettings = reactive<AuthSettings>({
   localEnabled: true,
   ldapEnabled: false,
@@ -193,6 +212,7 @@ const ouUnits = ref<OrganizationalUnit[]>([]);
 const selectedBases = ref<string[]>([]);
 
 const savingAd = ref(false);
+const savingAgent = ref(false);
 const savingAuth = ref(false);
 const savingThresholds = ref(false);
 const savingRetention = ref(false);
@@ -229,7 +249,7 @@ async function load(): Promise<void> {
 const syncLog = ref<{ reload: () => Promise<void> } | null>(null);
 
 async function save(
-  section: 'ad' | 'auth' | 'thresholds' | 'retention',
+  section: 'ad' | 'agent' | 'auth' | 'thresholds' | 'retention',
   busy: Ref<boolean>,
   payload: unknown,
 ): Promise<void> {
@@ -251,6 +271,17 @@ async function save(
         description:
           'Ein geänderter Suchbereich löst sofort einen Abgleich aus. Geräte, die nicht mehr ' +
           'darin liegen, werden dabei archiviert.',
+      });
+      return;
+    }
+
+    if (section === 'agent') {
+      Object.assign(agent, result as AgentSettingsView);
+
+      toast.success('Gespeichert.', {
+        description:
+          'Die Geräte übernehmen den neuen Abstand mit ihrer nächsten Meldung — bis dahin gilt der ' +
+          'bisherige.',
       });
       return;
     }
@@ -285,6 +316,9 @@ function currentAdPayload(): Record<string, unknown> {
 }
 
 const saveAd = () => void save('ad', savingAd, currentAdPayload());
+// Nur das Intervall: Das Token hat einen eigenen Weg, der auch eines erzeugen kann.
+const saveAgent = () =>
+  void save('agent', savingAgent, { checkIntervalHours: agent.checkIntervalHours });
 const saveAuth = () => void save('auth', savingAuth, { ...authSettings });
 const saveThresholds = () => void save('thresholds', savingThresholds, { ...thresholds });
 const saveRetention = () => void save('retention', savingRetention, { ...retention });
@@ -667,7 +701,7 @@ onMounted(load);
               ? 'bg-accent text-accent-foreground font-medium'
               : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
           "
-          @click="active = section.id"
+          @click="show(section.id)"
         >
           {{ section.label }}
         </button>
@@ -956,6 +990,43 @@ onMounted(load);
             <Button variant="secondary" :disabled="rotating" @click="rotateToken">
               <RefreshCw class="size-4" :class="rotating ? 'animate-spin' : ''" />
               Neues Token erzeugen
+            </Button>
+          </CardFooter>
+        </Card>
+
+        <Card v-if="active === 'agent' && !loading" class="mt-4 xl:w-1/2">
+          <CardHeader>
+            <CardTitle>Melde-Intervall</CardTitle>
+            <CardDescription>
+              Abstand zwischen zwei regulären Durchläufen. Zusätzlich meldet sich ein Agent, sobald
+              sich am Netzwerk etwas ändert — beim VPN-Aufbau also sofort.
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent>
+            <div class="space-y-1.5">
+              <Label for="interval">Stunden</Label>
+              <Input
+                id="interval"
+                v-model.number="agent.checkIntervalHours"
+                type="number"
+                min="0.25"
+                max="168"
+                step="0.25"
+                class="w-40"
+              />
+              <p class="text-muted-foreground text-xs">
+                Zwischen 15 Minuten und einer Woche. Der Wert geht mit jeder Check-in-Antwort an die
+                Geräte und ersetzt dort die örtliche Einstellung — wirksam wird er entsprechend erst
+                beim nächsten Durchlauf, im ungünstigsten Fall also nach dem bisherigen Abstand.
+              </p>
+            </div>
+          </CardContent>
+
+          <CardFooter>
+            <Button :disabled="savingAgent" @click="saveAgent">
+              <Loader2 v-if="savingAgent" class="size-4 animate-spin" />
+              Speichern
             </Button>
           </CardFooter>
         </Card>

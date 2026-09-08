@@ -120,10 +120,25 @@ export class SettingsService implements OnModuleInit {
    * billig und sollte im Zweifel geschehen.
    */
   async setEnrollmentToken(token?: string): Promise<AgentSettings> {
+    // Ueber den bestehenden Stand, nicht daneben: Der Abschnitt traegt neben
+    // dem Token auch das Melde-Intervall, und ein neu aufgebautes Objekt haette
+    // es beim Rotieren stillschweigend auf den Vorgabewert zurueckgesetzt.
     const next: AgentSettings = {
+      ...(await this.getAgent()),
       enrollmentToken: token && token !== '' ? token : generateToken(),
     };
-    await this.write(SETTING_KEYS.agent, next, 'Gemeinsames Geheimnis fuer die Agent-Registrierung.');
+
+    await this.write(SETTING_KEYS.agent, next, 'Einstellungen der Agents.');
+    return next;
+  }
+
+  async updateAgent(patch: Partial<AgentSettings>): Promise<AgentSettings> {
+    // Das Token laesst sich hier nicht mitaendern — dafuer gibt es einen
+    // eigenen Weg, der auch eines erzeugen kann.
+    const { enrollmentToken: _ignoriert, ...rest } = patch;
+    const next: AgentSettings = { ...(await this.getAgent()), ...rest };
+
+    await this.write(SETTING_KEYS.agent, next, 'Einstellungen der Agents.');
     return next;
   }
 

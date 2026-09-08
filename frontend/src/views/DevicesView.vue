@@ -438,6 +438,15 @@ onMounted(() => {
                 <SortHead field="lastSeenAt" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
                   Letzter Check-in
                 </SortHead>
+                <SortHead
+                  field="agentVersion"
+                  class="w-28"
+                  :sort-by="sortBy"
+                  :sort-dir="sortDir"
+                  @sort="onSort"
+                >
+                  Agent
+                </SortHead>
                 <TableHead class="w-20">Neustart</TableHead>
               </TableRow>
             </TableHeader>
@@ -445,14 +454,14 @@ onMounted(() => {
             <TableBody>
               <template v-if="loading">
                 <TableRow v-for="n in 6" :key="n">
-                  <TableCell v-for="column in 8" :key="column">
+                  <TableCell v-for="column in 9" :key="column">
                     <Skeleton class="h-4 w-full" />
                   </TableCell>
                 </TableRow>
               </template>
 
               <TableRow v-else-if="rows.length === 0">
-                <TableCell :colspan="8" class="text-muted-foreground py-8 text-center">
+                <TableCell :colspan="9" class="text-muted-foreground py-8 text-center">
                   Keine Geräte gefunden.
                 </TableCell>
               </TableRow>
@@ -513,6 +522,10 @@ onMounted(() => {
                   <Badge v-if="!row.enrolledAt" variant="destructive" class="ml-2">
                     ohne Agent
                   </Badge>
+                </TableCell>
+
+                <TableCell class="tabular">
+                  {{ row.agentVersion ?? '—' }}
                 </TableCell>
 
                 <TableCell>

@@ -5,6 +5,7 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Matches,
@@ -13,6 +14,10 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import {
+  MAX_CHECK_INTERVAL_HOURS,
+  MIN_CHECK_INTERVAL_HOURS,
+} from '../settings.types.js';
 
 const toInt = () =>
   Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)));
@@ -29,12 +34,26 @@ export class EnrollmentTokenDto {
   token?: string;
 }
 
+export class AgentSettingsDto {
+  /**
+   * Bruchteile sind zugelassen — 0.5 sind dreissig Minuten. Deshalb `IsNumber`
+   * statt `IsInt`.
+   */
+  @IsNumber()
+  @Min(MIN_CHECK_INTERVAL_HOURS)
+  @Max(MAX_CHECK_INTERVAL_HOURS)
+  @IsOptional()
+  checkIntervalHours?: number;
+}
+
 export class AgentSettingsViewDto {
   /**
    * Wird ausgeliefert, anders als das AD-Passwort: Man braucht es bei jeder
    * Agent-Installation.
    */
   enrollmentToken: string;
+
+  checkIntervalHours: number;
 }
 
 export class AuthSettingsDto {

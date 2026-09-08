@@ -22,6 +22,7 @@ public sealed class AgentCycle(
     DeviceIdentityStore identityStore,
     BackendClient backend,
     SelfUpdateService selfUpdate,
+    CheckinSchedule schedule,
     ILogger<AgentCycle> logger)
 {
     public async Task RunAsync(CancellationToken ct)
@@ -112,6 +113,7 @@ public sealed class AgentCycle(
                 }
 
                 Settle(schub, response);
+                schedule.Apply(response.CheckIntervalHours);
                 verbleibend -= schub.Count;
                 letzte = response;
             }

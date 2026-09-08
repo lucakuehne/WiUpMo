@@ -183,6 +183,12 @@ export interface CreateUpdateJobsResult {
   targetVersion: string;
 }
 
+export interface AgentVersionCount {
+  version: string | null;
+  devices: number;
+  isCurrent: boolean;
+}
+
 /** Ein Tag der Agent-Abdeckung; die drei Zahlen ergeben zusammen den Bestand. */
 export interface AgentTrendPoint {
   date: string;
@@ -369,6 +375,9 @@ export interface RetentionSettings {
 export interface AgentSettingsView {
   /** Wird bewusst ausgeliefert — man braucht es bei jeder Agent-Installation. */
   enrollmentToken: string;
+
+  /** Abstand zwischen zwei regulären Meldungen, in Stunden. */
+  checkIntervalHours: number;
 }
 
 export interface AdGroup {

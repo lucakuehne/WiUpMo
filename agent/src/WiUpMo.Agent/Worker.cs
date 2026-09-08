@@ -8,17 +8,16 @@ public sealed class Worker(
     AgentOptions options,
     AgentCycle cycle,
     CheckinTrigger trigger,
+    CheckinSchedule schedule,
     SnapshotQueue queue,
     ILogger<Worker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        TimeSpan interval = TimeSpan.FromHours(options.CheckIntervalHours);
-
         logger.LogInformation(
             "WiUpMo-Agent {Version} gestartet. Backend {Backend}, Intervall {Stunden} h, " +
             "{Wartend} Snapshot(s) in der Warteschlange.",
-            AgentVersion.Current, options.BackendUrl, options.CheckIntervalHours, queue.Count());
+            AgentVersion.Current, options.BackendUrl, schedule.Interval.TotalHours, queue.Count());
 
         trigger.Start();
 
@@ -49,7 +48,9 @@ public sealed class Worker(
 
             try
             {
-                if (await trigger.WaitAsync(interval, stoppingToken).ConfigureAwait(false))
+                // Bei jedem Durchgang neu abgefragt: Der Abstand kann sich mit
+                // der letzten Check-in-Antwort geaendert haben.
+                if (await trigger.WaitAsync(schedule.Interval, stoppingToken).ConfigureAwait(false))
                 {
                     logger.LogInformation("Trigger empfangen, Durchlauf vorgezogen.");
                 }

@@ -204,6 +204,35 @@ public sealed class SnapshotQueue(AgentOptions options, ILogger<SnapshotQueue> l
         return removed;
     }
 
+    /// <summary>
+    /// Merkt sich einen vom Backend vorgegebenen Wert.
+    ///
+    /// In der Warteschlangendatenbank und nicht in der <c>appsettings.json</c>:
+    /// Die liegt im Programmverzeichnis, wird beim Selbst-Update ersetzt und
+    /// gehoert der Installation — was das Backend sagt, gehoert zum Zustand des
+    /// Geraets.
+    /// </summary>
+    public void SetMeta(string key, string value)
+    {
+        using SqliteCommand command = Connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO meta (key, value) VALUES ($key, $value)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            """;
+        command.Parameters.AddWithValue("$key", key);
+        command.Parameters.AddWithValue("$value", value);
+        command.ExecuteNonQuery();
+    }
+
+    public string? GetMeta(string key)
+    {
+        using SqliteCommand command = Connection.CreateCommand();
+        command.CommandText = "SELECT value FROM meta WHERE key = $key;";
+        command.Parameters.AddWithValue("$key", key);
+
+        return command.ExecuteScalar() as string;
+    }
+
     public DateTimeOffset? GetLastHistoryTimestamp()
     {
         using SqliteCommand command = Connection.CreateCommand();

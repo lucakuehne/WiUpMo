@@ -35,6 +35,10 @@ const SORT_COLUMNS: Record<string, { column: string; invert?: boolean }> = {
   openSecurityUpdates: { column: 'open_security_updates' },
   patchAgeDays: { column: 'o.oldest_open_at', invert: true },
   updateSource: { column: 'c.update_source' },
+  // Als Zeichenkette sortiert, nicht nach Versionsteilen: Bei zwei, drei
+  // gleichzeitig verteilten Staenden reicht das, und ein Vergleich, der 0.10.0
+  // hinter 0.9.0 einordnet, braeuchte eine Zerlegung in der Abfrage.
+  agentVersion: { column: 'd.agent_version' },
 };
 
 interface DeviceRow {

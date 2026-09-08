@@ -153,6 +153,17 @@ export class AgentTrendPointDto {
   silentAgents: number;
 }
 
+/** Verteilung der Agent-Versionen ueber die aktiven, registrierten Geraete. */
+export class AgentVersionCountDto {
+  /** `null`, wenn ein Geraet registriert ist, aber noch keine Version gemeldet hat. */
+  version: string | null;
+
+  devices: number;
+
+  /** Die im Backend als aktuell markierte Version. */
+  isCurrent: boolean;
+}
+
 export class TrendQueryDto {
   @toInt()
   @IsInt()

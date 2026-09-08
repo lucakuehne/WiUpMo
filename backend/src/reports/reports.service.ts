@@ -5,6 +5,7 @@ import { UpdateSource } from '../database/enums.js';
 import { SettingsService } from '../settings/settings.service.js';
 import {
   AgentTrendPointDto,
+  AgentVersionCountDto,
   ComplianceDeviceDto,
   FailureGroupDto,
   MissingAgentDto,
@@ -403,6 +404,32 @@ export class ReportsService {
     }
 
     return points.reverse();
+  }
+
+  /**
+   * Welche Agent-Version laeuft auf wie vielen Geraeten.
+   *
+   * Nur registrierte Geraete: Ein Geraet ohne Agent hat keine Version, und es
+   * unter „unbekannt" mitzuzaehlen vermischte die Deployment-Luecke mit der
+   * Frage, wie weit ein Rollout gediehen ist.
+   */
+  async agentVersions(): Promise<AgentVersionCountDto[]> {
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT d.agent_version,
+              count(*)::text AS devices,
+              coalesce(bool_or(r.is_current), false) AS is_current
+         FROM devices d
+         LEFT JOIN agent_releases r ON r.version = d.agent_version
+        WHERE d.status = 'active' AND d.enrolled_at IS NOT NULL
+        GROUP BY d.agent_version
+        ORDER BY count(*) DESC, d.agent_version DESC NULLS LAST`,
+    );
+
+    return rows.map((row) => ({
+      version: (row.agent_version as string | null) ?? null,
+      devices: num(row.devices),
+      isCurrent: row.is_current === true,
+    }));
   }
 
   /**

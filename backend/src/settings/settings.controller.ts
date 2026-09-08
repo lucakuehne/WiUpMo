@@ -4,6 +4,7 @@ import { SessionGuard } from '../auth/session.guard.js';
 import {
   AdSettingsDto,
   AdSettingsViewDto,
+  AgentSettingsDto,
   AgentSettingsViewDto,
   AuthSettingsDto,
   AuthSettingsViewDto,
@@ -58,6 +59,12 @@ export class SettingsController {
   @ApiOperation({ summary: 'Setzt oder erneuert das Enrollment-Token.' })
   setEnrollmentToken(@Body() dto: EnrollmentTokenDto): Promise<AgentSettingsViewDto> {
     return this.settings.setEnrollmentToken(dto.token);
+  }
+
+  @Put('agent')
+  @ApiOperation({ summary: 'Aendert die Einstellungen der Agents.' })
+  updateAgent(@Body() dto: AgentSettingsDto): Promise<AgentSettingsViewDto> {
+    return this.settings.updateAgent(dto);
   }
 
   /**

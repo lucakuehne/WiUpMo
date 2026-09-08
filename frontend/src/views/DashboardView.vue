@@ -2,8 +2,15 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRouter, type RouteLocationRaw } from 'vue-router';
 import { get } from '@/api/client';
-import type { AgentTrendPoint, Summary, TrendPoint, UpdateSourcesReport } from '@/api/types';
+import type {
+  AgentTrendPoint,
+  AgentVersionCount,
+  Summary,
+  TrendPoint,
+  UpdateSourcesReport,
+} from '@/api/types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChartCanvas from '@/components/ChartCanvas.vue';
@@ -16,6 +23,7 @@ const router = useRouter();
 const summary = ref<Summary | null>(null);
 const trend = ref<TrendPoint[]>([]);
 const agentTrend = ref<AgentTrendPoint[]>([]);
+const agentVersions = ref<AgentVersionCount[]>([]);
 const sources = ref<UpdateSourcesReport | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -190,6 +198,11 @@ const agentTrendOptions = computed(() => ({
   },
 }));
 
+/** Für den Anteilsbalken je Version. */
+const agentVersionTotal = computed(() =>
+  agentVersions.value.reduce((sum, entry) => sum + entry.devices, 0),
+);
+
 const sourceData = computed(() => {
   const distribution = sources.value?.distribution ?? [];
 
@@ -214,19 +227,21 @@ const sourceOptions = computed(() => ({
 
 async function load(): Promise<void> {
   try {
-    const [s, t, a, src] = await Promise.all([
+    const [s, t, a, v, src] = await Promise.all([
       get<Summary>('/api/reports/summary'),
       get<TrendPoint[]>('/api/reports/trend', { days: 90 }),
       // 30 Tage, nicht 90: Die Einstufung „stumm" hängt an der
       // Check-in-Historie, und die unterliegt der Aufbewahrungsfrist. Innerhalb
       // eines Monats ist der Verlauf belastbar.
       get<AgentTrendPoint[]>('/api/reports/agent-trend', { days: 30 }),
+      get<AgentVersionCount[]>('/api/reports/agent-versions'),
       get<UpdateSourcesReport>('/api/reports/update-sources'),
     ]);
 
     summary.value = s;
     trend.value = t;
     agentTrend.value = a;
+    agentVersions.value = v;
     sources.value = src;
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Das Dashboard konnte nicht geladen werden.';
@@ -294,7 +309,51 @@ onMounted(load);
         </CardContent>
       </Card>
 
-      <Card class="xl:col-span-3">
+      <Card>
+        <CardHeader>
+          <CardTitle>Agent-Versionen</CardTitle>
+          <CardDescription>
+            Was auf den aktiven Geräten läuft. Ausrollen unter Einstellungen → Agent-Versionen.
+          </CardDescription>
+        </CardHeader>
+
+        <CardContent class="space-y-2">
+          <p v-if="agentVersions.length === 0" class="text-muted-foreground text-sm">
+            Noch kein Gerät hat eine Version gemeldet.
+          </p>
+
+          <div v-for="entry in agentVersions" :key="entry.version ?? 'unbekannt'" class="space-y-1">
+            <div class="flex items-baseline justify-between gap-2 text-sm">
+              <span class="flex items-center gap-2">
+                <span class="tabular font-medium">{{ entry.version ?? 'unbekannt' }}</span>
+                <Badge
+                  v-if="entry.isCurrent"
+                  variant="outline"
+                  class="bg-success/15 text-success border-success/30"
+                >
+                  aktuell
+                </Badge>
+              </span>
+              <span class="text-muted-foreground tabular">{{ entry.devices }}</span>
+            </div>
+
+            <!-- Der Balken statt eines zweiten Diagramms: Bei zwei bis vier
+                 Versionen trägt eine Grafik nichts, was die Zahl nicht schon
+                 sagt — der Anteil dagegen ist auf einen Blick lesbar. -->
+            <div class="bg-muted h-1.5 overflow-hidden rounded-full">
+              <div
+                class="h-full rounded-full"
+                :class="entry.isCurrent ? 'bg-success' : 'bg-muted-foreground/50'"
+                :style="{
+                  width: `${agentVersionTotal > 0 ? (entry.devices / agentVersionTotal) * 100 : 0}%`,
+                }"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card class="xl:col-span-2">
         <CardHeader>
           <CardTitle>Agent-Abdeckung über die Zeit</CardTitle>
           <CardDescription>

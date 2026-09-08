@@ -2,6 +2,7 @@ import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Device } from '../database/entities/index.js';
 import { ReleasesService } from '../releases/releases.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 import { CheckinService } from './checkin.service.js';
 import { CurrentDevice } from './current-device.decorator.js';
 import { DeviceAuthGuard } from './device-auth.guard.js';
@@ -16,6 +17,7 @@ export class CheckinController {
   constructor(
     private readonly checkins: CheckinService,
     private readonly releases: ReleasesService,
+    private readonly settings: SettingsService,
   ) {}
 
   @Post('checkin')
@@ -26,7 +28,12 @@ export class CheckinController {
     @Body() snapshot: SnapshotDto,
   ): Promise<CheckinResponseDto> {
     const result = await this.checkins.ingest(device, snapshot);
-    return { results: [result], agentUpdate: await this.releases.claimJob(device.id) };
+
+    return {
+      results: [result],
+      agentUpdate: await this.releases.claimJob(device.id),
+      checkIntervalHours: (await this.settings.getAgent()).checkIntervalHours,
+    };
   }
 
   /**
@@ -54,6 +61,10 @@ export class CheckinController {
     // Der Auftrag wird erst nach der Verarbeitung geholt: Der Agent soll seine
     // gepufferten Meldungen losgeworden sein, bevor er sich selbst ersetzt —
     // ein gescheitertes Update wuerde sonst auch die Warteschlange mitnehmen.
-    return { results, agentUpdate: await this.releases.claimJob(device.id) };
+    return {
+      results,
+      agentUpdate: await this.releases.claimJob(device.id),
+      checkIntervalHours: (await this.settings.getAgent()).checkIntervalHours,
+    };
   }
 }

@@ -169,6 +169,13 @@ public sealed class CheckinResponse
 
     /// <summary><c>null</c>, wenn kein Auftrag offen ist.</summary>
     public AgentUpdateJob? AgentUpdate { get; init; }
+
+    /// <summary>
+    /// Der zentral eingestellte Abstand bis zum naechsten Durchlauf, in
+    /// Stunden. <c>null</c> bei einem Backend, das das Feld noch nicht kennt —
+    /// dann gilt weiter die oertliche Einstellung.
+    /// </summary>
+    public double? CheckIntervalHours { get; init; }
 }
 
 public sealed class UpdateResultRequest
