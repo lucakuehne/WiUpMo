@@ -25,10 +25,13 @@ export class PostRebootPending1789600000000 implements MigrationInterface {
   private static readonly HRESULT = -2145116140;
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    // `last_reported_at`, nicht `updated_at`: Die Tabelle fuehrt keinen
+    // allgemeinen Aenderungszeitpunkt, sondern den des letzten Check-ins, der
+    // diesen Zustand gemeldet hat. Das ist hier auch der genauere Wert.
     await queryRunner.query(
       `UPDATE device_update_states
           SET state        = 'installed',
-              installed_at = COALESCE(installed_at, updated_at)
+              installed_at = COALESCE(installed_at, last_reported_at)
         WHERE state = 'failed' AND hresult = $1`,
       [PostRebootPending1789600000000.HRESULT],
     );
@@ -37,7 +40,6 @@ export class PostRebootPending1789600000000 implements MigrationInterface {
       `UPDATE device_update_events
           SET event_type = 'installed'
         WHERE event_type = 'failed'
-          AND details ? 'hresult'
           AND details->>'hresult' = $1`,
       [String(PostRebootPending1789600000000.HRESULT)],
     );
