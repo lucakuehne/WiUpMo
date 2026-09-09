@@ -112,6 +112,38 @@ public sealed class HistoryEntry
     public string? SupportUrl { get; init; }
 }
 
+/// <summary>
+/// Zustand des Agents selbst, nicht des Windows-Updates.
+///
+/// Damit laesst sich vom Backend aus beantworten, warum ein Geraet nicht
+/// vorankommt — bisher stand die Antwort ausschliesslich in einer Protokolldatei
+/// auf dem Rechner. Bewusst wenige, strukturierte Felder statt Freitext: Sie
+/// beantworten die Fragen, die tatsaechlich gestellt werden.
+/// </summary>
+public sealed class AgentDiagnostics
+{
+    /// <summary>Wartende Snapshots. Wachsend heisst: kommt nicht durch.</summary>
+    public required int QueuedSnapshots { get; init; }
+
+    /// <summary>Zustand eines laufenden Selbst-Updates, sonst <c>null</c>.</summary>
+    public string? SelfUpdateState { get; init; }
+
+    public string? SelfUpdateTarget { get; init; }
+    public DateTimeOffset? SelfUpdateStartedAt { get; init; }
+
+    /// <summary>
+    /// Ob der geplante Task registriert ist. Fehlt er, kann sich der Agent nicht
+    /// selbst aktualisieren — und das faellt sonst erst auf, wenn ein Auftrag
+    /// ewig auf "zugestellt" steht.
+    /// </summary>
+    public required bool UpdaterTaskRegistered { get; init; }
+
+    /// <summary>Die letzte Warnung oder Fehlermeldung des Agents, gekuerzt.</summary>
+    public string? LastError { get; init; }
+
+    public DateTimeOffset? LastErrorAt { get; init; }
+}
+
 public sealed class Snapshot
 {
     public required Guid SnapshotId { get; init; }
@@ -122,6 +154,13 @@ public sealed class Snapshot
     public required bool PendingReboot { get; init; }
     public required IReadOnlyList<AvailableUpdate> AvailableUpdates { get; init; }
     public required IReadOnlyList<HistoryEntry> History { get; init; }
+
+    /// <summary>
+    /// Optional — ein aelteres Backend kennt das Feld nicht und wiese den
+    /// gesamten Snapshot ab, wenn es immer mitginge. Der Agent laesst es
+    /// deshalb weg, solange es leer ist.
+    /// </summary>
+    public AgentDiagnostics? Diagnostics { get; init; }
 }
 
 public sealed class BatchCheckinRequest

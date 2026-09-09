@@ -4,6 +4,7 @@ using WiUpMo.Agent.Backend;
 using WiUpMo.Agent.Contracts;
 using WiUpMo.Agent.Storage;
 using WiUpMo.Agent.Update;
+using WiUpMo.Agent.Windows;
 
 namespace WiUpMo.Agent;
 
@@ -23,6 +24,7 @@ public sealed class AgentCycle(
     BackendClient backend,
     SelfUpdateService selfUpdate,
     CheckinSchedule schedule,
+    AgentHealth health,
     ILogger<AgentCycle> logger)
 {
     public async Task RunAsync(CancellationToken ct)
@@ -33,7 +35,27 @@ public sealed class AgentCycle(
         // Update-Suche oder einem unerreichbaren Backend verstreichen.
         selfUpdate.ConfirmSelf();
 
-        await CollectAsync(ct).ConfigureAwait(false);
+        /**
+         * Sammeln und Senden sind unabhaengig voneinander.
+         *
+         * Zuvor standen sie hintereinander im selben Ablauf: Warf die
+         * Update-Suche — etwa weil der WSUS-Name ausserhalb des Firmennetzes
+         * nicht aufloesbar ist —, brach der ganze Durchlauf ab, und bereits
+         * gepufferte Snapshots blieben liegen. Ein Geraet, das die Update-Quelle
+         * nicht erreicht, das Backend aber sehr wohl, meldete damit gar nichts.
+         */
+        try
+        {
+            await CollectAsync(ct).ConfigureAwait(false);
+        }
+        catch (WindowsUpdateException ex)
+        {
+            // Kein Programmfehler, sondern ein Zustand der Umgebung: als
+            // Warnung im Klartext, ohne Stapelspur.
+            logger.LogWarning("Update-Zustand nicht lesbar. {Meldung}", ex.Message);
+            health.Record($"Update-Zustand nicht lesbar. {ex.Message}");
+        }
+
         await FlushAsync(ct).ConfigureAwait(false);
     }
 
@@ -44,7 +66,12 @@ public sealed class AgentCycle(
 
         logger.LogInformation("Erfasse Update-Zustand, Historie seit {Seit:u}.", since);
 
-        Snapshot snapshot = await collector.CollectAsync(since, ct).ConfigureAwait(false);
+        // Der Zustand des Agents wird vor dem Erfassen gelesen: Die Warteschlange
+        // enthaelt dann noch nicht den Snapshot, den dieser Durchlauf gerade
+        // erzeugt — gemeldet wird also der Rueckstand, nicht der Normalbetrieb.
+        Snapshot snapshot = await collector
+            .CollectAsync(since, health.Read(), ct)
+            .ConfigureAwait(false);
 
         logger.LogInformation(
             "{Offen} offene Updates, {Historie} Historieneintraege, Quelle {Quelle}, Neustart ausstehend: {Reboot}.",
@@ -146,6 +173,8 @@ public sealed class AgentCycle(
                 "Das Backend fuehrt dieses Geraet als archiviert; {Anzahl} Snapshots werden verworfen. {Meldung}",
                 verbleibend, ex.Message);
 
+            health.Record("Das Backend fuehrt dieses Geraet als archiviert.");
+
             queue.Remove([.. pending.Select(p => p.Id)]);
         }
         catch (Exception ex) when (ex is BackendException or HttpRequestException or TaskCanceledException
@@ -154,6 +183,10 @@ public sealed class AgentCycle(
             logger.LogWarning(
                 "Uebermittlung fehlgeschlagen, {Anzahl} Snapshots bleiben in der Warteschlange: {Fehler}",
                 verbleibend, ex.Message);
+
+            // Beim naechsten gelungenen Check-in geht die Meldung mit — dann
+            // steht im Backend, warum es davor still war.
+            health.Record($"Uebermittlung fehlgeschlagen: {ex.Message}");
         }
         catch (InvalidOperationException ex)
         {

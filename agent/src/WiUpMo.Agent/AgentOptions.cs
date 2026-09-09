@@ -30,6 +30,16 @@ public sealed class AgentOptions
     public int HttpTimeoutSeconds { get; set; } = 120;
 
     /// <summary>
+    /// Eigenes Zeitlimit fuer das Herunterladen eines Agent-Binaries.
+    ///
+    /// Die 120 Sekunden der uebrigen Aufrufe reichen dafuer nicht: Das Binary
+    /// ist rund 75 MB, das waeren durchgehend gut 5 Mbit/s. Ueber VPN oder eine
+    /// schwache Leitung lief der Download in die Zeitueberschreitung, und der
+    /// Auftrag blieb im Backend fuer immer auf "zugestellt" stehen.
+    /// </summary>
+    public int DownloadTimeoutMinutes { get; set; } = 30;
+
+    /// <summary>
     /// <c>true</c> befragt die konfigurierte Update-Quelle (WSUS, Microsoft
     /// Update). <c>false</c> nutzt nur den lokalen Zwischenspeicher — schnell,
     /// aber moeglicherweise veraltet.

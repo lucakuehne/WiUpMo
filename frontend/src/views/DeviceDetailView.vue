@@ -78,6 +78,51 @@ const pagedTimeline = computed(() =>
 
 const latestCheckin = computed(() => device.value?.checkins[0] ?? null);
 
+/**
+ * Was am Agent nicht rund läuft, in Sätzen statt als Feldliste.
+ *
+ * Die Selbstauskunft trägt fünf Werte; vier davon sind im Normalfall
+ * unauffällig und sagen dann nichts. Interessant ist nur die Abweichung —
+ * deshalb wird hier ausgewertet statt angezeigt.
+ */
+const agentIssues = computed<string[]>(() => {
+  const d = device.value?.agentDiagnostics;
+  if (!d) {
+    return [];
+  }
+
+  const issues: string[] = [];
+
+  if (d.queuedSnapshots > 1) {
+    issues.push(
+      `${d.queuedSnapshots} Meldungen warten in der Warteschlange — das Gerät erreicht das ` +
+        'Backend nicht zuverlässig.',
+    );
+  }
+
+  if (d.selfUpdateState) {
+    const seit = d.selfUpdateStartedAt ? ` (seit ${formatRelative(d.selfUpdateStartedAt)})` : '';
+    issues.push(
+      `Ein Selbst-Update auf ${d.selfUpdateTarget ?? 'unbekannt'} steht im Zustand ` +
+        `${d.selfUpdateState}${seit}.`,
+    );
+  }
+
+  if (!d.updaterTaskRegistered) {
+    issues.push(
+      'Der geplante Task „WiUpMo Agent Updater" fehlt. Ohne ihn kann sich der Agent nicht ' +
+        'selbst aktualisieren — eine Neuinstallation mit --install legt ihn an.',
+    );
+  }
+
+  if (d.lastError) {
+    const wann = d.lastErrorAt ? `${formatRelative(d.lastErrorAt)}: ` : '';
+    issues.push(`${wann}${d.lastError}`);
+  }
+
+  return issues;
+});
+
 async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
@@ -232,6 +277,29 @@ onMounted(load);
               </dd>
             </div>
           </dl>
+        </CardContent>
+      </Card>
+
+      <!--
+        Nur wenn es etwas zu sagen gibt: Läuft alles rund — nichts in der
+        Warteschlange, kein Selbst-Update unterwegs, Task da, kein Fehler —,
+        wäre der Kasten eine Zeile Bestätigung ohne Erkenntnis.
+      -->
+      <Card v-if="agentIssues.length > 0" class="mb-4">
+        <CardHeader>
+          <CardTitle class="text-base">Agent-Zustand</CardTitle>
+          <CardDescription>
+            Aus dem letzten Check-in, {{ formatRelative(device.lastSeenAt) }}.
+          </CardDescription>
+        </CardHeader>
+
+        <CardContent>
+          <ul class="space-y-1.5 text-sm">
+            <li v-for="issue in agentIssues" :key="issue" class="flex items-start gap-2">
+              <AlertTriangle class="text-warning mt-0.5 size-4 shrink-0" />
+              <span>{{ issue }}</span>
+            </li>
+          </ul>
         </CardContent>
       </Card>
 

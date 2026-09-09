@@ -478,6 +478,15 @@ export class CheckinService {
          os_version    = COALESCE($5, os_version),
          os_build      = COALESCE($6, os_build),
          agent_version = $7,
+         -- Nur bei einem Snapshot, der neuer ist als der letzte gesehene: Eine
+         -- Offline-Nachreichung wuerde sonst einen alten Zustand als den
+         -- aktuellen hinstellen — gerade der Rueckstand der Warteschlange waere
+         -- dann rueckwaerts gerichtet.
+         agent_diagnostics = CASE
+           WHEN $8::jsonb IS NOT NULL AND (last_seen_at IS NULL OR last_seen_at <= $2)
+           THEN $8::jsonb
+           ELSE agent_diagnostics
+         END,
          updated_at    = now()
        WHERE id = $1`,
       [
@@ -488,6 +497,7 @@ export class CheckinService {
         snapshot.host.osVersion ?? null,
         snapshot.host.osBuild ?? null,
         snapshot.agentVersion,
+        snapshot.diagnostics ? JSON.stringify(snapshot.diagnostics) : null,
       ],
     );
   }

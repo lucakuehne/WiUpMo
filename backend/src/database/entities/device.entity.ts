@@ -55,6 +55,14 @@ export class Device {
   @Column({ type: 'text', name: 'agent_version', nullable: true })
   agentVersion: string | null;
 
+  /**
+   * Letzter Selbstauskunftsbericht des Agents — Warteschlange, laufendes
+   * Selbst-Update, Updater-Task, letzte Stoerung. Nur der jeweils aktuelle
+   * Stand; eine Zeitreihe waere hier Ballast.
+   */
+  @Column({ type: 'jsonb', name: 'agent_diagnostics', nullable: true })
+  agentDiagnostics: Record<string, unknown> | null;
+
   @Column({
     type: 'enum',
     enum: DeviceStatus,

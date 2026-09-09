@@ -103,10 +103,62 @@ public sealed class SelfUpdateService(
 
             case UpdateState.PendingSwap:
             case UpdateState.Verifying:
-                // Der Updater ist zustaendig. Nichts tun — und vor allem keinen
-                // zweiten Auftrag annehmen.
+                await AbandonIfStaleAsync(identity, marker, ct).ConfigureAwait(false);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Frist, nach der ein begonnenes Selbst-Update als steckengeblieben gilt.
+    ///
+    /// Der regulaere Weg dauert Minuten: Der Updater-Task laeuft alle fuenf,
+    /// die Bestaetigungsfrist betraegt zehn. Wer nach zwei Stunden noch nicht
+    /// durch ist, kommt auch nicht mehr durch — meist, weil der geplante Task
+    /// fehlt oder abgeschaltet wurde.
+    /// </summary>
+    private static readonly TimeSpan StuckAfter = TimeSpan.FromHours(2);
+
+    /// <summary>
+    /// Raeumt einen liegengebliebenen Marker weg.
+    ///
+    /// Ohne das blockiert er jeden weiteren Auftrag dauerhaft und lautlos:
+    /// <see cref="PrepareAsync"/> lehnt ab, solange ein Marker existiert, und
+    /// meldet dem Backend nichts — der Auftrag bliebe fuer immer auf
+    /// "zugestellt" stehen, und das Geraet faellt still aus dem Update-Betrieb.
+    /// </summary>
+    private async Task AbandonIfStaleAsync(
+        DeviceIdentity identity,
+        UpdateMarker marker,
+        CancellationToken ct)
+    {
+        if (DateTimeOffset.UtcNow - marker.StartedAt < StuckAfter)
+        {
+            // Noch in der Frist: Der Updater ist zustaendig, hier ist nichts zu tun.
+            return;
+        }
+
+        logger.LogWarning(
+            "Das Selbst-Update auf {Version} steht seit {Start:u} im Zustand {Zustand} und wird "
+                + "aufgegeben. Laeuft der geplante Task '{Task}'?",
+            marker.TargetVersion, marker.StartedAt, marker.State, Install.ServiceInstaller.UpdaterTaskName);
+
+        await backend.ReportUpdateResultAsync(
+            identity,
+            new UpdateResultRequest
+            {
+                JobId = marker.JobId,
+                State = "failed",
+                AgentVersion = AgentVersion.Current,
+                Error = $"Der Tausch blieb im Zustand {marker.State} stecken. "
+                    + "Vermutlich laeuft der Updater-Task nicht.",
+            },
+            ct).ConfigureAwait(false);
+
+        // Erst nach der Meldung: Bleibt der Marker liegen, weil das Backend
+        // gerade nicht erreichbar ist, wird beim naechsten Durchlauf erneut
+        // gemeldet. Weggeraeumt und ungemeldet waere der schlechtere Ausgang.
+        UpdateMarker.TryDelete(paths.MarkerPath);
+        TryDeleteFile(paths.StagedExe);
     }
 
     /// <summary>
@@ -179,8 +231,14 @@ public sealed class SelfUpdateService(
             logger.LogInformation(
                 "Neue Fassung liegt bereit. Der Updater-Task tauscht sie beim naechsten Lauf ein.");
         }
+        // TaskCanceledException gehoert dazu: Sie ist die Zeitueberschreitung des
+        // HttpClient. Fehlte sie hier, flog sie an dieser Stelle vorbei, das
+        // Backend erfuhr nichts, und der Auftrag blieb auf "zugestellt" — bei
+        // jedem Durchlauf aufs Neue. `ct.IsCancellationRequested` trennt das vom
+        // regulaeren Beenden des Dienstes, bei dem nichts zu melden ist.
         catch (Exception ex) when (ex is IOException or InvalidOperationException or BackendException
-                                      or HttpRequestException && !ct.IsCancellationRequested)
+                                      or HttpRequestException or TaskCanceledException
+                                      && !ct.IsCancellationRequested)
         {
             TryDeleteFile(temporary);
             TryDeleteFile(paths.StagedExe);

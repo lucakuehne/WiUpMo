@@ -177,6 +177,7 @@ internal static class Program
         builder.Services.AddSingleton<BackendClient>();
         builder.Services.AddSingleton<CheckinTrigger>();
         builder.Services.AddSingleton<CheckinSchedule>();
+        builder.Services.AddSingleton<AgentHealth>();
         builder.Services.AddSingleton(_ => new AgentPaths(options.DataDirectory));
         builder.Services.AddSingleton<SelfUpdateService>();
         builder.Services.AddSingleton<AgentCycle>();

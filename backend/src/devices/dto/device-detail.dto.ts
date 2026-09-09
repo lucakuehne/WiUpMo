@@ -1,5 +1,7 @@
+import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { AgentDiagnosticsDto } from '../../agent-api/dto/snapshot.dto.js';
 import { DeviceStatus, UpdateEventType, UpdateSource, UpdateState } from '../../database/enums.js';
 
 export class DeviceUpdateDto {
@@ -46,6 +48,13 @@ export class DeviceDetailDto {
   lastSeenAt: string | null;
   archivedAt: string | null;
   archivedReason: string | null;
+
+  /**
+   * Selbstauskunft des Agents aus dem letzten Check-in. `null` bei einem Geraet
+   * ohne Agent oder mit einer Version, die das Feld noch nicht schickt.
+   */
+  @ApiProperty({ type: () => AgentDiagnosticsDto, nullable: true, required: false })
+  agentDiagnostics: AgentDiagnosticsDto | null;
 
   /** Alle aktuellen Zustaende, offene zuerst. */
   updates: DeviceUpdateDto[];

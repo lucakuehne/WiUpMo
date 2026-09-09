@@ -75,9 +75,54 @@ internal static class Com
     public static object Require(object? value, string what) =>
         value ?? throw new WindowsUpdateException($"{what} lieferte keinen Wert.");
 
-    private static object? Invoke(object target, string name, BindingFlags flags, object?[] args) =>
-        target.GetType().InvokeMember(
-            name, flags, binder: null, target, args, CultureInfo.InvariantCulture);
+    /// <summary>
+    /// Jeder COM-Fehler kommt als <see cref="WindowsUpdateException"/> heraus.
+    ///
+    /// Zuvor tat das nur <see cref="Create"/>; aus einem Aufruf flog die rohe
+    /// <c>TargetInvocationException</c> bis zum Dienst durch und stand dort mit
+    /// fuenfzehn Zeilen Stapelspur als Programmfehler im Protokoll — fuer einen
+    /// Rechner, der schlicht nicht im Firmennetz war. Der Fehlercode sagt
+    /// meistens genau, was los ist; er gehoert im Klartext ins Protokoll, nicht
+    /// als Ausnahme.
+    /// </summary>
+    private static object? Invoke(object target, string name, BindingFlags flags, object?[] args)
+    {
+        try
+        {
+            return target.GetType().InvokeMember(
+                name, flags, binder: null, target, args, CultureInfo.InvariantCulture);
+        }
+        catch (Exception ex) when (ex is COMException or TargetInvocationException)
+        {
+            Exception ursache = ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
+
+            throw new WindowsUpdateException(
+                $"{name}: {DescribeHResult(ursache.HResult)}", ursache);
+        }
+    }
+
+    /// <summary>
+    /// Uebersetzt die haeufigen Fehlercodes der Windows-Update-API.
+    ///
+    /// Bewusst nur die, die im Betrieb tatsaechlich vorkommen. Eine
+    /// vollstaendige Liste waere Ballast; bei allem Uebrigen steht der Code in
+    /// Hexadezimal da und ist damit auffindbar.
+    /// </summary>
+    internal static string DescribeHResult(int hresult) => (uint)hresult switch
+    {
+        0x8024402C => "Der Name der Update-Quelle liess sich nicht aufloesen. "
+            + "Meist ein Geraet ausserhalb des Firmennetzes, dessen WSUS-Name im DNS fehlt.",
+        0x80072EE7 => "Der Servername liess sich nicht aufloesen (DNS).",
+        0x80072EFD => "Die Verbindung zur Update-Quelle wurde abgelehnt.",
+        0x80072EE2 or 0x8024401C => "Zeitueberschreitung beim Zugriff auf die Update-Quelle.",
+        0x80244022 => "Die Update-Quelle antwortet mit 'Dienst nicht verfuegbar'.",
+        0x80244010 => "Die Suche brach ab, weil die Update-Quelle zu viele Umleitungen lieferte.",
+        0x8024001E or 0x8024000B => "Die Suche wurde abgebrochen — meist faehrt der Rechner gerade herunter.",
+        0x80248014 => "Die konfigurierte Update-Quelle ist dem Dienst unbekannt.",
+        0x80240024 => "Es sind keine Updates verfuegbar.",
+        0x80070005 => "Zugriff verweigert.",
+        _ => $"Fehler 0x{(uint)hresult:X8} der Windows-Update-API.",
+    };
 
     // --- Nachsichtige Varianten ---------------------------------------------
 
@@ -187,7 +232,11 @@ internal static class Com
     }
 
     private static bool IsAccessFailure(Exception ex) =>
-        ex is COMException
+        // WindowsUpdateException zuerst: Seit `Invoke` COM-Fehler verpackt,
+        // kommt bei den nachsichtigen Varianten diese Ausnahme an. Fehlte sie
+        // hier, fiele jede nicht gesetzte Eigenschaft wieder durch.
+        ex is WindowsUpdateException
+            or COMException
             or TargetInvocationException
             or MissingMemberException
             or MissingMethodException

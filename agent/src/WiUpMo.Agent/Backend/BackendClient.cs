@@ -29,6 +29,13 @@ public sealed class BackendClient : IDisposable
 
     private readonly HttpClient _http;
 
+    /// <summary>
+    /// Eigener Client fuer das Binary. Ein Zeitlimit, das fuer API-Aufrufe
+    /// richtig ist, ist fuer 75 MB zu knapp — und ein einziger Client kann nur
+    /// eines von beidem.
+    /// </summary>
+    private readonly HttpClient _downloads;
+
     public BackendClient(AgentOptions options)
     {
         if (!Uri.TryCreate(options.BackendUrl, UriKind.Absolute, out Uri? baseUri)
@@ -51,6 +58,13 @@ public sealed class BackendClient : IDisposable
             Timeout = TimeSpan.FromSeconds(options.HttpTimeoutSeconds),
         };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd($"WiUpMo-Agent/{AgentVersion.Current}");
+
+        _downloads = new HttpClient
+        {
+            BaseAddress = baseUri,
+            Timeout = TimeSpan.FromMinutes(options.DownloadTimeoutMinutes),
+        };
+        _downloads.DefaultRequestHeaders.UserAgent.ParseAdd($"WiUpMo-Agent/{AgentVersion.Current}");
     }
 
     public async Task<DeviceIdentity> EnrollAsync(EnrollRequest request, CancellationToken ct)
@@ -111,7 +125,7 @@ public sealed class BackendClient : IDisposable
         using var request = new HttpRequestMessage(HttpMethod.Get, path.TrimStart('/'));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", identity.Token);
 
-        using HttpResponseMessage response = await _http
+        using HttpResponseMessage response = await _downloads
             .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
             .ConfigureAwait(false);
 
@@ -180,5 +194,9 @@ public sealed class BackendClient : IDisposable
         }
     }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        _http.Dispose();
+        _downloads.Dispose();
+    }
 }

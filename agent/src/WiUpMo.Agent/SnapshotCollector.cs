@@ -17,7 +17,10 @@ public sealed class SnapshotCollector(
     /// laufenden Erfassung entsteht, in das naechste Fenster — bei einem
     /// Endzeitpunkt fiele er dagegen durch beide Fenster und ginge verloren.
     /// </summary>
-    public async Task<Snapshot> CollectAsync(DateTimeOffset historySince, CancellationToken ct)
+    public async Task<Snapshot> CollectAsync(
+        DateTimeOffset historySince,
+        AgentDiagnostics diagnostics,
+        CancellationToken ct)
     {
         DateTimeOffset collectedAt = DateTimeOffset.UtcNow;
 
@@ -40,6 +43,7 @@ public sealed class SnapshotCollector(
             PendingReboot = pendingReboot,
             AvailableUpdates = available,
             History = history,
+            Diagnostics = diagnostics,
         };
     }
 }

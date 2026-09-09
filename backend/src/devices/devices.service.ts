@@ -300,7 +300,8 @@ export class DevicesService {
   async detail(id: string): Promise<DeviceDetailDto> {
     const devices: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT id, hostname, ad_dn, ad_ou, ad_object_guid, os_name, os_version, os_build,
-              status, agent_version, enrolled_at, last_seen_at, archived_at, archived_reason
+              status, agent_version, enrolled_at, last_seen_at, archived_at, archived_reason,
+              agent_diagnostics
          FROM devices WHERE id = $1`,
       [id],
     );
@@ -330,6 +331,7 @@ export class DevicesService {
       lastSeenAt: toIso(device.last_seen_at),
       archivedAt: toIso(device.archived_at),
       archivedReason: (device.archived_reason as string | null) ?? null,
+      agentDiagnostics: (device.agent_diagnostics as DeviceDetailDto['agentDiagnostics']) ?? null,
       updates,
       checkins,
     };

@@ -187,6 +187,47 @@ export class HistoryEntryDto {
   supportUrl?: string;
 }
 
+/**
+ * Zustand des Agents selbst.
+ *
+ * Beantwortet vom Backend aus, warum ein Geraet nicht vorankommt — die Antwort
+ * stand bisher ausschliesslich in einer Protokolldatei auf dem Rechner, und
+ * gerade die betroffenen Geraete sind oft nicht erreichbar.
+ */
+export class AgentDiagnosticsDto {
+  /** Wartende Snapshots. Wachsend heisst: kommt nicht durch. */
+  @IsInt()
+  @Min(0)
+  queuedSnapshots: number;
+
+  /** Zustand eines laufenden Selbst-Updates (`PendingSwap`, `Verifying`, …). */
+  @IsString()
+  @MaxLength(32)
+  @IsOptional()
+  selfUpdateState?: string;
+
+  @IsString()
+  @MaxLength(32)
+  @IsOptional()
+  selfUpdateTarget?: string;
+
+  @IsISO8601()
+  @IsOptional()
+  selfUpdateStartedAt?: string;
+
+  @IsBoolean()
+  updaterTaskRegistered: boolean;
+
+  @IsString()
+  @MaxLength(500)
+  @IsOptional()
+  lastError?: string;
+
+  @IsISO8601()
+  @IsOptional()
+  lastErrorAt?: string;
+}
+
 export class SnapshotDto {
   /**
    * Vom Agent erzeugt. Traegt die Idempotenz: derselbe Snapshot darf beliebig
@@ -231,4 +272,14 @@ export class SnapshotDto {
   @Type(() => HistoryEntryDto)
   @ArrayMaxSize(2000)
   history: HistoryEntryDto[];
+
+  /**
+   * Optional: Aeltere Agents kennen das Feld nicht. Es ist der einzige Teil des
+   * Snapshots, der nicht den Update-Zustand des Rechners beschreibt, sondern
+   * den des Agents.
+   */
+  @ValidateNested()
+  @Type(() => AgentDiagnosticsDto)
+  @IsOptional()
+  diagnostics?: AgentDiagnosticsDto;
 }

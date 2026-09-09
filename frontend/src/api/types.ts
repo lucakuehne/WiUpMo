@@ -85,6 +85,17 @@ export interface DeviceCheckin {
   pendingReboot: boolean;
 }
 
+/** Selbstauskunft des Agents aus dem letzten Check-in. */
+export interface AgentDiagnostics {
+  queuedSnapshots: number;
+  selfUpdateState: string | null;
+  selfUpdateTarget: string | null;
+  selfUpdateStartedAt: string | null;
+  updaterTaskRegistered: boolean;
+  lastError: string | null;
+  lastErrorAt: string | null;
+}
+
 export interface DeviceDetail {
   id: string;
   hostname: string;
@@ -100,6 +111,7 @@ export interface DeviceDetail {
   lastSeenAt: string | null;
   archivedAt: string | null;
   archivedReason: string | null;
+  agentDiagnostics: AgentDiagnostics | null;
   updates: DeviceUpdate[];
   checkins: DeviceCheckin[];
 }
