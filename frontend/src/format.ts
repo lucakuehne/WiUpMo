@@ -168,10 +168,3 @@ export function eventBadgeClass(type: UpdateEventType): string {
   }
 }
 
-/** Fehlercodes der Windows-Update-API sind in Hexadezimal auffindbar, dezimal nicht. */
-export function formatHresult(value: number | null): string {
-  if (value === null || value === 0) {
-    return '—';
-  }
-  return `0x${(value >>> 0).toString(16).toUpperCase().padStart(8, '0')}`;
-}

@@ -23,9 +23,9 @@ import {
   UPDATE_STATE_LABELS,
   formatBytes,
   formatDate,
-  formatHresult,
   stateBadgeClass,
 } from '@/format';
+import HresultCell from '@/components/HresultCell.vue';
 
 const router = useRouter();
 
@@ -300,7 +300,7 @@ onMounted(load);
                         <TableHead class="w-36">Zustand</TableHead>
                         <TableHead class="w-32">Offen seit</TableHead>
                         <TableHead class="w-32">Installiert</TableHead>
-                        <TableHead class="w-32">Fehlercode</TableHead>
+                        <TableHead class="w-72">Fehlercode</TableHead>
                       </TableRow>
                     </TableHeader>
 
@@ -325,12 +325,7 @@ onMounted(load);
                         </TableCell>
                         <TableCell>{{ formatDate(device.firstAvailableAt) }}</TableCell>
                         <TableCell>{{ formatDate(device.installedAt) }}</TableCell>
-                        <TableCell>
-                          <code v-if="device.hresult" class="text-xs">
-                            {{ formatHresult(device.hresult) }}
-                          </code>
-                          <span v-else class="text-muted-foreground">—</span>
-                        </TableCell>
+                        <TableCell><HresultCell :value="device.hresult" /></TableCell>
                       </TableRow>
                     </TableBody>
                   </Table>

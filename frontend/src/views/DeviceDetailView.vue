@@ -25,6 +25,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import HresultCell from '@/components/HresultCell.vue';
 import JobStateLegend from '@/components/JobStateLegend.vue';
 import SourceLegend from '@/components/SourceLegend.vue';
 import TablePager from '@/components/TablePager.vue';
@@ -37,7 +38,6 @@ import {
   eventBadgeClass,
   formatBytes,
   formatDateTime,
-  formatHresult,
   formatRelative,
   jobBadgeClass,
   sourceBadgeClass,
@@ -334,7 +334,7 @@ onMounted(load);
                   <TableHead class="w-32">Einstufung</TableHead>
                   <TableHead class="w-24 text-right">Grösse</TableHead>
                   <TableHead class="w-40">Offen seit</TableHead>
-                  <TableHead class="w-32">Fehlercode</TableHead>
+                  <TableHead class="w-72">Fehlercode</TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -389,12 +389,7 @@ onMounted(load);
 
                   <TableCell>{{ formatDateTime(update.firstAvailableAt) }}</TableCell>
 
-                  <TableCell>
-                    <code v-if="update.hresult" class="text-xs">
-                      {{ formatHresult(update.hresult) }}
-                    </code>
-                    <span v-else class="text-muted-foreground">—</span>
-                  </TableCell>
+                  <TableCell><HresultCell :value="update.hresult" /></TableCell>
                 </TableRow>
               </TableBody>
             </Table>

@@ -31,10 +31,10 @@ import { formatDnPath } from '@/dn';
 import {
   UPDATE_SOURCE_LABELS,
   formatDateTime,
-  formatHresult,
   formatRelative,
   sourceBadgeClass,
 } from '@/format';
+import HresultCell from '@/components/HresultCell.vue';
 import { usePagedList } from '@/paged';
 
 const router = useRouter();
@@ -461,7 +461,7 @@ onMounted(load);
               <TableRow>
                 <TableHead class="w-28">KB</TableHead>
                 <TableHead>Update</TableHead>
-                <TableHead class="w-36">Fehlercode</TableHead>
+                <TableHead class="w-72">Fehlercode</TableHead>
                 <TableHead class="w-24 text-right">Geräte</TableHead>
               </TableRow>
             </TableHeader>
@@ -479,7 +479,7 @@ onMounted(load);
                   <span v-else class="text-muted-foreground">—</span>
                 </TableCell>
                 <TableCell>{{ row.title }}</TableCell>
-                <TableCell><code class="text-xs">{{ formatHresult(row.hresult) }}</code></TableCell>
+                <TableCell><HresultCell :value="row.hresult" /></TableCell>
                 <TableCell class="tabular text-right">{{ row.devices }}</TableCell>
               </TableRow>
             </TableBody>
