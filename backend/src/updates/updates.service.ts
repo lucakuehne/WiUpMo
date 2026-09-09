@@ -28,6 +28,26 @@ const SORT_COLUMNS: Record<string, string> = {
              END`,
 };
 
+/**
+ * Zustaende, aber nur von aktiven Geraeten.
+ *
+ * Als `EXISTS` am Verbund statt als Bedingung im `WHERE`: Der Verbund bleibt
+ * damit ein LEFT JOIN, und ein Update ohne jeden passenden Zustand faellt nicht
+ * aus dem Katalog. Archivierte Geraete verbinden sich schlicht nicht, ihre
+ * Zustaende zaehlen dadurch nirgends mit.
+ *
+ * Ohne diese Einschraenkung wies der Katalog Geraete aus, die in der
+ * Geraeteliste gar nicht mehr auftauchen — und ein Update, das nur noch auf
+ * archivierten Geraeten offen ist, stand weiterhin als offen darin.
+ */
+const ACTIVE_STATES = `
+  LEFT JOIN device_update_states s
+         ON s.update_id = u.id
+        AND EXISTS (
+          SELECT 1 FROM devices d WHERE d.id = s.device_id AND d.status = 'active'
+        )
+`;
+
 @Injectable()
 export class UpdatesService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
@@ -64,7 +84,7 @@ export class UpdatesService {
               count(*) FILTER (WHERE s.state = 'installed') AS installed_devices,
               count(*) FILTER (WHERE s.state = 'failed')    AS failed_devices
          FROM updates u
-         LEFT JOIN device_update_states s ON s.update_id = u.id
+         ${ACTIVE_STATES}
         ${where}
         GROUP BY u.id
         ${having}
@@ -90,7 +110,7 @@ export class UpdatesService {
       `SELECT count(*)::text AS total FROM (
          SELECT u.id
            FROM updates u
-           LEFT JOIN device_update_states s ON s.update_id = u.id
+           ${ACTIVE_STATES}
           ${countWhere}
           GROUP BY u.id
           ${having}
@@ -139,7 +159,7 @@ export class UpdatesService {
               s.state, s.first_available_at, s.installed_at, s.hresult
          FROM device_update_states s
          JOIN devices d ON d.id = s.device_id
-        WHERE s.update_id = $1
+        WHERE s.update_id = $1 AND d.status = 'active'
         ORDER BY
           CASE s.state WHEN 'available' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END,
           d.hostname ASC`,
