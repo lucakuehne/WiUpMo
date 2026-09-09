@@ -57,6 +57,8 @@ interface DeviceRow {
   open_updates: string;
   open_security_updates: string;
   patch_age_days: number | null;
+  update_job_version: string | null;
+  update_job_state: string | null;
 }
 
 @Injectable()
@@ -85,6 +87,16 @@ export class DevicesService {
              device_id, update_source, pending_reboot
         FROM device_checkins
        ORDER BY device_id, collected_at DESC
+    ),
+    -- Der juengste noch offene Update-Auftrag je Geraet. Mehr als einen kann es
+    -- regulaer nicht geben; DISTINCT ON schuetzt trotzdem davor, dass ein
+    -- Altbestand die Zeilen der Liste vervielfacht.
+    offener_auftrag AS (
+      SELECT DISTINCT ON (device_id)
+             device_id, target_version, state
+        FROM agent_update_jobs
+       WHERE state IN ('pending', 'delivered', 'installing')
+       ORDER BY device_id, created_at DESC
     )
   `;
 
@@ -112,10 +124,13 @@ export class DevicesService {
               coalesce(c.pending_reboot, false)     AS pending_reboot,
               coalesce(o.open_updates, 0)           AS open_updates,
               coalesce(o.open_security_updates, 0)  AS open_security_updates,
-              date_part('day', now() - o.oldest_open_at)::int AS patch_age_days
+              date_part('day', now() - o.oldest_open_at)::int AS patch_age_days,
+              j.target_version AS update_job_version,
+              j.state          AS update_job_state
          FROM devices d
-         LEFT JOIN open_states    o ON o.device_id = d.id
-         LEFT JOIN latest_checkin c ON c.device_id = d.id
+         LEFT JOIN open_states     o ON o.device_id = d.id
+         LEFT JOIN latest_checkin  c ON c.device_id = d.id
+         LEFT JOIN offener_auftrag j ON j.device_id = d.id
         ${where}
         ORDER BY ${sort.column} ${direction} NULLS LAST, d.hostname ASC
         LIMIT ${limit} OFFSET ${offset}`,
@@ -246,6 +261,10 @@ export class DevicesService {
       );
     }
 
+    if (query.agentVersion) {
+      conditions.push(`d.agent_version = ${params.add(query.agentVersion)}`);
+    }
+
     if (query.updateSource) {
       conditions.push(`c.update_source = ${params.add(query.updateSource)}`);
     }
@@ -294,6 +313,8 @@ export class DevicesService {
       openUpdates: Number(row.open_updates),
       openSecurityUpdates: Number(row.open_security_updates),
       patchAgeDays: row.patch_age_days,
+      updateJobVersion: row.update_job_version,
+      updateJobState: row.update_job_state as DeviceListItemDto['updateJobState'],
     };
   }
 

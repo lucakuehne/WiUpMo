@@ -40,6 +40,10 @@ export interface DeviceListItem {
   pendingReboot: boolean;
   openUpdates: number;
   openSecurityUpdates: number;
+
+  /** Offener Update-Auftrag, sonst null. */
+  updateJobVersion: string | null;
+  updateJobState: AgentUpdateJobState | null;
   patchAgeDays: number | null;
 }
 
@@ -85,6 +89,12 @@ export interface DeviceCheckin {
   pendingReboot: boolean;
 }
 
+export interface AgentLogEntry {
+  at: string;
+  level: string;
+  message: string;
+}
+
 /** Selbstauskunft des Agents aus dem letzten Check-in. */
 export interface AgentDiagnostics {
   queuedSnapshots: number;
@@ -94,6 +104,9 @@ export interface AgentDiagnostics {
   updaterTaskRegistered: boolean;
   lastError: string | null;
   lastErrorAt: string | null;
+
+  /** Die jüngsten Warnungen und Fehler, älteste zuerst. */
+  recentLogs: AgentLogEntry[] | null;
 }
 
 export interface DeviceDetail {

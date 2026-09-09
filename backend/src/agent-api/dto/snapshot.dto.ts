@@ -194,6 +194,19 @@ export class HistoryEntryDto {
  * stand bisher ausschliesslich in einer Protokolldatei auf dem Rechner, und
  * gerade die betroffenen Geraete sind oft nicht erreichbar.
  */
+export class AgentLogEntryDto {
+  @IsISO8601()
+  at: string;
+
+  @IsString()
+  @MaxLength(16)
+  level: string;
+
+  @IsString()
+  @MaxLength(1000)
+  message: string;
+}
+
 export class AgentDiagnosticsDto {
   /** Wartende Snapshots. Wachsend heisst: kommt nicht durch. */
   @IsInt()
@@ -226,6 +239,18 @@ export class AgentDiagnosticsDto {
   @IsISO8601()
   @IsOptional()
   lastErrorAt?: string;
+
+  /**
+   * Die juengsten Warnungen und Fehler aus dem Protokoll des Agents. Kein
+   * vollstaendiges Protokoll und keine Zeitreihe — jeder Check-in bringt den
+   * aktuellen Stand, aeltere werden ueberschrieben.
+   */
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AgentLogEntryDto)
+  @ArrayMaxSize(50)
+  @IsOptional()
+  recentLogs?: AgentLogEntryDto[];
 }
 
 export class SnapshotDto {

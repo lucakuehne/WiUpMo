@@ -10,7 +10,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { DeviceStatus, UpdateSource } from '../../database/enums.js';
+import { AgentUpdateJobState, DeviceStatus, UpdateSource } from '../../database/enums.js';
 
 const toInt = () =>
   Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)));
@@ -81,6 +81,12 @@ export class DeviceQueryDto {
   @IsOptional()
   ou?: string;
 
+  /** Genau diese gemeldete Agent-Version. */
+  @IsString()
+  @MaxLength(32)
+  @IsOptional()
+  agentVersion?: string;
+
   @IsEnum(UpdateSource)
   @IsOptional()
   updateSource?: UpdateSource;
@@ -144,6 +150,16 @@ export class DeviceListItemDto {
   pendingReboot: boolean;
   openUpdates: number;
   openSecurityUpdates: number;
+
+  /**
+   * Zielversion und Zustand eines noch offenen Update-Auftrags, sonst `null`.
+   *
+   * Flach statt als eigenes Objekt: Zwei Felder rechtfertigen keine eigene
+   * Klasse, und das Swagger-Plugin leitet aus einem eingebetteten Objekttyp
+   * ohnehin kein Schema ab.
+   */
+  updateJobVersion: string | null;
+  updateJobState: AgentUpdateJobState | null;
 
   /**
    * Alter des aeltesten offenen Updates in Tagen — die eine Kennzahl, nach der

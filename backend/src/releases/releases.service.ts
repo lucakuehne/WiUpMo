@@ -541,6 +541,38 @@ export class ReleasesService implements OnModuleInit {
   }
 
   /**
+   * Bricht offene Auftraege ab.
+   *
+   * Ohne Kennung alle — der Fall, um den es geht: Ein Rollout, der nicht
+   * durchkommt, blockiert die betroffenen Geraete fuer jeden weiteren Auftrag,
+   * denn `createJobs` ueberspringt, wer schon einen offenen hat. Ohne einen Weg,
+   * sie loszuwerden, steht die Flotte still, bis jemand von Hand in die
+   * Datenbank greift.
+   *
+   * Abgebrochen heisst `failed`, nicht geloescht: Der Versuch hat
+   * stattgefunden, und das Protokoll soll ihn zeigen.
+   */
+  async cancelJobs(id?: string): Promise<number> {
+    const rows: Array<{ id: string }> = await this.dataSource.query(
+      `UPDATE agent_update_jobs SET
+         state        = 'failed',
+         completed_at = now(),
+         error        = 'Von Hand abgebrochen.'
+       WHERE state IN ('pending', 'delivered', 'installing')
+         AND ($1::uuid IS NULL OR id = $1)
+       RETURNING id`,
+      [id ?? null],
+    );
+
+    if (id && rows.length === 0) {
+      throw new NotFoundException('Auftrag nicht gefunden oder bereits abgeschlossen.');
+    }
+
+    this.logger.log(`${rows.length} Update-Auftrag/-Auftraege von Hand abgebrochen.`);
+    return rows.length;
+  }
+
+  /**
    * Schliesst offene Auftraege, deren Zielversion es nicht mehr gibt.
    *
    * Ohne Geraeteangabe raeumt es alle auf — so beim Start, damit ein Bestand
@@ -600,15 +632,16 @@ export class ReleasesService implements OnModuleInit {
     }
   }
 
-  async jobs(limit: number): Promise<AgentUpdateJobViewDto[]> {
+  async jobs(limit: number, deviceId?: string): Promise<AgentUpdateJobViewDto[]> {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT j.id, j.device_id, d.hostname, j.target_version, j.state,
               j.created_at, j.completed_at, j.error
          FROM agent_update_jobs j
          JOIN devices d ON d.id = j.device_id
+        WHERE $2::uuid IS NULL OR j.device_id = $2
         ORDER BY j.created_at DESC
         LIMIT $1`,
-      [limit],
+      [limit, deviceId ?? null],
     );
 
     return rows.map((row) => ({

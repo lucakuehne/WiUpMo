@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ActiveElement, ChartEvent } from 'chart.js/auto';
 import { computed, onMounted, ref } from 'vue';
 import { useRouter, type RouteLocationRaw } from 'vue-router';
 import { get } from '@/api/client';
@@ -264,6 +265,22 @@ const agentVersionOptions = computed(() => ({
   plugins: {
     legend: { position: 'bottom' as const, labels: { color: palette.value.text, boxWidth: 12 } },
   },
+  // Ein Klick auf ein Segment führt in die Geräteliste, gefiltert auf diese
+  // Version — die Frage nach einem Anteil ist fast immer die Frage danach,
+  // welche Geräte darin stecken.
+  onClick: (_event: ChartEvent, elemente: ActiveElement[]) => {
+    const version = agentVersions.value[elemente[0]?.index ?? -1]?.version;
+
+    if (version) {
+      void router.push({ name: 'devices', query: { agentVersion: version } });
+    }
+  },
+  onHover: (event: ChartEvent, elemente: ActiveElement[]) => {
+    const ziel = event.native?.target as HTMLElement | null;
+    if (ziel) {
+      ziel.style.cursor = elemente.length > 0 ? 'pointer' : 'default';
+    }
+  },
 }));
 
 const sourceData = computed(() => {
@@ -406,7 +423,8 @@ onMounted(load);
         <CardHeader>
           <CardTitle>Agent-Versionen</CardTitle>
           <CardDescription>
-            Was auf den aktiven Geräten läuft. Ausrollen unter Einstellungen → Agent-Versionen.
+            Was auf den aktiven Geräten läuft. Ein Klick auf ein Segment oder eine Zeile zeigt die
+            zugehörigen Geräte; ausgerollt wird unter Einstellungen → Agent-Versionen.
           </CardDescription>
         </CardHeader>
 
@@ -430,6 +448,11 @@ onMounted(load);
                 v-for="entry in agentVersions"
                 :key="entry.version ?? 'unbekannt'"
                 class="flex items-baseline justify-between gap-2 text-sm"
+                :class="entry.version ? 'hover:text-foreground cursor-pointer' : ''"
+                @click="
+                  entry.version &&
+                    router.push({ name: 'devices', query: { agentVersion: entry.version } })
+                "
               >
                 <span class="flex items-center gap-2">
                   <span class="tabular font-medium">{{ entry.version ?? 'unbekannt' }}</span>

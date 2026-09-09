@@ -1,4 +1,9 @@
-import type { UpdateSource, UpdateState, UpdateEventType } from '@/api/types';
+import type {
+  AgentUpdateJobState,
+  UpdateSource,
+  UpdateState,
+  UpdateEventType,
+} from '@/api/types';
 
 /**
  * Alle Zeitstempel kommen in UTC aus dem Backend und werden erst hier
@@ -85,6 +90,39 @@ export const EVENT_TYPE_LABELS: Record<UpdateEventType, string> = {
   disappeared: 'verschwunden',
   hidden: 'ausgeblendet',
 };
+
+export const JOB_STATE_LABELS: Record<AgentUpdateJobState, string> = {
+  pending: 'offen',
+  delivered: 'zugestellt',
+  installing: 'wird installiert',
+  done: 'erledigt',
+  failed: 'gescheitert',
+};
+
+/**
+ * Jeder Status mit eigener Farbe, keiner grau.
+ *
+ * Der Fortschritt eines Auftrags läuft von blau über violett und gelb nach
+ * grün — beim Überfliegen erkennt man den Stand an der Farbe, nicht erst am
+ * Wort. Fielen „offen" und „zugestellt" wie früher auf denselben neutralen Ton,
+ * sähe die Liste farblos aus; es sind die beiden häufigsten.
+ */
+export function jobBadgeClass(state: AgentUpdateJobState): string {
+  switch (state) {
+    case 'pending':
+      return 'bg-chart-1/15 text-chart-1 border-chart-1/30';
+    case 'delivered':
+      return 'bg-chart-4/15 text-chart-4 border-chart-4/30';
+    case 'installing':
+      return 'bg-warning/15 text-warning-foreground border-warning/40 dark:text-warning';
+    case 'done':
+      return 'bg-success/15 text-success border-success/30';
+    case 'failed':
+      return 'bg-destructive/15 text-destructive border-destructive/30';
+    default:
+      return 'bg-muted text-muted-foreground border-transparent';
+  }
+}
 
 /** Farbklassen der Abzeichen. */
 export function sourceBadgeClass(source: UpdateSource | null): string {

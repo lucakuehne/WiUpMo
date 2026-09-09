@@ -3,7 +3,14 @@ import { AlertTriangle, Download, RotateCcw, Search } from '@lucide/vue';
 import { onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { get } from '@/api/client';
-import type { DeviceListItem, DeviceOu, DeviceStatus, Paged, UpdateSource } from '@/api/types';
+import type {
+  AgentVersionCount,
+  DeviceListItem,
+  DeviceOu,
+  DeviceStatus,
+  Paged,
+  UpdateSource,
+} from '@/api/types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -60,6 +67,10 @@ const updateSource = ref<UpdateSource | null>(null);
 /** Gewählte Organisationseinheit einschliesslich allem darunter. */
 const ou = ref<string | null>(null);
 const units = ref<DeviceOu[]>([]);
+
+/** Gemeldete Agent-Version, exakt. Die Auswahl kommt aus der Auswertung. */
+const agentVersion = ref<string | null>(null);
+const agentVersions = ref<AgentVersionCount[]>([]);
 const staleDays = ref<number | null>(null);
 const hasOpenSecurity = ref(false);
 
@@ -124,6 +135,20 @@ function onOuChange(value: string | null): void {
   onFilterChange();
 }
 
+function onAgentVersionChange(value: unknown): void {
+  agentVersion.value = value === ANY || !value ? null : String(value);
+  onFilterChange();
+}
+
+async function loadAgentVersions(): Promise<void> {
+  try {
+    agentVersions.value = await get<AgentVersionCount[]>('/api/reports/agent-versions');
+  } catch {
+    // Nur die Auswahl im Filter; ohne sie bleibt die Liste bedienbar.
+    agentVersions.value = [];
+  }
+}
+
 function onStaleChange(value: unknown): void {
   staleDays.value = value === ANY || !value ? null : Number(value);
   onFilterChange();
@@ -159,6 +184,7 @@ async function load(): Promise<void> {
       search: search.value || undefined,
       status: status.value === 'all' ? undefined : status.value,
       ou: ou.value ?? undefined,
+      agentVersion: agentVersion.value ?? undefined,
       updateSource: updateSource.value ?? undefined,
       staleDays: staleDays.value ?? undefined,
       hasOpenSecurity: hasOpenSecurity.value || undefined,
@@ -212,6 +238,7 @@ function resetFilters(): void {
   search.value = '';
   status.value = 'active';
   ou.value = null;
+  agentVersion.value = null;
   updateSource.value = null;
   staleDays.value = null;
   hasOpenSecurity.value = false;
@@ -276,12 +303,16 @@ function applyQueryFilters(): void {
   if (typeof query.ou === 'string' && query.ou !== '') {
     ou.value = query.ou;
   }
+  if (typeof query.agentVersion === 'string' && query.agentVersion !== '') {
+    agentVersion.value = query.agentVersion;
+  }
 }
 
 onMounted(() => {
   applyQueryFilters();
   void load();
   void loadUnits();
+  void loadAgentVersions();
 });
 </script>
 
@@ -326,6 +357,25 @@ onMounted(() => {
         </Select>
         <SourceLegend />
       </div>
+
+      <Select
+        :model-value="agentVersion ?? ''"
+        @update:model-value="onAgentVersionChange"
+      >
+        <SelectTrigger class="w-44">
+          <SelectValue placeholder="Agent-Version" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem :value="ANY">Alle Versionen</SelectItem>
+          <SelectItem
+            v-for="entry in agentVersions"
+            :key="entry.version ?? 'unbekannt'"
+            :value="entry.version ?? ANY"
+          >
+            {{ entry.version ?? 'unbekannt' }} ({{ entry.devices }})
+          </SelectItem>
+        </SelectContent>
+      </Select>
 
       <Select
         :model-value="staleDays === null ? '' : String(staleDays)"
@@ -526,6 +576,16 @@ onMounted(() => {
 
                 <TableCell class="tabular">
                   {{ row.agentVersion ?? '—' }}
+                  <!-- Ein offener Auftrag gehört neben die laufende Version:
+                       Erst beides zusammen sagt, ob ein Gerät zurückliegt oder
+                       nur noch nicht so weit ist. -->
+                  <div
+                    v-if="row.updateJobVersion"
+                    class="text-muted-foreground truncate text-xs"
+                    :title="`Update-Auftrag auf ${row.updateJobVersion}`"
+                  >
+                    → {{ row.updateJobVersion }}
+                  </div>
                 </TableCell>
 
                 <TableCell>

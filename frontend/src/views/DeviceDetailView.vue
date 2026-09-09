@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router';
 import { toast } from 'vue-sonner';
 import { get, post } from '@/api/client';
 import type {
+  AgentUpdateJobView,
   CreateUpdateJobsResult,
   DeviceDetail,
   Timeline,
@@ -24,11 +25,13 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import JobStateLegend from '@/components/JobStateLegend.vue';
 import SourceLegend from '@/components/SourceLegend.vue';
 import TablePager from '@/components/TablePager.vue';
 import { formatDnPath } from '@/dn';
 import {
   EVENT_TYPE_LABELS,
+  JOB_STATE_LABELS,
   UPDATE_SOURCE_LABELS,
   UPDATE_STATE_LABELS,
   eventBadgeClass,
@@ -36,6 +39,7 @@ import {
   formatDateTime,
   formatHresult,
   formatRelative,
+  jobBadgeClass,
   sourceBadgeClass,
   stateBadgeClass,
 } from '@/format';
@@ -45,6 +49,7 @@ const props = defineProps<{ id: string }>();
 const router = useRouter();
 
 const device = ref<DeviceDetail | null>(null);
+const jobs = ref<AgentUpdateJobView[]>([]);
 const timeline = ref<TimelineEntry[]>([]);
 const timelineTotal = ref(0);
 const loading = ref(true);
@@ -85,6 +90,9 @@ const latestCheckin = computed(() => device.value?.checkins[0] ?? null);
  * unauffällig und sagen dann nichts. Interessant ist nur die Abweichung —
  * deshalb wird hier ausgewertet statt angezeigt.
  */
+/** Neueste zuerst — der Agent liefert sie in zeitlicher Reihenfolge. */
+const agentLogs = computed(() => [...(device.value?.agentDiagnostics?.recentLogs ?? [])].reverse());
+
 const agentIssues = computed<string[]>(() => {
   const d = device.value?.agentDiagnostics;
   if (!d) {
@@ -128,14 +136,16 @@ async function load(): Promise<void> {
   error.value = null;
 
   try {
-    const [detail, events] = await Promise.all([
+    const [detail, events, updateJobs] = await Promise.all([
       get<DeviceDetail>(`/api/devices/${props.id}`),
       get<Timeline>(`/api/devices/${props.id}/timeline`, { limit: 100 }),
+      get<AgentUpdateJobView[]>('/api/agent-update-jobs', { deviceId: props.id, limit: 50 }),
     ]);
 
     device.value = detail;
     timeline.value = events.items;
     timelineTotal.value = events.total;
+    jobs.value = updateJobs;
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Das Gerät konnte nicht geladen werden.';
   } finally {
@@ -308,6 +318,8 @@ onMounted(load);
           <TabsTrigger value="updates">Updates ({{ device.updates.length }})</TabsTrigger>
           <TabsTrigger value="timeline">Verlauf ({{ timelineTotal }})</TabsTrigger>
           <TabsTrigger value="checkins">Check-ins ({{ device.checkins.length }})</TabsTrigger>
+          <TabsTrigger value="agent">Agent-Updates ({{ jobs.length }})</TabsTrigger>
+          <TabsTrigger value="log">Agent-Protokoll ({{ agentLogs.length }})</TabsTrigger>
         </TabsList>
 
         <!-- ===================== Updates ===================== -->
@@ -478,6 +490,98 @@ onMounted(load);
                     {{ checkin.wsusServerUrl ?? '—' }}
                   </TableCell>
                   <TableCell class="tabular">{{ checkin.agentVersion ?? '—' }}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        <!-- ===================== Agent-Updates ===================== -->
+        <TabsContent value="agent">
+          <p class="text-muted-foreground mb-3 text-sm">
+            Die Update-Aufträge dieses Geräts. Ausgerollt wird unter Einstellungen →
+            Agent-Versionen; ein offener Auftrag verhindert, dass ein weiterer angelegt wird.
+          </p>
+
+          <div class="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead class="w-32">Zielversion</TableHead>
+                  <TableHead class="w-40">
+                    <span class="inline-flex items-center gap-1">Status <JobStateLegend /></span>
+                  </TableHead>
+                  <TableHead class="w-40">Angelegt</TableHead>
+                  <TableHead class="w-40">Abgeschlossen</TableHead>
+                  <TableHead>Fehler</TableHead>
+                </TableRow>
+              </TableHeader>
+
+              <TableBody>
+                <TableRow v-if="jobs.length === 0">
+                  <TableCell :colspan="5" class="text-muted-foreground py-8 text-center">
+                    Für dieses Gerät wurde noch kein Agent-Update beauftragt.
+                  </TableCell>
+                </TableRow>
+
+                <TableRow v-for="job in jobs" :key="job.id">
+                  <TableCell class="tabular">{{ job.targetVersion }}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" :class="jobBadgeClass(job.state)">
+                      {{ JOB_STATE_LABELS[job.state] }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>{{ formatDateTime(job.createdAt) }}</TableCell>
+                  <TableCell>{{ formatDateTime(job.completedAt) }}</TableCell>
+                  <TableCell class="text-destructive text-xs">{{ job.error ?? '' }}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        <!-- ===================== Agent-Protokoll ===================== -->
+        <TabsContent value="log">
+          <p class="text-muted-foreground mb-3 text-sm">
+            Warnungen und Fehler des Agents, wie sie mit dem letzten Check-in eingegangen sind —
+            neueste zuerst. Kein vollständiges Protokoll und keine Zeitreihe: Was hier steht, ist
+            der jeweils aktuelle Stand, das ganze Protokoll liegt auf dem Gerät unter
+            <code>%ProgramData%\WiUpMo\logs\</code>.
+          </p>
+
+          <div class="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead class="w-44">Zeitpunkt</TableHead>
+                  <TableHead class="w-28">Stufe</TableHead>
+                  <TableHead>Meldung</TableHead>
+                </TableRow>
+              </TableHeader>
+
+              <TableBody>
+                <TableRow v-if="agentLogs.length === 0">
+                  <TableCell :colspan="3" class="text-muted-foreground py-8 text-center">
+                    Nichts zu melden — oder der Agent ist noch zu alt, um sein Protokoll
+                    mitzuschicken.
+                  </TableCell>
+                </TableRow>
+
+                <TableRow v-for="(entry, index) in agentLogs" :key="`${entry.at}-${index}`">
+                  <TableCell>{{ formatDateTime(entry.at) }}</TableCell>
+                  <TableCell>
+                    <Badge
+                      variant="outline"
+                      :class="
+                        entry.level === 'error'
+                          ? 'bg-destructive/15 text-destructive border-destructive/30'
+                          : 'bg-warning/15 text-warning-foreground border-warning/40 dark:text-warning'
+                      "
+                    >
+                      {{ entry.level === 'error' ? 'Fehler' : 'Warnung' }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell class="text-sm">{{ entry.message }}</TableCell>
                 </TableRow>
               </TableBody>
             </Table>

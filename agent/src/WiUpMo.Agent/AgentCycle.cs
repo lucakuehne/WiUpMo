@@ -53,7 +53,6 @@ public sealed class AgentCycle(
             // Kein Programmfehler, sondern ein Zustand der Umgebung: als
             // Warnung im Klartext, ohne Stapelspur.
             logger.LogWarning("Update-Zustand nicht lesbar. {Meldung}", ex.Message);
-            health.Record($"Update-Zustand nicht lesbar. {ex.Message}");
         }
 
         await FlushAsync(ct).ConfigureAwait(false);
@@ -173,8 +172,6 @@ public sealed class AgentCycle(
                 "Das Backend fuehrt dieses Geraet als archiviert; {Anzahl} Snapshots werden verworfen. {Meldung}",
                 verbleibend, ex.Message);
 
-            health.Record("Das Backend fuehrt dieses Geraet als archiviert.");
-
             queue.Remove([.. pending.Select(p => p.Id)]);
         }
         catch (Exception ex) when (ex is BackendException or HttpRequestException or TaskCanceledException
@@ -183,10 +180,6 @@ public sealed class AgentCycle(
             logger.LogWarning(
                 "Uebermittlung fehlgeschlagen, {Anzahl} Snapshots bleiben in der Warteschlange: {Fehler}",
                 verbleibend, ex.Message);
-
-            // Beim naechsten gelungenen Check-in geht die Meldung mit — dann
-            // steht im Backend, warum es davor still war.
-            health.Record($"Uebermittlung fehlgeschlagen: {ex.Message}");
         }
         catch (InvalidOperationException ex)
         {

@@ -132,10 +132,15 @@ export class AgentUpdateJobsController {
   constructor(private readonly releases: ReleasesService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Protokoll der Update-Auftraege.' })
-  list(@Query('limit') limit?: string): Promise<AgentUpdateJobViewDto[]> {
+  @ApiOperation({ summary: 'Protokoll der Update-Auftraege, wahlweise eines Geraets.' })
+  list(
+    @Query('limit') limit?: string,
+    @Query('deviceId', new ParseUUIDPipe({ optional: true })) deviceId?: string,
+  ): Promise<AgentUpdateJobViewDto[]> {
     const parsed = Number(limit ?? 100);
-    return this.releases.jobs(Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 500) : 100);
+    const capped = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 500) : 100;
+
+    return this.releases.jobs(capped, deviceId);
   }
 
   /**
@@ -147,5 +152,20 @@ export class AgentUpdateJobsController {
   @ApiOperation({ summary: 'Legt Update-Auftraege an.' })
   create(@Body() dto: CreateUpdateJobsDto): Promise<CreateUpdateJobsResultDto> {
     return this.releases.createJobs(dto.deviceIds, dto.targetVersion);
+  }
+
+  /** Muss vor `:id/cancel` stehen, sonst faengt die Kennungsroute den Pfad ab. */
+  @Post('cancel-open')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bricht alle offenen Update-Auftraege ab.' })
+  async cancelOpen(): Promise<{ cancelled: number }> {
+    return { cancelled: await this.releases.cancelJobs() };
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bricht einen offenen Update-Auftrag ab.' })
+  async cancel(@Param('id', ParseUUIDPipe) id: string): Promise<{ cancelled: number }> {
+    return { cancelled: await this.releases.cancelJobs(id) };
   }
 }

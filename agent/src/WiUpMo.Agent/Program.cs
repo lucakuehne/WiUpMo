@@ -78,7 +78,12 @@ internal static class Program
         // gewoehnliche Konsolenanwendung, meldet dem Dienstmanager nie den
         // Start und laesst ihn nach 30 s mit Fehler 1053 abbrechen.
         bool asService = HasFlag(args, "--service") || WindowsServiceHelpers.IsWindowsService();
-        Serilog.Log.Logger = CreateLogger(options, asService);
+
+        // Der Sink entsteht vor dem Logger und wird spaeter in die
+        // Dienstsammlung gelegt: So haelt er auch fest, was vor dem Hochlauf des
+        // Hosts schiefging.
+        var logSink = new HealthLogSink();
+        Serilog.Log.Logger = CreateLogger(options, asService, logSink);
 
         try
         {
@@ -90,7 +95,7 @@ internal static class Program
                 return ExitConfiguration;
             }
 
-            using IHost host = BuildHost(options, asService);
+            using IHost host = BuildHost(options, asService, logSink);
             PrepareStorage(host, options);
 
             if (HasFlag(args, "--once"))
@@ -132,7 +137,7 @@ internal static class Program
         }
     }
 
-    private static IHost BuildHost(AgentOptions options, bool asService)
+    private static IHost BuildHost(AgentOptions options, bool asService, HealthLogSink logSink)
     {
         // Der regulaere Builder, nicht der leere: er bringt eine
         // Standard-Lebensdauer mit, die AddWindowsService dann ersetzt. Ohne
@@ -177,6 +182,7 @@ internal static class Program
         builder.Services.AddSingleton<BackendClient>();
         builder.Services.AddSingleton<CheckinTrigger>();
         builder.Services.AddSingleton<CheckinSchedule>();
+        builder.Services.AddSingleton(logSink);
         builder.Services.AddSingleton<AgentHealth>();
         builder.Services.AddSingleton(_ => new AgentPaths(options.DataDirectory));
         builder.Services.AddSingleton<SelfUpdateService>();
@@ -214,7 +220,10 @@ internal static class Program
         queue.ImportLegacyMarker(identityStore.GetLastHistoryTimestamp());
     }
 
-    private static Serilog.ILogger CreateLogger(AgentOptions options, bool asService)
+    private static Serilog.ILogger CreateLogger(
+        AgentOptions options,
+        bool asService,
+        HealthLogSink healthSink)
     {
         const string template =
             "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}";
@@ -223,7 +232,10 @@ internal static class Program
             .MinimumLevel.Information()
             .MinimumLevel.Override("Microsoft.Hosting.Lifetime", LogEventLevel.Warning)
             .Enrich.WithProperty("AgentVersion", AgentVersion.Current)
-            .WriteTo.Console(outputTemplate: template);
+            .WriteTo.Console(outputTemplate: template)
+            // Warnungen und Fehler zusaetzlich in den Ringpuffer, der mit dem
+            // naechsten Snapshot ans Backend geht.
+            .WriteTo.Sink(healthSink, restrictedToMinimumLevel: LogEventLevel.Warning);
 
         // Die Datei ist der eigentliche Ablageort; die Konsole sieht im
         // Dienstbetrieb ohnehin niemand.

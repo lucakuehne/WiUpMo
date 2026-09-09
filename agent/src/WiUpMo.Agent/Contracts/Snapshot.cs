@@ -142,6 +142,27 @@ public sealed class AgentDiagnostics
     public string? LastError { get; init; }
 
     public DateTimeOffset? LastErrorAt { get; init; }
+
+    /// <summary>
+    /// Die juengsten Protokolleintraege ab Stufe Warnung.
+    ///
+    /// Nicht das vollstaendige Protokoll: Das sind Megabyte je Geraet und Tag,
+    /// und der Erkenntniswert steckt fast vollstaendig in den Warnungen und
+    /// Fehlern. Es ist auch keine Zeitreihe — jeder Check-in liefert die
+    /// aktuellen, aeltere werden ueberschrieben. Wer mehr braucht, findet es im
+    /// Protokoll auf dem Geraet.
+    /// </summary>
+    public IReadOnlyList<AgentLogEntry>? RecentLogs { get; init; }
+}
+
+public sealed class AgentLogEntry
+{
+    public required DateTimeOffset At { get; init; }
+
+    /// <summary><c>warning</c> oder <c>error</c>.</summary>
+    public required string Level { get; init; }
+
+    public required string Message { get; init; }
 }
 
 public sealed class Snapshot

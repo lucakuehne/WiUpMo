@@ -18,6 +18,7 @@ namespace WiUpMo.Agent;
 public sealed class AgentHealth(
     SnapshotQueue queue,
     AgentPaths paths,
+    HealthLogSink logs,
     ILogger<AgentHealth> logger)
 {
     /// <summary>
@@ -31,9 +32,6 @@ public sealed class AgentHealth(
 
     private readonly Lock _gate = new();
 
-    private string? _lastError;
-    private DateTimeOffset? _lastErrorAt;
-
     private bool _taskRegistered;
     private DateTimeOffset _taskCheckedAt = DateTimeOffset.MinValue;
 
@@ -41,18 +39,15 @@ public sealed class AgentHealth(
     /// Haelt die juengste Stoerung fest. Aufgerufen an den Stellen, die im
     /// Protokoll eine Warnung erzeugen — was dort steht, gehoert auch hierher.
     /// </summary>
-    public void Record(string message)
-    {
-        lock (_gate)
-        {
-            _lastError = Limits.Truncate(message, MaxErrorLength);
-            _lastErrorAt = DateTimeOffset.UtcNow;
-        }
-    }
-
     public AgentDiagnostics Read()
     {
         UpdateMarker? marker = UpdateMarker.TryLoad(paths.MarkerPath);
+        IReadOnlyList<AgentLogEntry> entries = logs.Recent();
+
+        // Die juengste Stoerung ist der letzte Eintrag — sie steht zusaetzlich
+        // als eigenes Feld, weil sie in der Oberflaeche an anderer Stelle
+        // gebraucht wird als die Liste.
+        AgentLogEntry? letzte = entries.Count > 0 ? entries[^1] : null;
 
         lock (_gate)
         {
@@ -63,8 +58,9 @@ public sealed class AgentHealth(
                 SelfUpdateTarget = marker?.TargetVersion,
                 SelfUpdateStartedAt = marker?.StartedAt,
                 UpdaterTaskRegistered = IsUpdaterTaskRegistered(),
-                LastError = _lastError,
-                LastErrorAt = _lastErrorAt,
+                LastError = letzte is null ? null : Limits.Truncate(letzte.Message, MaxErrorLength),
+                LastErrorAt = letzte?.At,
+                RecentLogs = entries.Count > 0 ? entries : null,
             };
         }
     }

@@ -1,20 +1,16 @@
 <script setup lang="ts">
-import { Download, Loader2, Send, Trash2, Upload } from '@lucide/vue';
-import { onMounted, ref, useTemplateRef } from 'vue';
+import { Ban, Download, Loader2, Send, Trash2, Upload } from '@lucide/vue';
+import { computed, onMounted, ref, useTemplateRef } from 'vue';
 import { useRouter } from 'vue-router';
 import { toast } from 'vue-sonner';
 import { del, get, post, upload } from '@/api/client';
-import type {
-  AgentRelease,
-  AgentUpdateJobState,
-  AgentUpdateJobView,
-  CreateUpdateJobsResult,
-} from '@/api/types';
+import type { AgentRelease, AgentUpdateJobView, CreateUpdateJobsResult } from '@/api/types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardFooter,
@@ -41,7 +37,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import JobStateLegend from '@/components/JobStateLegend.vue';
 import TablePager from '@/components/TablePager.vue';
-import { formatBytes, formatDateTime } from '@/format';
+import { JOB_STATE_LABELS, formatBytes, formatDateTime, jobBadgeClass } from '@/format';
 import { usePagedList } from '@/paged';
 
 /**
@@ -202,36 +198,49 @@ async function rollOut(): Promise<void> {
   }
 }
 
-const JOB_STATE_LABELS: Record<AgentUpdateJobState, string> = {
-  pending: 'offen',
-  delivered: 'zugestellt',
-  installing: 'wird installiert',
-  done: 'erledigt',
-  failed: 'gescheitert',
-};
-
 /**
- * Jeder Zustand mit eigener Farbe, keiner grau.
- *
- * Zuvor fielen „offen" und „zugestellt" auf denselben neutralen Ton, und weil
- * das die beiden häufigsten sind, sah die Liste farblos aus. Der Fortschritt
- * eines Auftrags läuft von blau über violett und gelb nach grün — beim
- * Überfliegen erkennt man den Stand an der Farbe, nicht erst am Wort.
+ * Ein Auftrag ist offen, solange er nicht abgeschlossen ist. Nur solche lassen
+ * sich abbrechen — bei den übrigen wäre der Knopf eine Falle.
  */
-function jobBadgeClass(state: AgentUpdateJobState): string {
-  switch (state) {
-    case 'pending':
-      return 'bg-chart-1/15 text-chart-1 border-chart-1/30';
-    case 'delivered':
-      return 'bg-chart-4/15 text-chart-4 border-chart-4/30';
-    case 'installing':
-      return 'bg-warning/15 text-warning-foreground border-warning/40 dark:text-warning';
-    case 'done':
-      return 'bg-success/15 text-success border-success/30';
-    case 'failed':
-      return 'bg-destructive/15 text-destructive border-destructive/30';
-    default:
-      return 'bg-muted text-muted-foreground border-transparent';
+function isOpen(job: AgentUpdateJobView): boolean {
+  return job.state === 'pending' || job.state === 'delivered' || job.state === 'installing';
+}
+
+const openJobs = computed(() => jobs.value.filter(isOpen).length);
+
+/** Rückfrage nur beim Sammelabbruch — der einzelne ist überschaubar. */
+const cancelAllOpen = ref(false);
+
+async function cancel(job: AgentUpdateJobView): Promise<void> {
+  busy.value = true;
+
+  try {
+    await post(`/api/agent-update-jobs/${job.id}/cancel`);
+    toast.success(`Auftrag für ${job.hostname} abgebrochen.`);
+    await load();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Abbrechen fehlgeschlagen.';
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function cancelOpen(): Promise<void> {
+  cancelAllOpen.value = false;
+  busy.value = true;
+
+  try {
+    const result = await post<{ cancelled: number }>('/api/agent-update-jobs/cancel-open');
+
+    toast.success(`${result.cancelled} Auftrag/Aufträge abgebrochen.`, {
+      description: 'Die betroffenen Geräte können jetzt wieder beauftragt werden.',
+    });
+
+    await load();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Abbrechen fehlgeschlagen.';
+  } finally {
+    busy.value = false;
   }
 }
 
@@ -385,8 +394,21 @@ onMounted(load);
       <CardHeader>
         <CardTitle>Update-Aufträge</CardTitle>
         <CardDescription>
-          Ein Auftrag wird beim nächsten Check-in des Geräts abgeholt. Bis dahin bleibt er offen.
+          Ein Auftrag wird beim nächsten Check-in des Geräts abgeholt. Bis dahin bleibt er offen —
+          und solange er offen ist, bekommt das Gerät keinen neuen.
         </CardDescription>
+
+        <CardAction>
+          <Button
+            variant="outline"
+            size="sm"
+            :disabled="busy || openJobs === 0"
+            @click="cancelAllOpen = true"
+          >
+            <Ban class="size-3.5" />
+            {{ openJobs }} offene abbrechen
+          </Button>
+        </CardAction>
       </CardHeader>
 
       <CardContent>
@@ -402,12 +424,13 @@ onMounted(load);
                 <TableHead class="w-40">Angelegt</TableHead>
                 <TableHead class="w-40">Abgeschlossen</TableHead>
                 <TableHead>Fehler</TableHead>
+                <TableHead class="w-12" />
               </TableRow>
             </TableHeader>
 
             <TableBody>
               <TableRow v-if="!loading && jobs.length === 0">
-                <TableCell :colspan="6" class="text-muted-foreground py-8 text-center">
+                <TableCell :colspan="7" class="text-muted-foreground py-8 text-center">
                   Noch keine Aufträge.
                 </TableCell>
               </TableRow>
@@ -428,6 +451,20 @@ onMounted(load);
                 <TableCell>{{ formatDateTime(job.createdAt) }}</TableCell>
                 <TableCell>{{ formatDateTime(job.completedAt) }}</TableCell>
                 <TableCell class="text-destructive text-xs">{{ job.error ?? '' }}</TableCell>
+
+                <TableCell @click.stop>
+                  <Button
+                    v-if="isOpen(job)"
+                    variant="ghost"
+                    size="icon"
+                    class="text-muted-foreground hover:text-destructive size-8"
+                    title="Auftrag abbrechen"
+                    :disabled="busy"
+                    @click="cancel(job)"
+                  >
+                    <Ban class="size-4" />
+                  </Button>
+                </TableCell>
               </TableRow>
             </TableBody>
           </Table>
@@ -456,6 +493,24 @@ onMounted(load);
         <DialogFooter>
           <Button variant="outline" @click="pendingRemoval = null">Abbrechen</Button>
           <Button variant="destructive" @click="remove">Entfernen</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog :open="cancelAllOpen" @update:open="cancelAllOpen = false">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Offene Aufträge abbrechen</DialogTitle>
+          <DialogDescription>
+            {{ openJobs }} noch nicht abgeschlossene Aufträge werden als gescheitert vermerkt. Die
+            betroffenen Geräte lassen sich danach wieder beauftragen. Bereits laufende Tauschvorgänge
+            auf den Geräten hält das nicht auf.
+          </DialogDescription>
+        </DialogHeader>
+
+        <DialogFooter>
+          <Button variant="outline" @click="cancelAllOpen = false">Abbrechen</Button>
+          <Button variant="destructive" @click="cancelOpen">Aufträge abbrechen</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
