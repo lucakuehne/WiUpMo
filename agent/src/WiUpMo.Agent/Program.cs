@@ -36,7 +36,7 @@ internal static class Program
     /// Wert liest und bei einem alleinstehenden Schalter abbricht.
     /// </summary>
     private static readonly string[] Flags =
-        ["--install", "--uninstall", "--once", "--service", "--updater"];
+        ["--install", "--uninstall", "--purge", "--once", "--service", "--updater"];
 
     private static readonly Dictionary<string, string> SwitchMappings = new()
     {
@@ -60,7 +60,7 @@ internal static class Program
 
         if (HasFlag(args, "--uninstall"))
         {
-            return ServiceInstaller.Uninstall(options);
+            return ServiceInstaller.Uninstall(options, HasFlag(args, "--purge"));
         }
 
         // Der Updater-Lauf kommt vom geplanten Task und braucht weder Host noch

@@ -65,6 +65,18 @@ export class ReleasesService implements OnModuleInit {
     }
 
     await this.adoptBundled();
+
+    // Einmal beim Start aufraeumen: Auftraege auf eine entfernte Version
+    // schliessen sich sonst einzeln, verteilt ueber so viele Check-ins wie es
+    // sie gibt — jeder mit einer eigenen Warnung im Protokoll.
+    try {
+      await this.closeOrphaned();
+    } catch (error) {
+      this.logger.warn(
+        'Verwaiste Update-Auftraege liessen sich nicht aufraeumen: ' +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   /**
@@ -512,13 +524,11 @@ export class ReleasesService implements OnModuleInit {
     );
 
     if (!release[0]) {
-      // Die Zielversion wurde entfernt. Auftrag als gescheitert schliessen,
-      // statt den Agent auf eine nicht vorhandene Datei zu schicken.
-      await this.reportResult(deviceId, {
-        jobId: job.id as string,
-        state: 'failed',
-        error: 'Die Zielversion ist im Backend nicht mehr hinterlegt.',
-      });
+      // Die Zielversion wurde entfernt. Alle Auftraege dieses Geraets auf diese
+      // Version schliessen, nicht nur den gerade geholten: Einer pro Check-in
+      // hiesse bei mehreren aufgestauten Auftraegen, dass sich dasselbe Geraet
+      // ueber Stunden immer wieder meldet — und das Protokoll fuellt.
+      await this.closeOrphaned(job.target_version as string, deviceId);
       return null;
     }
 
@@ -528,6 +538,36 @@ export class ReleasesService implements OnModuleInit {
       sha256: release[0].sha256,
       downloadPath: `/api/agent/v1/binary/${job.target_version as string}`,
     };
+  }
+
+  /**
+   * Schliesst offene Auftraege, deren Zielversion es nicht mehr gibt.
+   *
+   * Ohne Geraeteangabe raeumt es alle auf — so beim Start, damit ein Bestand
+   * aus der Vergangenheit nicht bei jedem Check-in einzeln auffaellt.
+   */
+  private async closeOrphaned(version?: string, deviceId?: string): Promise<number> {
+    const rows: Array<{ id: string }> = await this.dataSource.query(
+      `UPDATE agent_update_jobs j SET
+         state        = 'failed',
+         completed_at = now(),
+         error        = 'Die Zielversion ' || j.target_version || ' ist im Backend nicht mehr hinterlegt.'
+       WHERE j.state IN ('pending', 'delivered', 'installing')
+         AND ($1::text IS NULL OR j.target_version = $1)
+         AND ($2::uuid IS NULL OR j.device_id = $2)
+         AND NOT EXISTS (SELECT 1 FROM agent_releases r WHERE r.version = j.target_version)
+       RETURNING j.id`,
+      [version ?? null, deviceId ?? null],
+    );
+
+    if (rows.length > 0) {
+      this.logger.warn(
+        `${rows.length} Update-Auftrag/-Auftraege geschlossen: Die Zielversion ` +
+          `${version ?? '(mehrere)'} ist nicht mehr hinterlegt.`,
+      );
+    }
+
+    return rows.length;
   }
 
   /** Rueckmeldung des Agents. Nur eigene Auftraege, damit kein Geraet fremde schliesst. */

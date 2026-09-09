@@ -39,8 +39,27 @@ Das richtet ein:
 ersetzt das Programm und startet ihn wieder — damit ist es zugleich der
 Aktualisierungsweg, bis Phase 6 das Selbst-Update bringt.
 
-`--uninstall` entfernt den Dienst und lässt das Datenverzeichnis stehen; dort
-liegen Geräteidentität und Protokolle.
+### Deinstallation
+
+```powershell
+# Als Administrator
+& "$env:ProgramFiles\WiUpMo\wiupmo-agent.exe" --uninstall
+
+# Restlos, samt Identität und Protokollen
+& "$env:ProgramFiles\WiUpMo\wiupmo-agent.exe" --uninstall --purge
+```
+
+`--uninstall` entfernt den geplanten Task, den Dienst, die Ereignisquelle und das
+Programmverzeichnis. Das Datenverzeichnis bleibt bewusst stehen: Dort liegt die
+Geräteidentität, und eine erneute Installation ist damit wieder **dasselbe**
+Gerät statt eines zweiten Eintrags im Backend. `--purge` entfernt es mit.
+
+Die gerade laufende EXE kann sich nicht selbst löschen — ruft man die
+Deinstallation mit der installierten Datei auf, bleibt genau diese liegen. Der
+Aufruf sagt dann, mit welchem Befehl der Rest wegkommt.
+
+Im Backend bleibt das Gerät bestehen und fällt nach einigen Tagen unter „meldet
+sich nicht mehr". Wer das vermeiden will, archiviert es dort von Hand.
 
 > Das Konto `LocalSystem` ist nicht verhandelbar: WUApi und die
 > Richtlinien-Registrierungsschlüssel sind für normale Benutzer nicht lesbar.
@@ -52,6 +71,7 @@ liegen Geräteidentität und Protokolle.
 | *(ohne Argumente)* | Dauerlauf im Vordergrund — praktisch zum Beobachten |
 | `--once` | Ein Durchlauf, dann beenden. Zum Prüfen einer Installation. |
 | `--install` / `--uninstall` | Dienst und Updater-Task einrichten bzw. entfernen (Administratorrechte) |
+| `--uninstall --purge` | Zusätzlich das Datenverzeichnis mit Identität, Warteschlange und Protokollen |
 | `--updater` | Ein Updater-Lauf. Wird vom geplanten Task aufgerufen, nicht von Hand. |
 
 > `--once` greift auf dieselbe Warteschlange zu wie der Dienst. Läuft der
@@ -61,7 +81,7 @@ liegen Geräteidentität und Protokolle.
 
 Im Dienstbetrieb läuft ein Durchlauf:
 
-- **alle 240 Minuten** — der Wert kommt aus den Einstellungen des Backends und
+- **alle 60 Minuten** — der Wert kommt aus den Einstellungen des Backends und
   geht mit jeder Check-in-Antwort mit; `CheckIntervalMinutes` ist nur der
   Rückfall, bis sich das Gerät zum ersten Mal gemeldet hat,
 - **einmalig 2 Minuten nach Dienststart** (`StartupDelaySeconds`) — nicht sofort,
@@ -103,7 +123,7 @@ Drei Quellen, die einander in dieser Reihenfolge überschreiben:
 | `Agent:BackendUrl` | `--backend-url` | — | Basisadresse des Backends. Pflicht. |
 | `Agent:EnrollmentToken` | `--enrollment-token` | — | Nur bis zur erstmaligen Registrierung nötig. |
 | `Agent:DataDirectory` | `--data-directory` | `%ProgramData%\WiUpMo` | |
-| `Agent:CheckIntervalMinutes` | `--interval-minutes` | 240 | Abstand regulärer Durchläufe. Wird vom Wert aus den Backend-Einstellungen überstimmt, sobald einer vorliegt. |
+| `Agent:CheckIntervalMinutes` | `--interval-minutes` | 60 | Abstand regulärer Durchläufe. Wird vom Wert aus den Backend-Einstellungen überstimmt, sobald einer vorliegt. |
 | `Agent:StartupDelaySeconds` | — | 120 | Wartezeit nach Dienststart. |
 | `Agent:NetworkDebounceMinutes` | — | 5 | Mindestabstand netzwerkausgelöster Durchläufe. |
 | `Agent:QueueMaxSnapshots` | — | 200 | Obergrenze der Warteschlange. |

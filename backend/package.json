@@ -12,7 +12,8 @@
     "pnpm": ">=11"
   },
   "scripts": {
-    "build": "nest build",
+    "//build": "Die Migrationspruefung laeuft mit: Eine nicht eingetragene Migration wird nie ausgefuehrt und faellt sonst erst in Produktion auf. Im Image-Build bricht es damit ab, bevor es jemanden trifft.",
+    "build": "nest build && node scripts/check-migrations.mjs",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/src/main.js",

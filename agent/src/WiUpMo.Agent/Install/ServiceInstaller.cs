@@ -4,6 +4,7 @@ using System.ServiceProcess;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using WiUpMo.Agent.Update;
 
 namespace WiUpMo.Agent.Install;
 
@@ -44,7 +45,12 @@ public static class ServiceInstaller
 
         string source = Environment.ProcessPath
             ?? throw new InvalidOperationException("Der eigene Programmpfad ist nicht ermittelbar.");
-        string target = Path.Combine(InstallDirectory, Path.GetFileName(source));
+
+        // Fester Zielname, nicht der der Quelldatei: Die heruntergeladene Datei
+        // heisst `wiupmo-agent-0.5.0.exe`, Selbst-Update und Updater arbeiten
+        // aber mit festen Namen. Uebernaehme man den Namen der Quelle, liefe der
+        // Dienst zwar, koennte sich aber nie selbst aktualisieren.
+        string target = Path.Combine(InstallDirectory, AgentPaths.ServiceFileName);
 
         bool exists = ServiceExists();
         if (exists)
@@ -112,7 +118,16 @@ public static class ServiceInstaller
         return 0;
     }
 
-    public static int Uninstall(AgentOptions options)
+    /// <summary>
+    /// Entfernt Task, Dienst und Programmverzeichnis. Mit <paramref name="purge"/>
+    /// zusaetzlich das Datenverzeichnis samt Identitaet und Protokollen.
+    ///
+    /// Die Trennung ist Absicht: Nach einer gewoehnlichen Deinstallation soll
+    /// eine erneute Installation dasselbe Geraet bleiben — die Identitaet liegt
+    /// im Datenverzeichnis. Wer wirklich alles los sein will, sagt es
+    /// ausdruecklich.
+    /// </summary>
+    public static int Uninstall(AgentOptions options, bool purge)
     {
         if (!IsElevated())
         {
@@ -136,12 +151,110 @@ public static class ServiceInstaller
             Console.WriteLine($"Dienst '{ServiceName}' war nicht vorhanden.");
         }
 
-        // Programmverzeichnis raeumen, Datenverzeichnis nicht: dort liegen
-        // Identitaet und Protokolle. Wer sie loeschen will, tut das bewusst.
-        Console.WriteLine(
-            $"Das Datenverzeichnis {options.DataDirectory} bleibt bestehen " +
-            "(Geraeteidentitaet und Protokolle).");
+        RemoveEventSource();
+        RemoveInstallDirectory();
+
+        if (purge)
+        {
+            RemoveDirectory(options.DataDirectory, "Datenverzeichnis");
+        }
+        else
+        {
+            Console.WriteLine(
+                $"Das Datenverzeichnis {options.DataDirectory} bleibt bestehen " +
+                "(Geraeteidentitaet und Protokolle). Mit --purge wird es mitentfernt.");
+        }
+
         return 0;
+    }
+
+    /// <summary>
+    /// Raeumt das Programmverzeichnis.
+    ///
+    /// Die gerade laufende Datei bleibt zwangslaeufig liegen — Windows haelt sie
+    /// offen. Das ist der Normalfall, weil man die Deinstallation ueblicherweise
+    /// mit der installierten EXE aufruft; die Meldung sagt dann, was noch zu tun
+    /// ist, statt einen Fehler zu werfen.
+    /// </summary>
+    private static void RemoveInstallDirectory()
+    {
+        string? laufende = Environment.ProcessPath;
+
+        if (!Directory.Exists(InstallDirectory))
+        {
+            return;
+        }
+
+        bool rest = false;
+
+        foreach (string datei in Directory.GetFiles(InstallDirectory))
+        {
+            if (string.Equals(datei, laufende, StringComparison.OrdinalIgnoreCase))
+            {
+                rest = true;
+                continue;
+            }
+
+            try
+            {
+                File.Delete(datei);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine($"  {datei} liess sich nicht entfernen: {ex.Message}");
+                rest = true;
+            }
+        }
+
+        if (rest)
+        {
+            Console.WriteLine(
+                $"Das Programmverzeichnis {InstallDirectory} enthaelt noch die gerade laufende " +
+                "Datei. Sie laesst sich nach dem Beenden loeschen:");
+            Console.WriteLine($"  Remove-Item -Recurse -Force '{InstallDirectory}'");
+            return;
+        }
+
+        RemoveDirectory(InstallDirectory, "Programmverzeichnis");
+    }
+
+    private static void RemoveDirectory(string path, string was)
+    {
+        if (!Directory.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(path, recursive: true);
+            Console.WriteLine($"{was} {path} entfernt.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"{was} {path} liess sich nicht entfernen: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Ohne das bleibt die Quelle in der Registrierung stehen. Sie stoert nicht,
+    /// aber "komplett entfernt" heisst komplett.
+    /// </summary>
+    private static void RemoveEventSource()
+    {
+        try
+        {
+            if (EventLog.SourceExists(EventSourceName))
+            {
+                EventLog.DeleteEventSource(EventSourceName);
+            }
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException
+                                      or InvalidOperationException
+                                      or ArgumentException)
+        {
+            Console.Error.WriteLine($"Die Ereignisquelle blieb bestehen: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -216,7 +329,7 @@ public static class ServiceInstaller
     /// </summary>
     private static void InstallUpdater(string serviceExe)
     {
-        string updater = Path.Combine(Path.GetDirectoryName(serviceExe)!, "wiupmo-updater.exe");
+        string updater = Path.Combine(Path.GetDirectoryName(serviceExe)!, AgentPaths.UpdaterFileName);
         File.Copy(serviceExe, updater, overwrite: true);
 
         int result = Run(

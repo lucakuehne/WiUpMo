@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { config as loadDotenv } from 'dotenv';
 import { DataSource, DataSourceOptions } from 'typeorm';
+import { AgentDiagnostics1789200000000 } from '../../migrations/1789200000000-AgentDiagnostics.js';
 import { AgentReleaseSize1788480000000 } from '../../migrations/1788480000000-AgentReleaseSize.js';
 import { InitialSchema1788307200000 } from '../../migrations/1788307200000-InitialSchema.js';
 import { ALL_ENTITIES } from './entities/index.js';
@@ -36,12 +37,21 @@ export const dataSourceOptions: DataSourceOptions = {
   entities: ALL_ENTITIES,
 
   /**
-   * Migrationen werden namentlich importiert statt ueber ein Glob eingesammelt.
-   * Unter ESM ist das Glob-Laden von TypeORM unzuverlaessig, und der explizite
-   * Import hat ohnehin den Vorteil, dass eine vergessene Registrierung schon
-   * beim Kompilieren auffaellt statt erst beim Deployment.
+   * Migrationen werden namentlich importiert statt ueber ein Glob eingesammelt:
+   * Unter ESM ist das Glob-Laden von TypeORM unzuverlaessig.
+   *
+   * Hier stand einmal, der explizite Import lasse eine vergessene Registrierung
+   * "schon beim Kompilieren auffallen". Das ist falsch — eine nicht
+   * eingetragene Datei uebersetzt anstandslos, sie wird nur nie ausgefuehrt.
+   * Genau das ist passiert: Die Spalte fehlte in Produktion, und die
+   * Geraeteabfrage samt Check-in brach ab. Dafuer gibt es jetzt
+   * `scripts/check-migrations.mjs`, das im Build laeuft.
    */
-  migrations: [InitialSchema1788307200000, AgentReleaseSize1788480000000],
+  migrations: [
+    InitialSchema1788307200000,
+    AgentReleaseSize1788480000000,
+    AgentDiagnostics1789200000000,
+  ],
   migrationsTableName: 'schema_migrations',
 
   /**

@@ -129,7 +129,7 @@ export const MAX_CHECK_INTERVAL_MINUTES = 360;
 
 export const DEFAULT_AGENT: AgentSettings = {
   enrollmentToken: '',
-  checkIntervalMinutes: 240,
+  checkIntervalMinutes: 60,
 };
 
 export interface AdSettings {

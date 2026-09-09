@@ -24,12 +24,30 @@ public sealed class AgentPaths
         DataDirectory = dataDirectory;
     }
 
+    /// <summary>
+    /// Der Name, unter dem der Dienst installiert wird — unabhaengig davon, wie
+    /// die aufgerufene Datei heisst.
+    ///
+    /// Das ist keine Kosmetik: Selbst-Update und Updater arbeiten mit festen
+    /// Dateinamen. Kopierte <c>--install</c> die Quelle unter ihrem eigenen
+    /// Namen — etwa <c>wiupmo-agent-0.5.0.exe</c>, wie die Datei aus dem
+    /// Download heisst —, liefe der Dienst zwar, aber der Tausch griffe ins
+    /// Leere, und der Notfall-Abbruch faende den Prozess nicht mehr. Beides
+    /// faellt erst beim ersten Selbst-Update auf, also spaet.
+    /// </summary>
+    public const string ServiceFileName = "wiupmo-agent.exe";
+
+    /// <summary>Der Prozessname ohne Endung, fuer <c>Process.GetProcessesByName</c>.</summary>
+    public const string ServiceProcessName = "wiupmo-agent";
+
+    public const string UpdaterFileName = "wiupmo-updater.exe";
+
     public string InstallDirectory { get; }
 
     public string DataDirectory { get; }
 
     /// <summary>Das Dienst-Binary — das einzige, was getauscht wird.</summary>
-    public string ServiceExe => Path.Combine(InstallDirectory, "wiupmo-agent.exe");
+    public string ServiceExe => Path.Combine(InstallDirectory, ServiceFileName);
 
     /// <summary>Die heruntergeladene, gepruefte neue Fassung.</summary>
     public string StagedExe => Path.Combine(InstallDirectory, "wiupmo-agent.new.exe");
@@ -38,7 +56,7 @@ public sealed class AgentPaths
     public string BackupExe => Path.Combine(InstallDirectory, "wiupmo-agent.bak.exe");
 
     /// <summary>Die Kopie, die der Updater-Task ausfuehrt.</summary>
-    public string UpdaterExe => Path.Combine(InstallDirectory, "wiupmo-updater.exe");
+    public string UpdaterExe => Path.Combine(InstallDirectory, UpdaterFileName);
 
     public string MarkerPath => Path.Combine(DataDirectory, "update.json");
 }

@@ -207,7 +207,7 @@ public static class Updater
 
         bool killed = false;
 
-        foreach (Process process in Process.GetProcessesByName("wiupmo-agent"))
+        foreach (Process process in Process.GetProcessesByName(AgentPaths.ServiceProcessName))
         {
             using (process)
             {
