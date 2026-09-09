@@ -12,6 +12,13 @@ import type {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChartCanvas from '@/components/ChartCanvas.vue';
 import SourceLegend from '@/components/SourceLegend.vue';
@@ -27,6 +34,24 @@ const agentVersions = ref<AgentVersionCount[]>([]);
 const sources = ref<UpdateSourcesReport | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
+
+/**
+ * Der Zeitraum gilt für beide Verlaufsdiagramme; die übrigen Karten zeigen den
+ * aktuellen Stand und sind davon unberührt.
+ *
+ * Die Agent-Abdeckung kann weniger Tage zurückliefern als angefragt: Was sich
+ * mangels aufbewahrter Check-ins nicht mehr belegen lässt, zeigt sie erst gar
+ * nicht. Deshalb steht die tatsächliche Spanne an der Karte.
+ */
+const rangeDays = ref(90);
+
+const rangeOptions = [
+  { value: '7', label: '7 Tage' },
+  { value: '30', label: '30 Tage' },
+  { value: '90', label: '90 Tage' },
+  { value: '180', label: '180 Tage' },
+  { value: '365', label: '1 Jahr' },
+];
 
 interface Tile {
   label: string;
@@ -263,24 +288,39 @@ const sourceOptions = computed(() => ({
   },
 }));
 
+/** Nur die beiden Verläufe — sie allein hängen am Zeitraum. */
+async function loadTrends(): Promise<void> {
+  try {
+    const [t, a] = await Promise.all([
+      get<TrendPoint[]>('/api/reports/trend', { days: rangeDays.value }),
+      get<AgentTrendPoint[]>('/api/reports/agent-trend', { days: rangeDays.value }),
+    ]);
+
+    trend.value = t;
+    agentTrend.value = a;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Die Verläufe konnten nicht geladen werden.';
+  }
+}
+
+function onRangeChange(value: unknown): void {
+  rangeDays.value = Number(value) || 90;
+  void loadTrends();
+}
+
 async function load(): Promise<void> {
   try {
-    const [s, t, a, v, src] = await Promise.all([
+    const [s, v, src] = await Promise.all([
       get<Summary>('/api/reports/summary'),
-      get<TrendPoint[]>('/api/reports/trend', { days: 90 }),
-      // 30 Tage, nicht 90: Die Einstufung „stumm" hängt an der
-      // Check-in-Historie, und die unterliegt der Aufbewahrungsfrist. Innerhalb
-      // eines Monats ist der Verlauf belastbar.
-      get<AgentTrendPoint[]>('/api/reports/agent-trend', { days: 30 }),
       get<AgentVersionCount[]>('/api/reports/agent-versions'),
       get<UpdateSourcesReport>('/api/reports/update-sources'),
     ]);
 
     summary.value = s;
-    trend.value = t;
-    agentTrend.value = a;
     agentVersions.value = v;
     sources.value = src;
+
+    await loadTrends();
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Das Dashboard konnte nicht geladen werden.';
   } finally {
@@ -293,7 +333,21 @@ onMounted(load);
 
 <template>
   <div class="mx-auto max-w-[1600px] px-5 py-6">
-    <h1 class="mb-4 text-xl font-semibold">Dashboard</h1>
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <h1 class="text-xl font-semibold">Dashboard</h1>
+
+      <div class="flex items-center gap-2">
+        <span class="text-muted-foreground text-sm">Zeitraum</span>
+        <Select :model-value="String(rangeDays)" @update:model-value="onRangeChange">
+          <SelectTrigger class="w-32"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem v-for="option in rangeOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
 
     <Alert v-if="error" variant="destructive" class="mb-4">
       <AlertDescription>{{ error }}</AlertDescription>
@@ -399,9 +453,12 @@ onMounted(load);
           <CardTitle>Agent-Abdeckung über die Zeit</CardTitle>
           <CardDescription>
             Der Bestand an jedem Tag, aufgeteilt nach Zustand — aus den Zeitpunkten am Gerät und
-            der Check-in-Historie gemessen, nicht geschätzt. Gezeigt werden 30 Tage: Weiter zurück
-            liesse sich „stumm" nicht mehr belegen, weil die Check-ins der Aufbewahrungsfrist
-            unterliegen.
+            der Check-in-Historie gemessen, nicht geschätzt.
+            <template v-if="agentTrend.length > 0 && agentTrend.length < rangeDays">
+              Gezeigt werden {{ agentTrend.length }} Tage statt {{ rangeDays }}: Weiter zurück
+              liesse sich „stumm" nicht mehr belegen, weil die Check-ins der Aufbewahrungsfrist
+              unterliegen.
+            </template>
           </CardDescription>
         </CardHeader>
         <CardContent>

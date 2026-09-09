@@ -50,7 +50,7 @@ public sealed class AgentOptions
     /// Nur der Rueckfall: Sobald sich das Geraet einmal gemeldet hat, gilt der
     /// Wert aus den Einstellungen des Backends (siehe <see cref="CheckinSchedule"/>).
     /// </summary>
-    public int CheckIntervalMinutes { get; set; } = 240;
+    public int CheckIntervalMinutes { get; set; } = 120;
 
     /// <summary>
     /// Wartezeit nach dem Dienststart bis zum ersten Durchlauf. Der Dienst

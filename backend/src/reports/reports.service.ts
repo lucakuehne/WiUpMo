@@ -507,6 +507,20 @@ export class ReportsService {
    */
   async agentTrend(days: number): Promise<AgentTrendPointDto[]> {
     const { staleAgentDays } = await this.settings.getThresholds();
+    const { checkinDays } = await this.settings.getRetention();
+
+    /**
+     * Der Zeitraum wird auf das begrenzt, was sich belegen laesst.
+     *
+     * "Stumm" heisst: seit mehr als `staleAgentDays` keine Meldung. Nachweisen
+     * laesst sich das nur, solange die Check-ins dieser Zeit noch da sind. An
+     * einem Tag, der `checkinDays - staleAgentDays` zurueckliegt, ist ein
+     * fehlender Nachweis gerade noch eindeutig — davor koennte er auch der
+     * Aufbewahrungsfrist zum Opfer gefallen sein, und die Kurve zeigte still
+     * zu viele stumme Geraete.
+     */
+    const belegbar = Math.max(7, checkinDays - staleAgentDays);
+    days = Math.min(days, belegbar);
 
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `WITH tage AS (

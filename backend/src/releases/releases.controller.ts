@@ -10,11 +10,13 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Response } from 'express';
 import { ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { diskStorage } from 'multer';
 import { randomUUID } from 'node:crypto';
@@ -83,6 +85,27 @@ export class ReleasesController {
     }
 
     return this.releases.publish(dto.version, dto.notes, file.path);
+  }
+
+  /**
+   * Download fuer die Installation von Hand.
+   *
+   * Damit ist das Binary auch ohne eigenen Build greifbar: Das Image bringt
+   * eines mit, das Backend nimmt es auf, und von hier holt man es sich fuer
+   * `--install` auf einem neuen Rechner.
+   */
+  @Get(':id/download')
+  @ApiOperation({ summary: 'Laedt das Agent-Binary einer Version herunter.' })
+  async download(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res() response: Response,
+  ): Promise<void> {
+    const { version, path, sizeBytes } = await this.releases.openBinaryById(id);
+
+    response.header('Content-Type', 'application/octet-stream');
+    response.header('Content-Length', String(sizeBytes));
+    response.header('Content-Disposition', `attachment; filename="wiupmo-agent-${version}.exe"`);
+    response.sendFile(path);
   }
 
   @Post(':id/current')

@@ -5,16 +5,24 @@ puffert und an das Backend meldet.
 
 ## Installation
 
+Die EXE gibt es fertig im Backend: **Einstellungen → Agent-Versionen**, dort das
+Download-Symbol in der gewünschten Zeile. Sie wird mit dem Backend-Image
+ausgeliefert und beim Start aufgenommen — selbst bauen muss man dafür nichts.
+
 Ein einzelner Aufruf, unabhängig von jeder Verteilungslösung — verteilbar per
 GPO-Startskript, von Hand oder über ein beliebiges Werkzeug:
 
 ```powershell
-dotnet publish agent/src/WiUpMo.Agent/WiUpMo.Agent.csproj -c Release -r win-x64 -o agent/publish
-
-# Als Administrator:
-agent\publish\wiupmo-agent.exe --install `
+# Als Administrator, im Verzeichnis der heruntergeladenen Datei:
+.\wiupmo-agent-0.4.0.exe --install `
   --backend-url https://wium.intern:3000 `
-  --enrollment-token <Wert aus AGENT_ENROLLMENT_TOKEN>
+  --enrollment-token <Wert aus den Einstellungen>
+```
+
+Selbst übersetzen geht weiterhin, etwa für eine Vorabversion:
+
+```powershell
+dotnet publish agent/src/WiUpMo.Agent/WiUpMo.Agent.csproj -c Release -r win-x64 -o agent/publish
 ```
 
 Das richtet ein:

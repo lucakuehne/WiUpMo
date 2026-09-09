@@ -365,6 +365,24 @@ export class ReleasesService implements OnModuleInit {
     await rm(join(this.root, release.version), { recursive: true, force: true });
   }
 
+  /**
+   * Dasselbe ueber die Kennung statt ueber die Version — fuer den Download aus
+   * der Oberflaeche, wo die Zeile der Tabelle die Kennung ohnehin schon traegt.
+   */
+  async openBinaryById(id: string): Promise<{ version: string; path: string; sizeBytes: number }> {
+    const rows: Array<{ version: string }> = await this.dataSource.query(
+      'SELECT version FROM agent_releases WHERE id = $1',
+      [id],
+    );
+
+    const version = rows[0]?.version;
+    if (!version) {
+      throw new NotFoundException('Release nicht gefunden.');
+    }
+
+    return { version, ...(await this.openBinary(version)) };
+  }
+
   /** Fuer die Auslieferung an den Agent. */
   async openBinary(version: string): Promise<{ path: string; sizeBytes: number }> {
     const rows: Array<{ version: string }> = await this.dataSource.query(

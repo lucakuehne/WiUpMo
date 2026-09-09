@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Loader2, Send, Trash2, Upload } from '@lucide/vue';
+import { Download, Loader2, Send, Trash2, Upload } from '@lucide/vue';
 import { onMounted, ref, useTemplateRef } from 'vue';
 import { useRouter } from 'vue-router';
 import { toast } from 'vue-sonner';
@@ -39,6 +39,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import JobStateLegend from '@/components/JobStateLegend.vue';
 import TablePager from '@/components/TablePager.vue';
 import { formatBytes, formatDateTime } from '@/format';
 import { usePagedList } from '@/paged';
@@ -122,6 +123,16 @@ async function publish(): Promise<void> {
   } finally {
     busy.value = false;
   }
+}
+
+/**
+ * Direkte Navigation statt eines Abrufs über den API-Client: Der Browser soll
+ * die Datei speichern, nicht der Code sie im Speicher halten — bei 75 MB ist
+ * das der Unterschied zwischen einem Download und einem hängenden Reiter. Das
+ * Sitzungscookie geht dabei automatisch mit.
+ */
+function download(release: AgentRelease): void {
+  window.location.href = `/api/agent-releases/${release.id}/download`;
 }
 
 async function setCurrent(release: AgentRelease): Promise<void> {
@@ -278,7 +289,9 @@ onMounted(load);
         <CardTitle>Hinterlegte Versionen</CardTitle>
         <CardDescription>
           „Aktuell" ist die Version, auf die ein Auftrag ohne ausdrückliche Angabe zielt.
-          „Ausrollen" legt Aufträge für alle aktiven Geräte an, die nicht darauf laufen.
+          „Ausrollen" legt Aufträge für alle aktiven Geräte an, die nicht darauf laufen. Das
+          Download-Symbol liefert die EXE für eine Installation von Hand mit
+          <code>--install</code>.
         </CardDescription>
       </CardHeader>
 
@@ -329,6 +342,15 @@ onMounted(load);
                 <TableCell>
                   <div class="flex justify-end gap-1.5 whitespace-nowrap">
                     <Button
+                      variant="ghost"
+                      size="icon"
+                      class="size-8"
+                      title="Binary herunterladen"
+                      @click="download(release)"
+                    >
+                      <Download class="size-4" />
+                    </Button>
+                    <Button
                       v-if="!release.isCurrent"
                       variant="outline"
                       size="sm"
@@ -374,7 +396,9 @@ onMounted(load);
               <TableRow>
                 <TableHead>Gerät</TableHead>
                 <TableHead class="w-32">Zielversion</TableHead>
-                <TableHead class="w-40">Zustand</TableHead>
+                <TableHead class="w-40">
+                  <span class="inline-flex items-center gap-1">Status <JobStateLegend /></span>
+                </TableHead>
                 <TableHead class="w-40">Angelegt</TableHead>
                 <TableHead class="w-40">Abgeschlossen</TableHead>
                 <TableHead>Fehler</TableHead>

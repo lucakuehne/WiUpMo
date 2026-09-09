@@ -1,11 +1,5 @@
 <script setup lang="ts">
-import { CircleQuestionMark } from '@lucide/vue';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+import HelpLegend from '@/components/HelpLegend.vue';
 
 /**
  * Erklärt die Update-Quellen.
@@ -45,22 +39,5 @@ const ENTRIES = [
 </script>
 
 <template>
-  <TooltipProvider :delay-duration="150">
-    <Tooltip>
-      <TooltipTrigger
-        type="button"
-        class="text-muted-foreground hover:text-foreground align-middle transition-colors"
-        aria-label="Was bedeuten die Update-Quellen?"
-      >
-        <CircleQuestionMark class="size-3.5" />
-      </TooltipTrigger>
-
-      <TooltipContent class="w-80 space-y-1.5 p-3">
-        <p v-for="entry in ENTRIES" :key="entry.label" class="leading-snug">
-          <span class="font-semibold">{{ entry.label }}</span>
-          <span class="text-background/80"> — {{ entry.text }}</span>
-        </p>
-      </TooltipContent>
-    </Tooltip>
-  </TooltipProvider>
+  <HelpLegend :entries="ENTRIES" caption="Was bedeuten die Update-Quellen?" />
 </template>
