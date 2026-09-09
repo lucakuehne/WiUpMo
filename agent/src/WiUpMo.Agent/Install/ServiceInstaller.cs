@@ -137,7 +137,15 @@ public static class ServiceInstaller
 
         // Zuerst der Task: Liefe er noch, koennte er einen Dienst starten, den
         // wir gerade entfernen.
-        Run("schtasks.exe", "/Delete", "/TN", UpdaterTaskName, "/F");
+        //
+        // Ohne Ausgabe von schtasks: Ein nicht vorhandener Task ist bei einer
+        // Deinstallation der Normalfall, und die Rohmeldung ("FEHLER: Das System
+        // kann die angegebene Datei nicht finden") liest sich, als waere die
+        // Deinstallation gescheitert.
+        Console.WriteLine(
+            RunQuiet("schtasks.exe", "/Delete", "/TN", UpdaterTaskName, "/F") == 0
+                ? $"Geplanter Task '{UpdaterTaskName}' entfernt."
+                : $"Geplanter Task '{UpdaterTaskName}' war nicht vorhanden.");
 
         if (ServiceExists())
         {
@@ -451,7 +459,17 @@ public static class ServiceInstaller
     /// getrennten Argumenten — deshalb die Uebergabe ueber
     /// <see cref="ProcessStartInfo.ArgumentList"/> statt als Zeichenkette.
     /// </summary>
-    private static int Run(string fileName, params string[] arguments)
+    /// <summary>
+    /// Wie <see cref="Run"/>, aber ohne Ausgabe im Fehlerfall. Fuer Aufrufe, bei
+    /// denen der Aufrufer den Rueckgabewert selbst deutet.
+    /// </summary>
+    private static int RunQuiet(string fileName, params string[] arguments) =>
+        Run(fileName, quiet: true, arguments);
+
+    private static int Run(string fileName, params string[] arguments) =>
+        Run(fileName, quiet: false, arguments);
+
+    private static int Run(string fileName, bool quiet, params string[] arguments)
     {
         var startInfo = new ProcessStartInfo(fileName)
         {
@@ -472,7 +490,7 @@ public static class ServiceInstaller
         string error = process.StandardError.ReadToEnd();
         process.WaitForExit();
 
-        if (process.ExitCode != 0)
+        if (process.ExitCode != 0 && !quiet)
         {
             string detail = string.IsNullOrWhiteSpace(error) ? output : error;
             Console.Error.WriteLine(

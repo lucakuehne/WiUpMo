@@ -4,6 +4,7 @@ import { DataSource, DataSourceOptions } from 'typeorm';
 import { AgentDiagnostics1789200000000 } from '../../migrations/1789200000000-AgentDiagnostics.js';
 import { AgentReleaseSize1788480000000 } from '../../migrations/1788480000000-AgentReleaseSize.js';
 import { InitialSchema1788307200000 } from '../../migrations/1788307200000-InitialSchema.js';
+import { PostRebootPending1789600000000 } from '../../migrations/1789600000000-PostRebootPending.js';
 import { ALL_ENTITIES } from './entities/index.js';
 
 /**
@@ -51,6 +52,7 @@ export const dataSourceOptions: DataSourceOptions = {
     InitialSchema1788307200000,
     AgentReleaseSize1788480000000,
     AgentDiagnostics1789200000000,
+    PostRebootPending1789600000000,
   ],
   migrationsTableName: 'schema_migrations',
 
