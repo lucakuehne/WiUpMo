@@ -81,12 +81,15 @@ sich nicht mehr". Wer das vermeiden will, archiviert es dort von Hand.
 
 Im Dienstbetrieb läuft ein Durchlauf:
 
-- **alle 60 Minuten** — der Wert kommt aus den Einstellungen des Backends und
-  geht mit jeder Check-in-Antwort mit; `CheckIntervalMinutes` ist nur der
-  Rückfall, bis sich das Gerät zum ersten Mal gemeldet hat,
-- **einmalig 2 Minuten nach Dienststart** (`StartupDelaySeconds`) — nicht sofort,
-  weil eine Update-Suche während des Systemhochlaufs mit allem anderen um Platte
-  und Netz konkurriert,
+- **im zentral eingestellten Abstand** (Voreinstellung 60 Minuten) — der Wert
+  kommt aus den Einstellungen des Backends und geht mit jeder Check-in-Antwort
+  mit; `CheckIntervalMinutes` ist nur der Rückfall, bis sich das Gerät zum ersten
+  Mal gemeldet hat, und liegt mit 15 Minuten bewusst darunter: Ein frisch
+  installiertes Gerät soll nicht bis zu einer Stunde brauchen, bis es in der
+  Oberfläche auftaucht,
+- **einmalig 90 Sekunden nach Dienststart** (`StartupDelaySeconds`) — nicht
+  sofort, weil eine Update-Suche während des Systemhochlaufs mit allem anderen um
+  Platte und Netz konkurriert,
 - **bei Netzwerkwechseln**, entprellt auf mindestens 5 Minuten Abstand
   (`NetworkDebounceMinutes`).
 
@@ -123,8 +126,8 @@ Drei Quellen, die einander in dieser Reihenfolge überschreiben:
 | `Agent:BackendUrl` | `--backend-url` | — | Basisadresse des Backends. Pflicht. |
 | `Agent:EnrollmentToken` | `--enrollment-token` | — | Nur bis zur erstmaligen Registrierung nötig. |
 | `Agent:DataDirectory` | `--data-directory` | `%ProgramData%\WiUpMo` | |
-| `Agent:CheckIntervalMinutes` | `--interval-minutes` | 60 | Abstand regulärer Durchläufe. Wird vom Wert aus den Backend-Einstellungen überstimmt, sobald einer vorliegt. |
-| `Agent:StartupDelaySeconds` | — | 120 | Wartezeit nach Dienststart. |
+| `Agent:CheckIntervalMinutes` | `--interval-minutes` | 15 | Abstand regulärer Durchläufe. Wird vom Wert aus den Backend-Einstellungen überstimmt, sobald einer vorliegt. |
+| `Agent:StartupDelaySeconds` | — | 90 | Wartezeit nach Dienststart. |
 | `Agent:NetworkDebounceMinutes` | — | 5 | Mindestabstand netzwerkausgelöster Durchläufe. |
 | `Agent:QueueMaxSnapshots` | — | 200 | Obergrenze der Warteschlange. |
 | `Agent:QueueMaxAgeDays` | — | 30 | Höchstalter in der Warteschlange. |

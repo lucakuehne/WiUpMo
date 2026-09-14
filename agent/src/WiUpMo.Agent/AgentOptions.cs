@@ -60,14 +60,14 @@ public sealed class AgentOptions
     /// Nur der Rueckfall: Sobald sich das Geraet einmal gemeldet hat, gilt der
     /// Wert aus den Einstellungen des Backends (siehe <see cref="CheckinSchedule"/>).
     /// </summary>
-    public int CheckIntervalMinutes { get; set; } = 60;
+    public int CheckIntervalMinutes { get; set; } = 15;
 
     /// <summary>
     /// Wartezeit nach dem Dienststart bis zum ersten Durchlauf. Der Dienst
     /// startet mit dem System; eine Update-Suche waehrend des Anmeldevorgangs
     /// konkurriert mit allem anderen um Platte und Netz.
     /// </summary>
-    public int StartupDelaySeconds { get; set; } = 120;
+    public int StartupDelaySeconds { get; set; } = 90;
 
     /// <summary>
     /// Mindestabstand zwischen zwei durch Netzwerkwechsel ausgeloesten

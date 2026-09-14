@@ -68,12 +68,15 @@ export class ReleasesService implements OnModuleInit {
 
     // Einmal beim Start aufraeumen: Auftraege auf eine entfernte Version
     // schliessen sich sonst einzeln, verteilt ueber so viele Check-ins wie es
-    // sie gibt — jeder mit einer eigenen Warnung im Protokoll.
+    // sie gibt — jeder mit einer eigenen Warnung im Protokoll. Dasselbe gilt
+    // fuer die steckengebliebenen; ein Bestand daraus soll in einer Zeile
+    // verschwinden, nicht in fuenfzig.
     try {
       await this.closeOrphaned();
+      await this.abandonStalled();
     } catch (error) {
       this.logger.warn(
-        'Verwaiste Update-Auftraege liessen sich nicht aufraeumen: ' +
+        'Offene Update-Auftraege liessen sich nicht aufraeumen: ' +
           `${error instanceof Error ? error.message : String(error)}`,
       );
     }
@@ -500,6 +503,11 @@ export class ReleasesService implements OnModuleInit {
    * verarbeiten konnte.
    */
   async claimJob(deviceId: string): Promise<AgentUpdateJobDto | null> {
+    // Vor dem Holen: Steht hier noch ein Auftrag, an dem das Geraet seit
+    // Stunden nachweislich nicht vorankommt, ist er weg. Sonst bekaeme es
+    // gleich denselben wieder.
+    await this.abandonStalled(deviceId);
+
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `UPDATE agent_update_jobs j SET
          state = CASE WHEN j.state = 'pending' THEN 'delivered' ELSE j.state END
@@ -569,6 +577,67 @@ export class ReleasesService implements OnModuleInit {
     }
 
     this.logger.log(`${rows.length} Update-Auftrag/-Auftraege von Hand abgebrochen.`);
+    return rows.length;
+  }
+
+  /**
+   * Frist, nach der das Backend einen Auftrag aufgibt, an dem ein erreichbares
+   * Geraet nicht vorankommt.
+   *
+   * Laenger als die zwei Stunden, nach denen der Agent selbst aufgibt: Seine
+   * Meldung ist die genauere — er weiss, in welchem Zustand der Tausch
+   * steckengeblieben ist und ob der geplante Task laeuft. Diese Frist hier
+   * greift nur, wenn gar nichts kam.
+   */
+  private static readonly STALLED_AFTER_HOURS = 3;
+
+  /**
+   * Gibt Auftraege auf, an denen ein erreichbares Geraet nicht vorankommt.
+   *
+   * Aus `delivered` und `installing` fuehrt nur die Rueckmeldung des Agents
+   * heraus — das Backend kann von sich aus nichts feststellen. Bleibt sie aus,
+   * ist der Auftrag unsterblich, und weil {@link createJobs} jedes Geraet
+   * mit offenem Auftrag ueberspringt, faellt das Geraet damit dauerhaft aus dem
+   * Update-Betrieb. Genau das ist eingetreten: Ein Agent aelter als 0.5.0 laeuft
+   * beim Herunterladen in die Zeitueberschreitung und hat die noch nicht
+   * abgefangen — er meldet nie etwas, bei jedem Durchlauf aufs Neue.
+   *
+   * Die Bedingung ist bewusst nicht die Wanduhr allein, sondern der Kontakt:
+   * `last_seen_at` nach Ablauf der Frist heisst, das Geraet spricht mit uns und
+   * kommt trotzdem nicht weiter. Ein ausgeschalteter Laptop behaelt seinen
+   * Auftrag — bei ihm ist nichts steckengeblieben, er ist nur weg.
+   *
+   * `created_at` als Bezug, weil es keinen Zeitpunkt der Auslieferung gibt. Der
+   * liegt hoechstens einen Check-in spaeter; bei einer Frist von Stunden macht
+   * das keinen Unterschied.
+   */
+  private async abandonStalled(deviceId?: string): Promise<number> {
+    const rows: Array<{ id: string }> = await this.dataSource.query(
+      `UPDATE agent_update_jobs j SET
+         state        = 'failed',
+         completed_at = now(),
+         error        = 'Das Geraet hat sich seit der Zustellung gemeldet, aber nie eine '
+                     || 'Rueckmeldung zum Selbst-Update geschickt. Ein Agent aelter als 0.5.0 '
+                     || 'kann sich nicht selbst aktualisieren — auf diesen Geraeten muss die '
+                     || 'neue Fassung einmal von Hand mit --install eingerichtet werden.'
+       WHERE j.state IN ('delivered', 'installing')
+         AND ($1::uuid IS NULL OR j.device_id = $1)
+         AND EXISTS (
+           SELECT 1 FROM devices d
+            WHERE d.id = j.device_id
+              AND d.last_seen_at > j.created_at + make_interval(hours => $2::int)
+         )
+       RETURNING j.id`,
+      [deviceId ?? null, ReleasesService.STALLED_AFTER_HOURS],
+    );
+
+    if (rows.length > 0) {
+      this.logger.warn(
+        `${rows.length} Update-Auftrag/-Auftraege aufgegeben: Die Geraete melden sich, ` +
+          'aber das Selbst-Update kommt nicht voran.',
+      );
+    }
+
     return rows.length;
   }
 
