@@ -1,9 +1,13 @@
-# syntax=docker/dockerfile:1
-#
 # Build-Kontext ist das Repository-Wurzelverzeichnis, nicht deploy/ — der Build
-# braucht backend/ und ab Phase 4 auch frontend/.
+# braucht backend/, frontend/ und agent/.
 #
 #   docker build -f deploy/Dockerfile -t wium-backend .
+#
+# Bewusst ohne BuildKit-Eigenheiten (kein `RUN --mount`, keine syntax-Zeile):
+# Der Test-Stack baut das Image ueber den Build-Endpunkt der Docker-API auf dem
+# Server, und der arbeitet mit dem klassischen Builder. Ein Cache-Mount brachte
+# ohnehin nur lokal etwas — in GitHub Actions wandert er nicht mit in den
+# Registry-Cache, jeder Lauf begann dort mit leerem pnpm-Store.
 
 # --- Abhaengigkeiten ---------------------------------------------------------
 # Eigene Stufe, damit ein reiner Quelltext-Commit den Installationsschritt nicht
@@ -17,8 +21,7 @@ WORKDIR /app
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 COPY backend/package.json backend/pnpm-lock.yaml backend/pnpm-workspace.yaml ./
-RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 # --- Uebersetzen -------------------------------------------------------------
 FROM deps AS build
@@ -34,8 +37,7 @@ WORKDIR /app
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
-RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 COPY frontend/ ./
 RUN pnpm build
 
@@ -73,8 +75,11 @@ ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 
 COPY backend/package.json backend/pnpm-lock.yaml backend/pnpm-workspace.yaml ./
-RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile --prod
+# Der Store liegt voruebergehend unter /tmp und verschwindet im selben Schritt:
+# node_modules ist danach vollstaendig, und der Store wandert nicht als
+# zweite Kopie der Pakete ins Image.
+RUN pnpm install --frozen-lockfile --prod --store-dir=/tmp/pnpm-store \
+ && rm -rf /tmp/pnpm-store
 
 COPY --from=build /app/dist ./dist
 

@@ -1,0 +1,23 @@
+# Build-Kontext ist die Repository-Wurzel (siehe deploy/Dockerfile).
+#
+# Zwei Gruende fuer diese Liste: Lokale Artefakte wie node_modules oder dist
+# wuerden die frisch installierten im Image ueberschreiben, und der Test-Stack
+# laedt den Arbeitsstand des Laptops auf den Server hoch — Zugangsdaten sollen
+# dabei nicht im Image landen.
+
+.git
+**/node_modules
+**/dist
+**/bin
+**/obj
+agent/publish
+coverage
+
+.env
+**/.env
+**/.env.*
+!**/.env.example
+
+**/portainer-token.txt
+deploy/portainer.local.psd1
+deploy/test-results

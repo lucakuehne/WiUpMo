@@ -1,8 +1,12 @@
-# Baut das Backend-Image und legt es in der GitHub Container Registry ab.
+# Prueft den Code und baut danach das Backend-Image fuer die GitHub Container
+# Registry.
 #
 # Damit muss auf dem Docker-Host nichts mehr gebaut werden: Portainer zieht ein
 # fertiges, versioniertes Image. Der Weg ueber ghcr.io braucht keine zusaetzliche
 # Infrastruktur — die Registry gehoert zum GitHub-Konto.
+#
+# deploy/release.ps1 wartet auf genau diesen Lauf, bevor es ausrollt. Der Name
+# der Datei steht dort, also nicht umbenennen, ohne das Skript nachzuziehen.
 
 name: Backend-Image
 
@@ -12,17 +16,27 @@ on:
     # Eine Aenderung an der Dokumentation soll keinen Build ausloesen, eine am
     # Quelltext schon — und zwar auch am Agent: Sein Binary wird in dasselbe
     # Image gebaut, damit das Backend es beim Start selbst aufnehmen kann.
-    paths:
+    paths: &image-paths
       - 'backend/**'
       # Das Frontend wird in dasselbe Image gebaut und vom Backend
       # ausgeliefert — eine Aenderung dort braucht also ebenfalls ein neues Image.
       - 'frontend/**'
       - 'agent/**'
       - 'deploy/Dockerfile'
+      - '.dockerignore'
       - 'NuGet.config'
       - '.github/workflows/backend-image.yml'
     tags: ['backend/v*']
+  # Ein Pull-Request wird nur geprueft, nicht gebaut.
+  pull_request:
+    paths: *image-paths
   workflow_dispatch:
+
+# Ein neuer Push auf denselben Zweig loest den laufenden ab. Ausgerollt wird
+# ohnehin nur der juengste Stand.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
@@ -31,7 +45,44 @@ env:
   IMAGE_NAME: ${{ github.repository }}/backend
 
 jobs:
+  # Was der Image-Build selbst nicht prueft: Unit-Tests und die Erzeugung des
+  # OpenAPI-Dokuments. Uebersetzt wird hier wie im Dockerfile (node 24,
+  # corepack), damit beide Wege dieselbe pnpm-Version benutzen.
+  test:
+    runs-on: ubuntu-latest
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      - run: corepack enable
+
+      - name: Backend installieren
+        working-directory: backend
+        run: pnpm install --frozen-lockfile
+      # Prueft mit, dass jede Migration in data-source.ts eingetragen ist.
+      - name: Backend uebersetzen
+        working-directory: backend
+        run: pnpm build
+      - name: Unit-Tests
+        working-directory: backend
+        run: pnpm test
+      - name: OpenAPI-Dokument
+        working-directory: backend
+        run: pnpm check:openapi
+
+      - name: Frontend installieren
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Frontend-Typecheck
+        working-directory: frontend
+        run: pnpm typecheck
+
   build:
+    needs: test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read

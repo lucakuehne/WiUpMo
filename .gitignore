@@ -10,6 +10,12 @@ npm-debug.log*
 .env.*
 !.env.example
 
+# Steuerung vom Laptop: Portainer-Token, Serveradresse und Testergebnisse.
+# Das Repository ist oeffentlich — interne Namen gehoeren nicht hinein.
+deploy/portainer-token.txt
+deploy/portainer.local.psd1
+deploy/test-results/
+
 # .NET
 [Bb]in/
 [Oo]bj/

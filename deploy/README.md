@@ -1,6 +1,15 @@
 # Deployment
 
-Backend und PostgreSQL als Docker-Stack, betrieben über Portainer.
+Gebaut wird nur bei GitHub, auf dem Server läuft alles über Portainer. Vom
+Laptop aus wird ausschliesslich über die Portainer-API gesteuert — lokal
+laufen weder Docker noch die Anwendung.
+
+| Wer | Was |
+|---|---|
+| GitHub Actions | prüft den Code (Unit-Tests, Typecheck, OpenAPI) und baut das Image nach `ghcr.io` |
+| Portainer | zieht das Image und startet den Stack aus [`docker-compose.yml`](docker-compose.yml) |
+| [`test-stack.ps1`](test-stack.ps1) | baut den Arbeitsstand auf dem Server und testet ihn in einem eigenen Stack |
+| [`release.ps1`](release.ps1) | sichert die Datenbank, rollt aus, kontrolliert und räumt auf |
 
 ## Grundentscheid: Portainer baut nicht
 
@@ -10,379 +19,274 @@ Git-Stack braucht [Relative Path Support][relpath], und den gibt es nur in der
 Business Edition. In der Community Edition scheitern `build:`-Kontexte aus einem
 Repository seit Jahren am selben [Fehler][issue3242].
 
-Daraus folgt die Arbeitsteilung:
-
-| Wer | Was |
-|---|---|
-| GitHub Actions (oder du auf dem Host) | baut das Image und vergibt einen Versions-Tag |
-| Portainer | zieht genau diesen Tag und startet ihn |
-
-Der Nebeneffekt ist willkommen: In Portainer steht mit `BACKEND_IMAGE` immer
-sichtbar, welcher Stand läuft, und ein Rücksprung ist der vorherige Tag.
+Das Image enthält alles: Backend, das vom Backend ausgelieferte Frontend und das
+Agent-Binary. Die Datenbank läuft als eigener Dienst im selben Stack, die
+Migrationen als einmaliger Dienst `migrate` vor dem Backend.
 
 ## Dateien
 
 | Datei | Zweck |
 |---|---|
-| `docker-compose.yml` | Der Stack. Startet nur, baut nie. Diese Datei bekommt Portainer. |
-| `docker-compose.build.yml` | Ergänzung zum Bauen von Hand, für den Host oder lokal. |
-| `Dockerfile` | Mehrstufiger Build des Backends. Build-Kontext ist die Repository-Wurzel. |
+| `docker-compose.yml` | Der produktive Stack. Startet nur, baut nie. Diese Datei bekommt Portainer. |
+| `Dockerfile` | Mehrstufiger Build. Build-Kontext ist die Repository-Wurzel. |
+| `test-stack.yml` | Der Test-Stack `wiupmo-test`: eigene Datenbank, Samba-AD, Runner, Playwright. |
+| `test-stack.ps1` | Baut, startet, testet und entfernt den Test-Stack. |
+| `release.ps1` | Rollt den produktiven Stack aus. |
+| `tools/Portainer.psm1` | Helfer für die Portainer- und Docker-API: `Invoke-Portainer`, `Invoke-DockerExec`, Logs, Dateien hinein und heraus, Build. |
+| `portainer.local.example.psd1` | Vorlage für die lokale Serverkonfiguration. |
+| `docker-compose.build.yml` | Ergänzung zum Bauen von Hand, nur für einen Betrieb ohne Portainer. |
 | `.env.example` | Vorlage der Variablen. In Portainer werden sie in der Oberfläche gesetzt. |
+
+Die Testskripte liegen in [`backend/test/`](../backend/test/): `smoke.mjs`,
+`ad-smoke.mjs` mit `ad-setup.sh`, `ui-smoke.mjs`.
 
 ---
 
-## Teil 1 — Jetzt testen
+## Steuerung vom Laptop einrichten
 
-Voraussetzung: SSH-Zugang zum Docker-Host und ein GitHub-Repository mit diesem
-Stand.
+Einmalig, beides ist per `.gitignore` und `.dockerignore` ausgeschlossen —
+das Repository ist öffentlich, Serveradressen und Token gehören nicht hinein:
 
-### 1. Image besorgen
+1. **Token:** In Portainer unter *My account → Access tokens* ein API-Token
+   erzeugen und als einzige Zeile in `deploy\portainer-token.txt` ablegen.
+2. **Server:** `deploy\portainer.local.example.psd1` nach
+   `deploy\portainer.local.psd1` kopieren und Adresse, Environment-Id und
+   optional die öffentliche Adresse von WiUpMo eintragen.
 
-**Der kurze Weg:** Ist der Workflow für den gewünschten Stand gelaufen, liegt
-das Image bereits in der Registry und dieser Schritt entfällt vollständig —
-weiter bei Schritt 2, mit `BACKEND_IMAGE` aus [Teil 2](#ci-baut-portainer-zieht).
+Die Skripte laufen unter Windows PowerShell 5.1 und benutzen `curl.exe` und
+`tar.exe` aus Windows. `Invoke-RestMethod` scheitert dort am TLS-Handshake mit
+dem selbstsignierten Zertifikat von Portainer.
 
-**Auf dem Host bauen** braucht es nur, wenn ein Stand getestet werden soll, den
-die CI nicht gebaut hat:
+Die Helfer lassen sich auch direkt benutzen, etwa um im Datenbank-Container
+nachzusehen:
 
-```bash
-git clone https://github.com/<org>/WiUpMo.git
-cd WiUpMo
-docker build -f deploy/Dockerfile -t wiupmo-backend:0.1.0 .
-docker images wiupmo-backend        # sollte 0.1.0 zeigen
+```powershell
+Import-Module .\deploy\tools\Portainer.psm1
+$pg = Get-ServiceContainer -Project wiupmo -Service postgres
+(Invoke-DockerExec -Container $pg.Id -User postgres -Command @('ls', '-l', '/var/lib/postgresql/sicherungen')).Stdout
 ```
 
-> Bewusst `docker build` statt `docker compose build`: Compose wertet beim
-> Parsen die ganze Datei aus, also auch die Pflichtprüfungen auf `DB_PASSWORD`
-> und `AGENT_ENROLLMENT_TOKEN`. Zum Bauen braucht es beides nicht, und ein
-> `.env` mit Geheimnissen soll auf dem Host gar nicht erst nötig sein — die
-> Werte gehören in Portainer. `docker-compose.build.yml` ist für den Fall
-> gedacht, dass der ganze Stack ohne Portainer läuft, siehe unten.
+## Ablauf eines Releases
 
-Der Build lädt die Abhängigkeiten aus dem Netz — der Host braucht dafür einmalig
-Zugriff auf `registry.npmjs.org` und `ghcr.io`/Docker Hub.
+1. **Lokal prüfen**, so wie die CI es tut:
 
-### 2. Geheimnisse erzeugen
+   ```powershell
+   cd backend;  pnpm build; pnpm test; pnpm check:openapi
+   cd ..\frontend; pnpm typecheck
+   ```
 
-```bash
-openssl rand -base64 32   # → DB_PASSWORD
+2. **Test-Stack**, mit dem Arbeitsstand vor dem Commit:
+
+   ```powershell
+   .\deploy\test-stack.ps1 -Bauen -Migrationstest
+   ```
+
+3. **Commit und Push auf `main`.** GitHub Actions
+   ([`backend-image.yml`](../.github/workflows/backend-image.yml)) prüft und
+   baut das Image mit den Tags `main` und `sha-<commit>`; ein Git-Tag
+   `backend/v1.2.3` ergibt zusätzlich `1.2.3`.
+
+4. **Ausrollen:**
+
+   ```powershell
+   .\deploy\release.ps1
+   ```
+
+   Das Skript
+
+   - bricht ab, wenn der Arbeitsstand nicht committet oder `HEAD` nicht
+     `origin/main` ist,
+   - wartet über die GitHub-API, bis der Actions-Lauf für `HEAD` erfolgreich
+     war,
+   - sichert die Datenbank mit `pg_dump -Fc` nach
+     `/var/lib/postgresql/sicherungen/` im Datenbank-Volume und prüft die Datei
+     mit `pg_restore -l`,
+   - ruft `PUT /api/stacks/<id>/git/redeploy` mit `pullImage` und **allen
+     bisherigen Variablen** des Stacks auf — was dort fehlt, wäre danach weg,
+   - kontrolliert: Revision des Containers (Label
+     `org.opencontainers.image.revision`) gegen den Commit, Exit-Code und
+     Protokoll von `migrate`, die Startmeldung, Fehler und Warnungen im Log,
+     `/health` im Container und von aussen, die Zahl der Migrationen und
+     Geräte in der Datenbank — nur Zahlen, keine Inhalte,
+   - entfernt das alte Image, sobald kein Container es mehr benutzt.
+
+   `-NurKontrolle` führt nur die Kontrollen aus, `-ZeigeFehler` gibt die
+   Fehlerzeilen aus dem Log aus. Ein Commit, der kein neues Image braucht (nur
+   Doku oder `docker-compose.yml`), geht mit `-OhneImage`.
+
+Die Sicherungen liegen im Volume der Datenbank, nicht im Datenverzeichnis. Sie
+schützen vor einer misslungenen Migration, nicht vor dem Verlust des Servers;
+dafür braucht es zusätzlich eine Sicherung ausserhalb. Aufgeräumt wird dort
+nicht automatisch — das Skript zeigt nach jeder Sicherung Anzahl und Platz.
+
+### Zurückgehen
+
+Jeder Commit hat ein eigenes Image. Zurück zu einem früheren Stand:
+
+```powershell
+.\deploy\release.ps1 -Tag sha-1a2b3c4      # setzt BACKEND_IMAGE im Stack
+.\deploy\release.ps1 -Tag main             # hebt die Festlegung wieder auf
 ```
 
-Mehr braucht es nicht. Das Enrollment-Token für die Agents erzeugt das Backend
-beim ersten Start selbst; es steht danach im Frontend unter **Einstellungen**
-und lässt sich dort auch erneuern.
+Solange `BACKEND_IMAGE` gesetzt ist, verweigert ein normaler Aufruf das
+Ausrollen — sonst liefe weiter der festgelegte Stand, obwohl man `main` meint.
 
-### 3. Stack in Portainer anlegen
+Liegt zwischen den beiden Ständen eine Migration, kennt das ältere Image das
+neuere Schema nicht. Dann vor dem Zurückgehen die Sicherung von vor dem
+Release zurückspielen:
 
-**Stacks → Add stack**, Name z. B. `wiupmo`.
+```powershell
+Import-Module .\deploy\tools\Portainer.psm1
+$pg = Get-ServiceContainer -Project wiupmo -Service postgres
+$backend = Get-ServiceContainer -Project wiupmo -Service backend
+Invoke-Docker POST "/containers/$($backend.Id)/stop"
+Invoke-DockerExec -Container $pg.Id -User postgres -Command @('sh', '-c',
+  'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists "/var/lib/postgresql/sicherungen/$1"',
+  'restore', 'wiupmo-<zeitpunkt>-<commit>.dump')
+.\deploy\release.ps1 -Tag sha-<commit-davor>
+```
 
-Als Build-Methode **Repository**:
+## Test-Stack
+
+Ein eigener Stack `wiupmo-test` auf demselben Server, aus
+[`test-stack.yml`](test-stack.yml). Er ist von aussen nicht erreichbar, hat eine
+eigene Datenbank und feste Testzugänge, die im Repository stehen. Smoke-, AD-
+und Oberflächentests laufen **nur hier, nie gegen die Produktion**; die
+Testskripte brechen ab, wenn die Zieladresse nicht nach dem Test-Stack aussieht.
+
+```powershell
+.\deploy\test-stack.ps1 -Bauen -Migrationstest   # voller Lauf vor einem Release
+.\deploy\test-stack.ps1 -Tests Smoke -Behalten   # nur API, Stack bleibt stehen
+.\deploy\test-stack.ps1 -Entfernen               # Stack samt Volumes weg
+.\deploy\test-stack.ps1 -Aufraeumen              # dazu Test-Images und Build-Reste
+```
+
+| Schritt | Was passiert |
+|---|---|
+| `-Bauen` | Lädt ein tar des Arbeitsstands hoch — was Git kennt, ohne Ignoriertes wie `.env`, `node_modules` und das Token — und baut `wiupmo:dev` über den Build-Endpunkt der Docker-API. Das Dockerfile verzichtet deshalb auf BuildKit-Eigenheiten. |
+| `-Migrationstest` | Startet das Image der Produktion (oder `-AltesImage`), legt mit `smoke.mjs --nur-daten` ein Gerät mit Check-ins an, stellt auf das neue Image um und vergleicht die Zeilen je Tabelle sowie die Zahl der Migrationen. |
+| Vorbereitung | Datenbank leeren, `migrate` erneut starten, Backend neu starten, Testskripte in die Container legen. |
+| `Smoke` | `smoke.mjs`: Einrichtung, Anmeldung, Registrierung, Check-ins mit Installation und Fehlschlag, Nachreichung, Duplikat, Archivierung, Auswertungen, Einstellungen, Agent-Download, Auslieferung des Frontends. |
+| `Ad` | `ad-setup.sh` richtet im Samba-AD Zertifikat, OUs, Computerkonten und Benutzer ein; `ad-smoke.mjs` prüft Verbindungsprobe, Abgleich mit Archivierung und Reaktivierung und die LDAP-Anmeldung mit verschachtelter Gruppenfreigabe. |
+| `Ui` | `ui-smoke.mjs` im Playwright-Container: alle Seiten hell, dunkel und schmal, Fehler im Browser. Bildschirmfotos landen in `deploy\test-results\<zeitpunkt>\`. |
+| Ende | Ergebnisliste, danach wird der Stack samt Volumes entfernt — ausser mit `-Behalten`. |
+
+Der Server hat wenig freien Speicher; die Dienste des Test-Stacks tragen
+deshalb Speichergrenzen. `-Aufraeumen` entfernt `wiupmo:dev`, die Images von
+Playwright, Samba und dem .NET-SDK sowie ungetaggte Zwischenstufen des Builders.
+Was ein Container noch benutzt, lässt Docker stehen; `postgres:18-alpine`
+gehört der Produktion und wird nie angefasst.
+
+---
+
+## Stack in Portainer anlegen
+
+Einmalig. **Stacks → Add stack**, Name `wiupmo`, Build-Methode **Repository**:
 
 | Feld | Wert |
 |---|---|
 | Repository URL | `https://github.com/<org>/WiUpMo` |
 | Repository reference | `refs/heads/main` |
 | Compose path | `deploy/docker-compose.yml` |
-| Authentication | einschalten, falls das Repository privat ist |
+| Authentication | nur bei einem privaten Repository |
 
-Für ein privates GitHub-Repository erwartet Portainer **Basic**-Authentifizierung:
-Benutzername plus ein Personal Access Token als Passwort — das Token gehört ins
-Passwortfeld, nicht in die URL.
-
-Darunter unter **Environment variables** setzen:
+Darunter unter **Environment variables**:
 
 ```
-DB_PASSWORD=<erzeugter Wert>
+DB_PASSWORD=<openssl rand -base64 32>
 ```
 
-Mehr ist nicht nötig — alles Übrige hat brauchbare Standardwerte, `BACKEND_IMAGE`
-eingeschlossen. AD-Anbindung, Schwellwerte und das Enrollment-Token werden im
-Frontend unter **Einstellungen** gepflegt, nicht hier. Nach Bedarf zusätzlich:
+Mehr ist nicht nötig — alles Übrige hat brauchbare Standardwerte. AD-Anbindung,
+Schwellwerte und das Enrollment-Token werden im Frontend unter
+**Einstellungen** gepflegt. Nach Bedarf zusätzlich:
 
 | Variable | Wann |
 |---|---|
-| `HOST_PORT` | Auf dem Host liegt schon etwas auf 3000. Im Container bleibt es 3000, nur die Veröffentlichung wandert. |
+| `HOST_PORT` | Auf dem Host liegt schon etwas auf 3000. Im Container bleibt es 3000. |
 | `BIND_ADDRESS` | `127.0.0.1`, sobald ein Reverse Proxy davorsteht. |
-| `BACKEND_IMAGE` | Eine feste Version statt `:main` (produktiv). |
-| `DB_USER`, `DB_NAME` | Abweichend von `wiupmo`. Nur beim allerersten Start wirksam — danach steckt es im Volume. |
+| `BACKEND_IMAGE` | Setzt `release.ps1 -Tag …`; von Hand nur in Ausnahmefällen. |
+| `DB_USER`, `DB_NAME` | Abweichend von `wiupmo`. Nur beim allerersten Start wirksam. |
 
-> **„Re-pull image"** nur ankreuzen, wenn `BACKEND_IMAGE` auf die Registry
-> zeigt. Bei einem lokal auf dem Host gebauten Image ginge der Pull-Versuch an
-> Docker Hub und schlüge fehl.
+Solange das Repository öffentlich ist, ist es auch das Paket in `ghcr.io` —
+Portainer zieht das Image ohne Zugangsdaten. Wird es privat, braucht Portainer
+unter **Registries** einen Eintrag für `ghcr.io` mit einem Token
+(`read:packages`).
 
-Dann **Deploy the stack**.
+Danach zeigt der Stack vier Container. Dass `migrate` und `prepare-releases`
+als *exited* dastehen, ist der Normalfall — beide laufen einmal durch.
+`.\deploy\release.ps1 -NurKontrolle` prüft den Rest.
 
-### 3a. Stack neu anlegen, ohne die Daten zu verlieren
+Den ersten Agent meldet man mit dem Aufruf an, der im Frontend unter
+**Einstellungen → Agent-Registrierung** zum Kopieren steht.
 
-Muss der Stack einmal neu angelegt werden, entscheidet sich alles an zwei
-Werten. Beide **vor** dem Entfernen des alten Stacks notieren:
+### Stack neu anlegen, ohne die Daten zu verlieren
 
-1. **Denselben Stack-Namen verwenden.** Compose stellt den Projektnamen den
-   Volumes voran; aus `wiupmo` werden `wiupmo_postgres-data` und
-   `wiupmo_agent-releases`. Ein anderer Name erzeugt leere Volumes — Datenbank
-   weg, Geräte weg, Historie weg. Die alten Volumes lägen dann noch da, nur
-   benutzt sie niemand mehr.
-2. **Dasselbe `DB_PASSWORD` verwenden.** PostgreSQL setzt das Passwort nur beim
-   allerersten Start aus `POSTGRES_PASSWORD`; danach steht es in der Datenbank.
-   Ein neu erzeugtes Passwort führt an einem bestehenden Volume zu
+Es entscheidet sich an zwei Werten, beide **vor** dem Entfernen notieren:
+
+1. **Derselbe Stack-Name.** Compose stellt ihn den Volumes voran; aus `wiupmo`
+   werden `wiupmo_postgres-data` und `wiupmo_agent-releases`. Ein anderer Name
+   erzeugt leere Volumes — Geräte und Historie wären scheinbar weg.
+2. **Dasselbe `DB_PASSWORD`.** PostgreSQL setzt das Passwort nur beim
+   allerersten Start; ein neues führt an einem bestehenden Volume zu
    `password authentication failed`.
 
 Portainer löscht beim Entfernen eines Stacks die Container, nicht die benannten
-Volumes. Nachsehen lohnt sich trotzdem — vorher wie nachher:
-
-```bash
-sudo docker volume ls --filter name=wiupmo
-```
-
-Steht dort `wiupmo_postgres-data`, ist der Datenbestand da und der neue Stack
-übernimmt ihn, sobald Name und Passwort stimmen.
-
-### 4. Prüfen
-
-Der Stack zeigt vier Container. Dass `wiupmo-migrate-1` und
-`wiupmo-prepare-releases-1` als *exited* dastehen, ist der Normalfall und kein
-Fehler — beide laufen einmal durch und beenden sich. Das Protokoll von `migrate`
-muss `migration:run` ohne Fehler zeigen, `prepare-releases` beendet sich mit
-Code 0.
-
-```bash
-curl http://<host>:3000/health
-# {"status":"ok","database":"ok","uptimeSeconds":…}
-```
-
-Die API-Dokumentation liegt unter `http://<host>:3000/api/docs`. Ist `HOST_PORT`
-gesetzt, gilt überall dieser Port statt 3000 — auch für die Backend-Adresse des
-Agents.
-
-### 5. Ersten Agent melden lassen
-
-Das Enrollment-Token steht im Frontend unter **Einstellungen → Agent-Registrierung**;
-dort steht auch der fertige Aufrufbefehl zum Kopieren. Auf einem Windows-Rechner,
-als Administrator:
-
-```powershell
-dotnet publish agent/src/WiUpMo.Agent/WiUpMo.Agent.csproj -c Release -r win-x64 -o agent/publish
-agent\publish\wiupmo-agent.exe --install --backend-url http://<host>:3000 --enrollment-token <token>
-```
-
-Erwartete Ausgabe: eine Zeile „Registriert als Gerät …", danach „Snapshot
-übermittelt (accepted)". Kontrolle in der Datenbank:
-
-```bash
-docker exec -it wiupmo-postgres-1 psql -U wiupmo -d wiupmo \
-  -c "select hostname, os_name, os_build, last_seen_at from devices;"
-```
-
----
-
-## Teil 2 — Der dauerhafte Weg
-
-Sobald der Stand steht, sollte der Host nichts mehr selbst bauen.
-
-### CI baut, Portainer zieht
-
-[`.github/workflows/backend-image.yml`](../.github/workflows/backend-image.yml)
-baut bei jedem Commit an `backend/` ein Image und legt es unter
-`ghcr.io/<org>/wiupmo/backend` ab. Ein Tag `backend/v0.2.0` erzeugt zusätzlich
-das Image-Tag `0.2.0`. Die Registry gehört zum GitHub-Konto — es braucht keine
-zusätzliche Infrastruktur.
-
-Solange das Repository öffentlich ist, ist es auch das Paket — Portainer zieht
-das Image dann ohne Zugangsdaten. Im Stack genügt:
-
-```
-BACKEND_IMAGE=ghcr.io/lucakuehne/wiupmo/backend:0.2.0
-```
-
-Wird das Repository später privat, ist einmalig in Portainer unter
-**Registries** eine Registry `ghcr.io` mit einem GitHub-Token (Berechtigung
-`read:packages`) zu hinterlegen.
-
-**Immer einen festen Tag eintragen, nie `main`.** Der Branch-Tag wandert; welcher
-Stand tatsächlich läuft, wäre danach nicht mehr feststellbar, und ein „Re-pull"
-tauschte das Image unbemerkt aus. Für einen Zwischenstand ohne Version eignet
-sich der `sha-…`-Tag, den derselbe Workflow mitschreibt.
-
-### Aktualisieren
-
-**In der Testphase** ist `BACKEND_IMAGE` gar nicht gesetzt. Dann gilt der
-Standardwert `…/backend:main` aus der Compose-Datei, und ein Update ist:
-
-1. Änderung nach `main` pushen — die CI baut und überschreibt den Tag `main`
-2. In Portainer **Pull and redeploy**, „Re-pull image" angekreuzt
-
-Mehr nicht. Das Ankreuzen ist dabei nicht optional: ohne Re-pull benutzt Docker
-das lokal vorhandene `main` weiter, und die Änderung käme nicht an.
-
-Wer auch den Knopfdruck sparen will, aktiviert beim Stack unter *Automatic
-updates* einen Webhook und trägt ihn in den GitHub-Repository-Einstellungen ein.
-Dann redeployt Portainer nach jedem Push von selbst.
-
-**Für den produktiven Betrieb** wird stattdessen fest gepinnt:
-
-1. Version taggen: `git tag backend/v0.2.0 && git push --tags` — die CI erzeugt daraus `:0.2.0`
-2. In Portainer `BACKEND_IMAGE=ghcr.io/lucakuehne/wiupmo/backend:0.2.0` setzen
-3. **Update the stack** mit „Re-pull image"
-
-Der Unterschied ist Absicht. `main` wandert und ist deshalb bequem, solange
-schnelle Iteration zählt; sobald eine Geräteflotte daran hängt, muss aus dem
-Stack ablesbar sein, welcher Stand läuft — und ein Rücksprung ist dann der
-vorherige Versions-Tag.
-
-Geht etwas schief, ist der Rücksprung derselbe Ablauf mit dem alten Tag. Die
-Datenbank bleibt dabei unberührt — sie liegt im Volume `wiupmo_postgres-data`.
-
-> Migrationen sind nicht automatisch rückwärtskompatibel. Ein Rücksprung über
-> eine Migration hinweg braucht vorher `migration:revert`. Solange das Schema
-> nur wächst, ist das kein Thema.
-
-**GitOps-Automatik** (Stack → *Automatic updates*) ist verlockend, taugt hier
-aber nur bedingt: Sie zieht Änderungen an der Compose-Datei nach, nicht an
-`BACKEND_IMAGE` — das ist eine Portainer-Variable, kein Repository-Inhalt. Der
-Versionswechsel bleibt also ein bewusster Handgriff. Genau so soll es bei einem
-System sein, an dem eine ganze Geräteflotte hängt.
-
-### Agent-Versionen
-
-Das Image bringt den passenden Agent mit: Die Bauanleitung übersetzt ihn in
-einer eigenen Stufe für `win-x64` und legt ihn unter `/app/agent/` ab. Beim
-Start nimmt das Backend ihn auf, sofern seine Version noch nicht hinterlegt ist
-— ein Upload von Hand entfällt damit für den Regelfall.
-
-Ausgerollt wird deswegen nichts: Welche Version auf die Flotte geht, bleibt eine
-bewusste Entscheidung unter **Einstellungen → Agent-Versionen**. Die einzige
-Ausnahme ist die Erstinstallation — solange gar keine Version als aktuell
-markiert ist, wird die mitgelieferte gesetzt.
-
-`AGENT_BUNDLED_BINARY` zeigt auf die Datei; leer gesetzt schaltet die Aufnahme
-ab. Der Upload über die Oberfläche bleibt daneben bestehen, etwa für eine
-Vorabversion oder einen Rücksprung.
-
-Die hochgeladenen Agent-Binaries liegen im Volume `wiupmo_agent-releases`,
-nicht in der Datenbank. Ein `pg_dump` sichert sie also **nicht**. Sie sind
-ersetzbar — ein Release lässt sich jederzeit neu hochladen —, aber die
-Zuordnung Version → Prüfsumme steckt in der Datenbank. Geht das Volume
-verloren, zeigen die Einträge auf fehlende Dateien; das Backend antwortet dem
-Agent dann mit 404, und der Auftrag scheitert kontrolliert.
-
-```bash
-sudo docker run --rm -v wiupmo_agent-releases:/data -v "$PWD:/backup" alpine \
-  tar czf /backup/agent-releases.tar.gz -C /data .
-```
-
-**Eigentümer des Volumes.** Das Backend läuft als `node`, nicht als root. Legt
-Docker den Einhängepunkt eines neuen Volumes selbst an, gehört er root — der
-Upload scheitert dann mit `EACCES: permission denied, mkdir`. Der Dienst
-`prepare-releases` im Stack richtet das bei jedem Start; er läuft als root, tut
-nichts als `chown` und beendet sich.
-
-Ohne Neuanlage des Stacks lässt es sich auch von Hand richten:
-
-```bash
-sudo docker run --rm -v wiupmo_agent-releases:/data alpine chown -R 1000:1000 /data
-```
+Volumes.
 
 ### „A stack with the normalized name 'wiupmo' already exists"
 
-Portainer hält den Namen noch für belegt. Meist liegt es nicht an einem Eintrag
-in der Stack-Liste, sondern an Containern auf dem Host, die das Compose-Label
-des Projekts tragen — Portainer erkennt sie als *external stack* und
-beansprucht den Namen dafür. Genau der Zustand entsteht, wenn der Stack einmal
-mit `docker compose up` ausserhalb von Portainer gestartet wurde.
+Meist liegt es an Containern mit dem Compose-Label des Projekts, die
+ausserhalb von Portainer entstanden sind (`docker compose up` auf dem Host).
+Portainer erkennt sie als *external stack* und beansprucht den Namen dafür.
+Die Container entfernen, die Volumes stehen lassen, dann die Stack-Liste neu
+laden:
 
-Aufräumen ohne Datenverlust — die Volumes bleiben ausdrücklich stehen:
-
-```bash
-# Was den Namen belegt
-sudo docker ps -a --filter label=com.docker.compose.project=wiupmo
-
-# Container weg, Netz weg — Volumes NICHT anfassen
-sudo docker ps -a --filter label=com.docker.compose.project=wiupmo -q | xargs -r sudo docker rm -f
-sudo docker network rm wiupmo_default
-
-# Zur Kontrolle: die beiden Volumes muessen noch da sein
-sudo docker volume ls --filter name=wiupmo
+```powershell
+Import-Module .\deploy\tools\Portainer.psm1
+Find-Container -Project wiupmo -All | ForEach-Object { Invoke-Docker DELETE "/containers/$($_.Id)?force=1" }
 ```
 
-Danach in Portainer die Stack-Liste neu laden. Zeigt sie den Namen weiterhin,
-steht dort noch ein echter Eintrag — den über **Remove** entfernen; auch das
-lässt die benannten Volumes unberührt.
+Deshalb gilt auf dem Docker-Host: **nie `docker compose up`** für dieses
+Projekt — sonst gehört der Stack dem Host, und Portainer lässt weder Bearbeiten
+noch Redeploy zu.
 
-### Von vorn anfangen
+## Agent-Versionen
 
-Wenn der Zustand auf dem Host unklar geworden ist — halb entfernte Container,
-ein Stack ausserhalb von Portainer, ein Image mit unbekanntem Inhalt — ist das
-Aufräumen billiger als die Fehlersuche. Solange keine Geräte gemeldet haben,
-geht dabei nichts verloren.
+Das Image bringt den passenden Agent mit: Die Bauanleitung übersetzt ihn für
+`win-x64` und legt ihn unter `/app/agent/` ab. Beim Start nimmt das Backend ihn
+auf, sofern seine Version noch nicht hinterlegt ist. Welche Version auf die
+Flotte geht, bleibt eine bewusste Entscheidung unter **Einstellungen →
+Agent-Versionen** — ausser bei der Erstinstallation, solange gar keine Version
+als aktuell markiert ist.
 
-```bash
-# Alles zum Projekt entfernen, unabhaengig davon, wer es angelegt hat
-docker ps -a --filter label=com.docker.compose.project=wiupmo -q | xargs -r docker rm -f
-docker volume rm wiupmo_postgres-data wiupmo_agent-releases
-docker network rm wiupmo_default
+Hochgeladene Agent-Binaries liegen im Volume `wiupmo_agent-releases`, nicht in
+der Datenbank; ein `pg_dump` sichert sie also nicht. Sie sind ersetzbar, die
+Zuordnung Version → Prüfsumme steckt aber in der Datenbank.
 
-# Lokal gebaute Images weg, damit sie nicht unbemerkt wieder greifen
-docker rmi wiupmo-backend:0.1.0
-docker rmi ghcr.io/lucakuehne/wiupmo/backend:main
+Das Backend läuft als `node`, nicht als root. Der Dienst `prepare-releases`
+richtet deshalb bei jedem Start den Eigentümer des Volumes — ein Volume, das
+einmal als root angelegt wurde, bliebe sonst unbeschreibbar (`EACCES` beim
+Upload).
 
-# Kontrolle — hier darf nichts mehr auftauchen
-docker ps -a | grep wiupmo
-docker volume ls | grep wiupmo
-ss -lptn 'sport = :3000'
-```
-
-Danach das Image ziehen und **vor** dem Deployen prüfen, was drinsteckt:
-
-```bash
-docker pull ghcr.io/lucakuehne/wiupmo/backend:main
-docker run --rm ghcr.io/lucakuehne/wiupmo/backend:main \
-  grep -n 'design:type' dist/src/database/entities/device-secret.entity.js
-```
-
-Die Ausgabe muss `Object` enthalten, nicht `Device`. Diese eine Zeile beantwortet
-die Frage „läuft der aktuelle Stand?", bevor ein Deployment sie teuer stellt.
-
-### Von Test auf produktiv
-
-Auf derselben Maschine sind es vier Punkte:
-
-**Sicherung.** Die Datenbank ist der einzige unersetzliche Teil.
-
-```bash
-docker exec wiupmo-postgres-1 pg_dump -U wiupmo -Fc wiupmo > wiupmo-$(date +%F).dump
-```
-
-Als nächtlicher Cron-Job, Ergebnis auf ein anderes System. Ohne
-Rückspielprobe ist eine Sicherung eine Vermutung.
+## Sicherheit im Betrieb
 
 **Erreichbarkeit.** Der Agent legt sein Geräte-Secret in jeden Request; über
-HTTP liegt es im Klartext im Netz. Für den Dauerbetrieb gehört ein Reverse Proxy
-mit TLS davor, `BIND_ADDRESS=127.0.0.1` und im Agent eine `https://`-Adresse.
+HTTP liegt es im Klartext im Netz. Das Backend gehört ins Firmennetz bzw.
+hinter den VPN-Zugang, nicht ins Internet.
 
-**Zugriff auf Portainer.** Der Stack trägt `DB_PASSWORD` und
-`AGENT_ENROLLMENT_TOKEN` in seinen Variablen. Wer die Portainer-Oberfläche
-öffnen kann, kann jedes Gerät der Flotte registrieren.
+**Zugriff auf Portainer.** Der Stack trägt `DB_PASSWORD` in seinen Variablen,
+das API-Token öffnet den ganzen Docker-Server. Das Token gehört nur auf den
+Laptop, der steuert.
 
-**Token-Wechsel.** Ändert sich `AGENT_ENROLLMENT_TOKEN`, sind bereits
-registrierte Geräte davon nicht betroffen — sie arbeiten mit ihrem eigenen
-Secret weiter. Betroffen sind nur Neuinstallationen.
+**Token-Wechsel.** Ändert sich das Enrollment-Token, arbeiten registrierte
+Geräte mit ihrem eigenen Secret weiter. Betroffen sind nur Neuinstallationen.
 
 ---
 
 ## Ohne Portainer
 
-> **Nicht beides auf demselben Host.** Wird das Projekt mit `docker compose up`
-> gestartet, gehört es dem Host. Portainer erkennt es dann zwar an den
-> Compose-Labels und zeigt es an, meldet aber „This stack was created outside of
-> Portainer. Control over this stack is limited" — und lässt weder Bearbeiten
-> noch Redeploy zu. Zurück kommt man nur, indem man die Container entfernt
-> (`docker rm -f …`, das Volume behalten) und den Stack in Portainer unter
-> demselben Namen neu anlegt.
->
-> Auf dem Docker-Host mit Portainer gilt deshalb: `docker build` ja,
-> `docker compose up` nein.
-
-Auf einem Rechner ohne Portainer lässt sich derselbe Stack direkt fahren:
+Auf einem Rechner ohne Portainer lässt sich derselbe Stack direkt fahren — nie
+auf dem Host, auf dem Portainer den Stack verwaltet:
 
 ```bash
 cd deploy
