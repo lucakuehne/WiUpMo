@@ -327,14 +327,7 @@ export class LdapClient {
       url: config.url,
       timeout: config.timeoutSeconds * 1000,
       connectTimeout: config.timeoutSeconds * 1000,
-      tlsOptions: {
-        rejectUnauthorized: config.tlsRejectUnauthorized,
-        // Ist ein Zertifikat der ausstellenden Stelle hinterlegt, wird
-        // ausschliesslich dagegen geprueft. Das ist der richtige Weg bei einer
-        // internen PKI — im Gegensatz zum Abschalten der Pruefung bleibt ein
-        // untergeschobener Server erkennbar.
-        ca: config.caCertificate.trim() ? [config.caCertificate] : undefined,
-      },
+      tlsOptions: ldapTlsOptions(config),
     });
 
     try {
@@ -376,6 +369,24 @@ export class LdapClient {
       operatingSystemVersion: asString(entry.operatingSystemVersion),
     };
   }
+}
+
+/**
+ * TLS-Einstellungen fuer jede Verbindung zum Verzeichnis — Abgleich wie
+ * Anmeldung. Beide Wege muessen dasselbe pruefen; die Anmeldung hatte das
+ * hinterlegte Zertifikat einmal nicht mitgegeben und scheiterte deshalb an
+ * einer internen PKI, waehrend der Abgleich mit denselben Einstellungen lief.
+ *
+ * Ist ein Zertifikat der ausstellenden Stelle hinterlegt, wird ausschliesslich
+ * dagegen geprueft. Das ist der richtige Weg bei einer internen PKI — im
+ * Gegensatz zum Abschalten der Pruefung bleibt ein untergeschobener Server
+ * erkennbar.
+ */
+export function ldapTlsOptions(config: AdSettings): { rejectUnauthorized: boolean; ca?: string[] } {
+  return {
+    rejectUnauthorized: config.tlsRejectUnauthorized,
+    ca: config.caCertificate.trim() ? [config.caCertificate] : undefined,
+  };
 }
 
 function asString(value: unknown): string | null {

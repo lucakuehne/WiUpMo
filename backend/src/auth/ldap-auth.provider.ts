@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Client } from 'ldapts';
 import { Repository } from 'typeorm';
 import { User } from '../database/entities/index.js';
-import { LdapClient } from '../ad/ldap.client.js';
+import { LdapClient, ldapTlsOptions } from '../ad/ldap.client.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { AdSettings, isAdConfigured } from '../settings/settings.types.js';
 import { AuthProvider, AuthenticatedUser } from './auth-provider.js';
@@ -55,7 +55,7 @@ export class LdapAuthProvider implements AuthProvider {
       url: ad.url,
       timeout: ad.timeoutSeconds * 1000,
       connectTimeout: ad.timeoutSeconds * 1000,
-      tlsOptions: { rejectUnauthorized: ad.tlsRejectUnauthorized },
+      tlsOptions: ldapTlsOptions(ad),
     });
 
     try {
