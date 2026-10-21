@@ -14,6 +14,8 @@ interface Palette {
   text: string;
   muted: string;
   grid: string;
+  /** Hintergrund der Karten (`--card`), für die Fugen zwischen Segmenten. */
+  surface: string;
   series: string[];
 }
 
@@ -21,6 +23,7 @@ const LIGHT: Palette = {
   text: '#3f3f46',
   muted: '#71717a',
   grid: 'rgba(0, 0, 0, 0.08)',
+  surface: '#ffffff',
   series: ['#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#94a3b8', '#f43f5e'],
 };
 
@@ -28,6 +31,7 @@ const DARK: Palette = {
   text: '#e4e4e7',
   muted: '#a1a1aa',
   grid: 'rgba(255, 255, 255, 0.10)',
+  surface: '#171717',
   series: ['#60a5fa', '#4ade80', '#fbbf24', '#a78bfa', '#a1a1aa', '#fb7185'],
 };
 

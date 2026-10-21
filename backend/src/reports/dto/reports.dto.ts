@@ -176,6 +176,13 @@ export class AgentVersionTrendPointDto {
   devices: number;
 }
 
+/** Ein Tag und eine Quelle, aufgebaut wie der Verlauf der Agent-Versionen. */
+export class UpdateSourceTrendPointDto {
+  date: string;
+  source: UpdateSource;
+  devices: number;
+}
+
 export class TrendQueryDto {
   @toInt()
   @IsInt()

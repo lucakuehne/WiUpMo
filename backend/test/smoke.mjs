@@ -226,6 +226,12 @@ await step('Berichte', async () => {
     versions.some((p) => p.date === today && p.version === AGENT_VERSION && p.devices >= 1),
     'die Version des Testgeraets fehlt im Versionsverlauf',
   );
+
+  const sourceTrend = await api.get('/api/reports/update-source-trend?days=7');
+  assert.ok(
+    sourceTrend.some((p) => p.date === today && p.source === 'wsus' && p.devices >= 1),
+    'die Quelle des Testgeraets fehlt im Quellenverlauf',
+  );
 });
 
 // --- Einstellungen --------------------------------------------------------------

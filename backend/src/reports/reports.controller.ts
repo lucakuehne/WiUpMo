@@ -4,6 +4,7 @@ import { SessionGuard } from '../auth/session.guard.js';
 import {
   AgentTrendPointDto,
   AgentVersionTrendPointDto,
+  UpdateSourceTrendPointDto,
   AgentVersionCountDto,
   ComplianceDeviceDto,
   FailureGroupDto,
@@ -94,5 +95,11 @@ export class ReportsController {
   @ApiOperation({ summary: 'Verlauf der Agent-Versionen ueber die Zeit.' })
   agentVersionTrend(@Query() query: TrendQueryDto): Promise<AgentVersionTrendPointDto[]> {
     return this.reports.agentVersionTrend(query.days);
+  }
+
+  @Get('update-source-trend')
+  @ApiOperation({ summary: 'Verlauf der Update-Quellen ueber die Zeit.' })
+  updateSourceTrend(@Query() query: TrendQueryDto): Promise<UpdateSourceTrendPointDto[]> {
+    return this.reports.updateSourceTrend(query.days);
   }
 }

@@ -6,6 +6,7 @@ import { SettingsService } from '../settings/settings.service.js';
 import {
   AgentTrendPointDto,
   AgentVersionTrendPointDto,
+  UpdateSourceTrendPointDto,
   AgentVersionCountDto,
   ComplianceDeviceDto,
   FailureGroupDto,
@@ -594,6 +595,47 @@ export class ReportsService {
    * Geraete.
    */
   async agentVersionTrend(days: number): Promise<AgentVersionTrendPointDto[]> {
+    return (await this.latestCheckinPerDay(days, 'agent_version')).map((row) => ({
+      date: row.date,
+      version: row.value,
+      devices: row.devices,
+    }));
+  }
+
+  /**
+   * Verlauf der Update-Quellen: an jedem Tag, wie viele Geraete aus welcher
+   * Quelle bezogen.
+   *
+   * Dasselbe Verfahren wie bei den Versionen — die Quelle des letzten
+   * Check-ins bis zum Ende des Tages. Eine WSUS-Abloesung zeigt sich hier als
+   * Flaeche, die von WSUS zu Microsoft Update oder Intune wandert.
+   */
+  async updateSourceTrend(days: number): Promise<UpdateSourceTrendPointDto[]> {
+    return (await this.latestCheckinPerDay(days, 'update_source')).map((row) => ({
+      date: row.date,
+      source: row.value as UpdateSource,
+      devices: row.devices,
+    }));
+  }
+
+  /**
+   * Zaehlt je Tag die Geraete nach einem Merkmal ihres letzten Check-ins bis
+   * zum Ende des Tages.
+   *
+   * Mitgezaehlt wird, wer an dem Tag registriert und nicht archiviert war und
+   * bis dahin mindestens einmal gemeldet hat; ein stummes Geraet zaehlt mit
+   * seinem zuletzt gemeldeten Wert, denn der gilt dort vermutlich noch. Die
+   * Spalte am Geraet taugt dafuer nicht, sie kennt nur den heutigen Stand.
+   *
+   * Zurueck reicht der Verlauf hoechstens so weit wie die aufbewahrten
+   * Check-ins. Davor fehlte der Nachweis, und die Kurve zeigte still zu wenige
+   * Geraete.
+   */
+  private async latestCheckinPerDay(
+    days: number,
+    // Feste Auswahl: Der Name geht in die Abfrage, nicht als Parameter.
+    column: 'agent_version' | 'update_source',
+  ): Promise<Array<{ date: string; value: string; devices: number }>> {
     const { checkinDays } = await this.settings.getRetention();
     days = Math.min(days, checkinDays);
 
@@ -605,7 +647,7 @@ export class ReportsService {
                   interval '1 day'
                 )::date AS tag
        )
-       SELECT t.tag, letzte.agent_version, count(*) AS geraete
+       SELECT t.tag, letzte.wert, count(*) AS geraete
          FROM tage t
          JOIN devices d
            ON d.enrolled_at IS NOT NULL
@@ -614,22 +656,22 @@ export class ReportsService {
          -- Wie beim Verlauf der Abdeckung gegen die Spalte selbst verglichen,
          -- damit idx_device_checkins_device_collected greift.
          JOIN LATERAL (
-           SELECT c.agent_version
+           SELECT c.${column}::text AS wert
              FROM device_checkins c
             WHERE c.device_id = d.id
               AND c.collected_at < (t.tag + 1)::timestamptz
-              AND c.agent_version IS NOT NULL
+              AND c.${column} IS NOT NULL
             ORDER BY c.collected_at DESC
             LIMIT 1
          ) letzte ON true
-        GROUP BY t.tag, letzte.agent_version
-        ORDER BY t.tag, letzte.agent_version`,
+        GROUP BY t.tag, letzte.wert
+        ORDER BY t.tag, letzte.wert`,
       [days],
     );
 
     return rows.map((row) => ({
       date: (row.tag as Date).toISOString().slice(0, 10),
-      version: row.agent_version as string,
+      value: row.wert as string,
       devices: num(row.geraete),
     }));
   }

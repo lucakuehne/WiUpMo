@@ -297,8 +297,11 @@ function applyQueryFilters(): void {
   if (query.pendingReboot === '1') {
     pendingReboot.value = true;
   }
-  if (query.hasAgent === '0') {
-    hasAgent.value = false;
+  if (query.hasAgent === '0' || query.hasAgent === '1') {
+    hasAgent.value = query.hasAgent === '1';
+  }
+  if (typeof query.updateSource === 'string' && query.updateSource in UPDATE_SOURCE_LABELS) {
+    updateSource.value = query.updateSource as UpdateSource;
   }
   if (typeof query.ou === 'string' && query.ou !== '') {
     ou.value = query.ou;

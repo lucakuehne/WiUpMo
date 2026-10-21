@@ -229,6 +229,13 @@ export interface AgentVersionTrendPoint {
   devices: number;
 }
 
+/** Ein Tag und eine Quelle, aufgebaut wie der Versionsverlauf. */
+export interface UpdateSourceTrendPoint {
+  date: string;
+  source: UpdateSource;
+  devices: number;
+}
+
 export interface Summary {
   devicesTotal: number;
   devicesActive: number;

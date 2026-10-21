@@ -9,7 +9,9 @@ import type {
   AgentVersionTrendPoint,
   Summary,
   TrendPoint,
+  UpdateSource,
   UpdateSourcesReport,
+  UpdateSourceTrendPoint,
 } from '@/api/types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +37,7 @@ const agentTrend = ref<AgentTrendPoint[]>([]);
 const agentVersions = ref<AgentVersionCount[]>([]);
 const agentVersionTrend = ref<AgentVersionTrendPoint[]>([]);
 const sources = ref<UpdateSourcesReport | null>(null);
+const sourceTrend = ref<UpdateSourceTrendPoint[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
 
@@ -195,37 +198,24 @@ const trendOptions = computed(() => ({
 }));
 
 /**
- * Gestapelt, nicht nebeneinander: Die drei Werte sind Teile desselben
- * Bestandes. Die Gesamthöhe zeigt die Flotte, und wie sich die Fläche von rot
- * über gelb nach grün verschiebt, ist genau der Fortschritt des Rollouts.
- *
- * Reihenfolge von unten: aktiv, stumm, ohne Agent — das Erfreuliche als
- * Sockel, das zu Erledigende obenauf.
+ * Fugen in Kartenfarbe zwischen gestapelten Segmenten und Ringstücken. Sie
+ * trennen benachbarte Flächen auch dort, wo die Farben allein bei einer
+ * Farbfehlsichtigkeit nah beieinander liegen.
  */
-const agentTrendData = computed(() => ({
-  labels: agentTrend.value.map((point) => point.date.slice(5)),
-  datasets: [
-    {
-      label: 'Mit Agent, meldet sich',
-      data: agentTrend.value.map((point) => point.activeAgents),
-      backgroundColor: palette.value.series[1],
-    },
-    {
-      label: `Mit Agent, stumm (> ${summary.value?.staleAgentDays ?? 14} T)`,
-      data: agentTrend.value.map((point) => point.silentAgents),
-      backgroundColor: palette.value.series[2],
-    },
-    {
-      label: 'Ohne Agent',
-      data: agentTrend.value.map((point) => point.withoutAgent),
-      backgroundColor: palette.value.series[5],
-    },
-  ],
-}));
+const segmentGap = computed(() => ({ borderColor: palette.value.surface, borderWidth: { top: 1 } }));
+const ringGap = computed(() => ({ borderColor: palette.value.surface, borderWidth: 2 }));
 
-const agentTrendOptions = computed(() => ({
+/**
+ * Alle Verläufe sind gestapelt: Die Teile ergeben zusammen den Bestand eines
+ * Tages. Die Legende steht umgekehrt, damit sie sich von oben nach unten so
+ * liest wie der Stapel.
+ */
+const stackedOptions = computed(() => ({
   ...baseOptions.value,
   interaction: { mode: 'index' as const, intersect: false },
+  plugins: {
+    legend: { ...baseOptions.value.plugins.legend, reverse: true },
+  },
   scales: {
     x: {
       stacked: true,
@@ -241,6 +231,100 @@ const agentTrendOptions = computed(() => ({
     },
   },
 }));
+
+/** Ein Ring mit Legende darunter; ein Klick auf ein Stück führt in die Geräteliste. */
+function ringOptions(target: (index: number) => RouteLocationRaw | null) {
+  return {
+    ...baseOptions.value,
+    plugins: {
+      legend: { position: 'bottom' as const, labels: { color: palette.value.text, boxWidth: 12 } },
+    },
+    // Die Frage nach einem Anteil ist fast immer die Frage danach, welche
+    // Geräte darin stecken.
+    onClick: (_event: ChartEvent, elemente: ActiveElement[]) => {
+      const ziel = target(elemente[0]?.index ?? -1);
+      if (ziel) {
+        void router.push(ziel);
+      }
+    },
+    onHover: (event: ChartEvent, elemente: ActiveElement[]) => {
+      const element = event.native?.target as HTMLElement | null;
+      if (element) {
+        element.style.cursor = elemente.length > 0 ? 'pointer' : 'default';
+      }
+    },
+  };
+}
+
+/** Tage mit Daten — weiter zurück, als Check-ins aufbewahrt werden, reicht ein Verlauf nicht. */
+function daysWithData(points: Array<{ date: string }>): number {
+  return new Set(points.map((point) => point.date)).size;
+}
+
+/**
+ * Die drei Zustände der Agent-Abdeckung, im Ring wie im Verlauf.
+ *
+ * Reihenfolge von unten: aktiv, stumm, ohne Agent — das Erfreuliche als
+ * Sockel, das zu Erledigende obenauf. Stumm ist grau, nicht gelb: Grün neben
+ * Gelb ist bei einer Rot-Grün-Schwäche kaum zu unterscheiden (geprüft), und
+ * ein Gerät, das schweigt, ist eher ausgegraut als ein Alarm — der steht bei
+ * „ohne Agent".
+ */
+const coverage = computed(() => [
+  { label: 'Mit Agent, meldet sich', color: palette.value.series[1] },
+  {
+    label: `Mit Agent, stumm (> ${summary.value?.staleAgentDays ?? 14} T)`,
+    color: palette.value.series[4],
+  },
+  { label: 'Ohne Agent', color: palette.value.series[5] },
+]);
+
+const agentTrendData = computed(() => {
+  const values = [
+    agentTrend.value.map((point) => point.activeAgents),
+    agentTrend.value.map((point) => point.silentAgents),
+    agentTrend.value.map((point) => point.withoutAgent),
+  ];
+
+  return {
+    labels: agentTrend.value.map((point) => point.date.slice(5)),
+    datasets: coverage.value.map((state, index) => ({
+      label: state.label,
+      data: values[index],
+      backgroundColor: state.color,
+      ...segmentGap.value,
+    })),
+  };
+});
+
+/** Der heutige Stand aus denselben Zahlen wie die Kacheln. */
+const coverageData = computed(() => {
+  const s = summary.value;
+  const values = s ? [s.devicesEnrolled - s.staleAgents, s.staleAgents, s.devicesWithoutAgent] : [];
+
+  return {
+    labels: coverage.value.map((state) => state.label),
+    datasets: [
+      {
+        data: values,
+        backgroundColor: coverage.value.map((state) => state.color),
+        ...ringGap.value,
+      },
+    ],
+  };
+});
+
+const coverageOptions = computed(() =>
+  ringOptions((index) => {
+    const s = summary.value;
+    if (!s) return null;
+    return [
+      { name: 'devices', query: { hasAgent: '1' } },
+      { name: 'devices', query: { staleDays: String(s.staleAgentDays) } },
+      { name: 'devices', query: { hasAgent: '0' } },
+    ][index] ?? null;
+  }),
+);
 
 /** Versionsnummern der Reihe nach, `1.10.0` nach `1.9.0`; Zusätze wie `-beta` als Text. */
 function compareVersions(a: string, b: string): number {
@@ -311,18 +395,17 @@ const agentVersionData = computed(() => ({
     {
       data: agentVersions.value.map((entry) => entry.devices),
       backgroundColor: agentVersions.value.map((entry) => versionColor(entry.version)),
-      borderWidth: 0,
+      ...ringGap.value,
     },
   ],
 }));
 
 /**
- * Gestapelt wie die Abdeckung darüber: Die Gesamthöhe ist die Flotte, und ein
- * Rollout ist die grüne Fläche der aktuellen Version, die wächst.
+ * Die Gesamthöhe ist die Flotte, und ein Rollout ist die grüne Fläche der
+ * aktuellen Version, die wächst.
  *
  * Von unten nach oben: Ältere, dann die benannten Versionen aufsteigend — die
- * neueste liegt obenauf. Die Legende steht umgekehrt, damit sie sich von oben
- * nach unten so liest wie der Stapel.
+ * neueste liegt obenauf.
  */
 const agentVersionTrendData = computed(() => {
   const dates = [...new Set(agentVersionTrend.value.map((point) => point.date))].sort();
@@ -344,6 +427,7 @@ const agentVersionTrendData = computed(() => {
               label: 'Ältere',
               data: dates.map((date) => count(date, (version) => !versionColors.value.has(version))),
               backgroundColor: palette.value.series[OLDER_COLOR_INDEX],
+              ...segmentGap.value,
             },
           ]
         : []),
@@ -351,80 +435,103 @@ const agentVersionTrendData = computed(() => {
         label: version === currentVersion.value ? `${version} (aktuell)` : version,
         data: dates.map((date) => count(date, (v) => v === version)),
         backgroundColor: versionColor(version),
+        ...segmentGap.value,
       })),
     ],
   };
 });
 
-const agentVersionTrendOptions = computed(() => ({
-  ...agentTrendOptions.value,
-  plugins: {
-    legend: { ...baseOptions.value.plugins.legend, reverse: true },
-  },
-}));
+const agentVersionTrendDays = computed(() => daysWithData(agentVersionTrend.value));
 
-/** Tage mit Daten — weiter zurück, als Check-ins aufbewahrt werden, reicht der Verlauf nicht. */
-const agentVersionTrendDays = computed(
-  () => new Set(agentVersionTrend.value.map((point) => point.date)).size,
+const agentVersionOptions = computed(() =>
+  ringOptions((index) => {
+    const version = agentVersions.value[index]?.version;
+    return version ? { name: 'devices', query: { agentVersion: version } } : null;
+  }),
 );
 
-const agentVersionOptions = computed(() => ({
-  ...baseOptions.value,
-  plugins: {
-    legend: { position: 'bottom' as const, labels: { color: palette.value.text, boxWidth: 12 } },
-  },
-  // Ein Klick auf ein Segment führt in die Geräteliste, gefiltert auf diese
-  // Version — die Frage nach einem Anteil ist fast immer die Frage danach,
-  // welche Geräte darin stecken.
-  onClick: (_event: ChartEvent, elemente: ActiveElement[]) => {
-    const version = agentVersions.value[elemente[0]?.index ?? -1]?.version;
+/**
+ * Jede Quelle hat ihre feste Farbe, im Ring wie im Verlauf, passend zu den
+ * Abzeichen: WSUS blau, Dual Scan gelb, Microsoft Update grün. Intune trägt
+ * im Abzeichen ebenfalls Grün; im Diagramm bekommt es Violett, weil zwei
+ * Quellen nicht dieselbe Farbe tragen dürfen.
+ *
+ * Die Reihenfolge ist zugleich die des Stapels von unten nach oben — die
+ * Ablösung wandert nach oben, Unklares liegt unten. So liegen nur Farben
+ * nebeneinander, die auch bei Farbfehlsichtigkeit unterscheidbar bleiben
+ * (geprüft, hell wie dunkel).
+ */
+const SOURCE_ORDER: UpdateSource[] = ['unknown', 'dual_scan', 'wsus', 'microsoft_update', 'intune'];
 
-    if (version) {
-      void router.push({ name: 'devices', query: { agentVersion: version } });
-    }
-  },
-  onHover: (event: ChartEvent, elemente: ActiveElement[]) => {
-    const ziel = event.native?.target as HTMLElement | null;
-    if (ziel) {
-      ziel.style.cursor = elemente.length > 0 ? 'pointer' : 'default';
-    }
-  },
+const SOURCE_SERIES: Record<UpdateSource, number> = {
+  unknown: 4,
+  dual_scan: 2,
+  wsus: 0,
+  microsoft_update: 1,
+  intune: 3,
+};
+
+function sourceColor(source: UpdateSource): string {
+  return palette.value.series[SOURCE_SERIES[source]];
+}
+
+const sourceDistribution = computed(() =>
+  [...(sources.value?.distribution ?? [])].sort(
+    (a, b) => SOURCE_ORDER.indexOf(a.source) - SOURCE_ORDER.indexOf(b.source),
+  ),
+);
+
+const sourceData = computed(() => ({
+  labels: sourceDistribution.value.map((entry) => UPDATE_SOURCE_LABELS[entry.source]),
+  datasets: [
+    {
+      data: sourceDistribution.value.map((entry) => entry.devices),
+      backgroundColor: sourceDistribution.value.map((entry) => sourceColor(entry.source)),
+      ...ringGap.value,
+    },
+  ],
 }));
 
-const sourceData = computed(() => {
-  const distribution = sources.value?.distribution ?? [];
+const sourceOptions = computed(() =>
+  ringOptions((index) => {
+    const source = sourceDistribution.value[index]?.source;
+    return source ? { name: 'devices', query: { updateSource: source } } : null;
+  }),
+);
+
+const sourceTrendData = computed(() => {
+  const dates = [...new Set(sourceTrend.value.map((point) => point.date))].sort();
+  const present = SOURCE_ORDER.filter((source) => sourceTrend.value.some((point) => point.source === source));
 
   return {
-    labels: distribution.map((entry) => UPDATE_SOURCE_LABELS[entry.source]),
-    datasets: [
-      {
-        data: distribution.map((entry) => entry.devices),
-        backgroundColor: palette.value.series,
-        borderWidth: 0,
-      },
-    ],
+    labels: dates.map((date) => date.slice(5)),
+    datasets: present.map((source) => ({
+      label: UPDATE_SOURCE_LABELS[source],
+      data: dates.map(
+        (date) => sourceTrend.value.find((point) => point.date === date && point.source === source)?.devices ?? 0,
+      ),
+      backgroundColor: sourceColor(source),
+      ...segmentGap.value,
+    })),
   };
 });
 
-const sourceOptions = computed(() => ({
-  ...baseOptions.value,
-  plugins: {
-    legend: { position: 'right' as const, labels: { color: palette.value.text } },
-  },
-}));
+const sourceTrendDays = computed(() => daysWithData(sourceTrend.value));
 
 /** Nur die Verläufe — sie allein hängen am Zeitraum. */
 async function loadTrends(): Promise<void> {
   try {
-    const [t, a, v] = await Promise.all([
+    const [t, a, v, s] = await Promise.all([
       get<TrendPoint[]>('/api/reports/trend', { days: rangeDays.value }),
       get<AgentTrendPoint[]>('/api/reports/agent-trend', { days: rangeDays.value }),
       get<AgentVersionTrendPoint[]>('/api/reports/agent-version-trend', { days: rangeDays.value }),
+      get<UpdateSourceTrendPoint[]>('/api/reports/update-source-trend', { days: rangeDays.value }),
     ]);
 
     trend.value = t;
     agentTrend.value = a;
     agentVersionTrend.value = v;
+    sourceTrend.value = s;
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Die Verläufe konnten nicht geladen werden.';
   }
@@ -500,8 +607,9 @@ onMounted(load);
       </Card>
     </div>
 
+    <!-- Je Thema links der heutige Stand als Ring, rechts der Verlauf. -->
     <div class="grid gap-3 xl:grid-cols-3">
-      <Card class="xl:col-span-2">
+      <Card class="xl:col-span-3">
         <CardHeader>
           <CardTitle>Offene Updates über die Zeit</CardTitle>
           <CardDescription>
@@ -522,10 +630,64 @@ onMounted(load);
             Update-Quellen
             <SourceLegend />
           </CardTitle>
-          <CardDescription>Geräte je Quelle — der Stand der WSUS-Ablösung.</CardDescription>
+          <CardDescription>
+            Geräte je Quelle — der Stand der WSUS-Ablösung. Ein Klick auf ein Stück zeigt die
+            zugehörigen Geräte.
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <ChartCanvas type="doughnut" :data="sourceData" :options="sourceOptions" />
+          <ChartCanvas type="doughnut" :data="sourceData" :options="sourceOptions" height="16rem" />
+        </CardContent>
+      </Card>
+
+      <Card class="xl:col-span-2">
+        <CardHeader>
+          <CardTitle>Update-Quellen über die Zeit</CardTitle>
+          <CardDescription>
+            Die Quelle, die jedes registrierte Gerät an dem Tag zuletzt gemeldet hat. Eine Ablösung
+            zeigt sich als Fläche, die von WSUS nach oben zu Microsoft Update oder Intune wandert.
+            <template v-if="sourceTrendDays > 0 && sourceTrendDays < rangeDays">
+              Gezeigt werden {{ sourceTrendDays }} Tage statt {{ rangeDays }}: Weiter zurück reichen
+              die aufbewahrten Check-ins nicht.
+            </template>
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p v-if="sourceTrend.length === 0" class="text-muted-foreground text-sm">
+            Noch keine Check-ins im gewählten Zeitraum.
+          </p>
+          <ChartCanvas v-else type="bar" :data="sourceTrendData" :options="stackedOptions" height="18rem" />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Agent-Abdeckung</CardTitle>
+          <CardDescription>
+            Heute, aus denselben Zahlen wie die Kacheln oben. Ein Klick auf ein Stück zeigt die
+            zugehörigen Geräte.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ChartCanvas type="doughnut" :data="coverageData" :options="coverageOptions" height="16rem" />
+        </CardContent>
+      </Card>
+
+      <Card class="xl:col-span-2">
+        <CardHeader>
+          <CardTitle>Agent-Abdeckung über die Zeit</CardTitle>
+          <CardDescription>
+            Der Bestand an jedem Tag, aufgeteilt nach Zustand — aus den Zeitpunkten am Gerät und
+            der Check-in-Historie gemessen, nicht geschätzt.
+            <template v-if="agentTrend.length > 0 && agentTrend.length < rangeDays">
+              Gezeigt werden {{ agentTrend.length }} Tage statt {{ rangeDays }}: Weiter zurück
+              liesse sich „stumm" nicht mehr belegen, weil die Check-ins der Aufbewahrungsfrist
+              unterliegen.
+            </template>
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ChartCanvas type="bar" :data="agentTrendData" :options="stackedOptions" height="18rem" />
         </CardContent>
       </Card>
 
@@ -533,7 +695,7 @@ onMounted(load);
         <CardHeader>
           <CardTitle>Agent-Versionen</CardTitle>
           <CardDescription>
-            Was auf den aktiven Geräten läuft. Ein Klick auf ein Segment oder eine Zeile zeigt die
+            Was auf den aktiven Geräten läuft. Ein Klick auf ein Stück oder eine Zeile zeigt die
             zugehörigen Geräte; ausgerollt wird unter Einstellungen → Agent-Versionen.
           </CardDescription>
         </CardHeader>
@@ -583,24 +745,6 @@ onMounted(load);
 
       <Card class="xl:col-span-2">
         <CardHeader>
-          <CardTitle>Agent-Abdeckung über die Zeit</CardTitle>
-          <CardDescription>
-            Der Bestand an jedem Tag, aufgeteilt nach Zustand — aus den Zeitpunkten am Gerät und
-            der Check-in-Historie gemessen, nicht geschätzt.
-            <template v-if="agentTrend.length > 0 && agentTrend.length < rangeDays">
-              Gezeigt werden {{ agentTrend.length }} Tage statt {{ rangeDays }}: Weiter zurück
-              liesse sich „stumm" nicht mehr belegen, weil die Check-ins der Aufbewahrungsfrist
-              unterliegen.
-            </template>
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ChartCanvas type="bar" :data="agentTrendData" :options="agentTrendOptions" height="18rem" />
-        </CardContent>
-      </Card>
-
-      <Card class="xl:col-span-3">
-        <CardHeader>
           <CardTitle>Agent-Versionen über die Zeit</CardTitle>
           <CardDescription>
             Welche Version an jedem Tag lief — die zuletzt gemeldete jedes registrierten Geräts. Ein
@@ -622,7 +766,7 @@ onMounted(load);
             v-else
             type="bar"
             :data="agentVersionTrendData"
-            :options="agentVersionTrendOptions"
+            :options="stackedOptions"
             height="18rem"
           />
         </CardContent>
