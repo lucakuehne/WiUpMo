@@ -55,6 +55,11 @@ Import-Module (Join-Path $PSScriptRoot 'tools\Portainer.psm1') -Force
 if ($StackName -notmatch '-test$') { throw "Der Test-Stack muss auf -test enden, nicht '$StackName'." }
 
 $PlaywrightImage = 'mcr.microsoft.com/playwright:v1.64.1-noble'
+
+# Ein Build belegt voruebergehend mehrere GB. Am 21.10.2026 lief die Platte
+# des Servers nach vier Builds voll, und die produktive Datenbank konnte drei
+# Minuten lang nicht schreiben. Darunter wird nicht gebaut.
+$MinimumFreeGb = 15
 $Utf8 = New-Object System.Text.UTF8Encoding $false
 $results = [ordered]@{}
 
@@ -110,6 +115,11 @@ function Wait-TestStack {
 
 function Build-DevImage {
   Write-Step "Image $Image aus dem Arbeitsstand bauen"
+  $free = Get-ServerDiskFreeGb -Project $ProduktionsStack, $StackName
+  if ($free -lt $MinimumFreeGb) {
+    throw "Auf dem Server sind nur $free GB frei (mindestens $MinimumFreeGb). Erst aufraeumen: .\deploy\test-stack.ps1 -Aufraeumen"
+  }
+  Write-Info "$free GB frei auf dem Server"
   Push-Location $repoRoot
   try {
     # Was Git kennt oder kennen wuerde - Ignoriertes wie node_modules, .env
@@ -286,10 +296,7 @@ function Invoke-Aufraeumen {
       409 { Write-Info "bleibt (in Benutzung): $reference" }
     }
   }
-  # Ungetaggte Zwischenstufen des klassischen Builders. Docker nimmt nur, was
-  # kein Container mehr benutzt.
-  $pruned = Invoke-Docker POST "/images/prune?filters=$(ConvertTo-DockerFilter @{ dangling = @('true') })" -TimeoutSeconds 600
-  Write-Info ("{0:N0} MB freigegeben" -f ($pruned.SpaceReclaimed / 1MB))
+  Write-Info "$(Remove-DanglingImages) GB an Build-Resten freigegeben, $(Get-ServerDiskFreeGb -Project $ProduktionsStack) GB frei"
 }
 
 # --- Ablauf ---------------------------------------------------------------------
@@ -345,6 +352,12 @@ finally {
   }
   else {
     Remove-TestStack
+  }
+  # Immer, auch nach einem Abbruch: Die Zwischenstufen eines Builds braucht
+  # niemand mehr, und liegen gelassen fuellen sie die Platte des Servers.
+  if ($Bauen) {
+    try { Write-Info "$(Remove-DanglingImages) GB an Build-Resten freigegeben" }
+    catch { Write-Warning "Build-Reste liessen sich nicht entfernen: $($_.Exception.Message)" }
   }
 }
 

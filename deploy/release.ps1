@@ -264,6 +264,12 @@ function Test-Deployment([string]$Expected, $Before, [string]$OldBackendId) {
     else { Write-Bad "Healthcheck von aussen ($publicUrl) gescheitert" }
   }
 
+  # Die Datenbank liegt auf derselben Platte wie alle Images des Servers. Am
+  # 21.10.2026 lief sie voll, und PostgreSQL konnte drei Minuten nicht schreiben.
+  $free = Get-ServerDiskFreeGb -Project $StackName
+  if ($free -lt 10) { Write-Warn "Nur noch $free GB frei auf dem Server - aufraeumen (test-stack.ps1 -Aufraeumen)." }
+  else { Write-Ok "$free GB frei auf dem Server" }
+
   $now = Get-DatabaseCounts
   $expectedMigrations = $null
   if ($Expected) {

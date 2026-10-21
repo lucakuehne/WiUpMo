@@ -177,6 +177,13 @@ Playwright, Samba und dem .NET-SDK sowie ungetaggte Zwischenstufen des Builders.
 Was ein Container noch benutzt, lässt Docker stehen; `postgres:18-alpine`
 gehört der Produktion und wird nie angefasst.
 
+**Plattenplatz.** Jeder Build auf dem Server lässt mehrere GB an
+Zwischenstufen liegen, und die Platte teilt er sich mit der produktiven
+Datenbank. Nach vier Builds an einem Tag lief sie einmal voll, und PostgreSQL
+konnte drei Minuten lang nicht schreiben. Seitdem baut `-Bauen` nur bei
+mindestens 15 GB freiem Platz und entfernt die Zwischenstufen nach jedem Lauf,
+auch nach einem Abbruch; `release.ps1` warnt unter 10 GB.
+
 ---
 
 ## Stack in Portainer anlegen

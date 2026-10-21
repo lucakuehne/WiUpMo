@@ -449,6 +449,33 @@ function Remove-DockerImage([Parameter(Mandatory)][string]$Reference) {
   (Invoke-Docker DELETE "/images/$Reference" -Allow 404, 409 -Full).Status
 }
 
+<#
+  Freier Platz auf dem Dateisystem, auf dem Docker seine Daten haelt, in GB.
+
+  Die Docker-API nennt nur, was Images und Volumes belegen, nicht was frei
+  ist. Das Wurzelverzeichnis eines Containers liegt aber auf genau diesem
+  Dateisystem - `df` in einem laufenden Container beantwortet es. Gefragt
+  wird nur in Containern der genannten Projekte, nicht in fremden.
+#>
+function Get-ServerDiskFreeGb([Parameter(Mandatory)][string[]]$Project) {
+  foreach ($container in @($Project | ForEach-Object { Find-Container -Project $_ })) {
+    $run = Invoke-DockerExec -Container $container.Id -Command @('df', '-k', '/') -AllowFailure
+    if ($run.ExitCode -ne 0) { continue }
+    $line = ($run.Stdout -split "`n" | Where-Object { $_ -match '^\S+\s+\d+\s+\d+\s+\d+' } | Select-Object -First 1)
+    if ($line) { return [Math]::Round([long](($line -split '\s+')[3]) / 1MB, 1) }
+  }
+  throw 'Der freie Platz auf dem Server liess sich nicht ermitteln.'
+}
+
+<#
+  Entfernt ungetaggte Images, die kein Container benutzt - die Zwischenstufen
+  des klassischen Builders. Jeder Build laesst davon mehrere GB liegen.
+#>
+function Remove-DanglingImages {
+  $pruned = Invoke-Docker POST "/images/prune?filters=$(ConvertTo-DockerFilter @{ dangling = @('true') })" -TimeoutSeconds 600
+  [Math]::Round($pruned.SpaceReclaimed / 1GB, 1)
+}
+
 <# Entfernt die Volumes eines Test-Projekts. Fuer produktive Stacks gesperrt. #>
 function Remove-ProjectVolume([Parameter(Mandatory)][string]$Project) {
   if ($Project -notmatch '-test$') { throw "Volumes von '$Project' werden nicht angefasst - nur Test-Stacks (*-test)." }
