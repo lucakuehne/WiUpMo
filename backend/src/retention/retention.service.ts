@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { returnedRows } from '../common/query-result.js';
 import { SettingsService } from '../settings/settings.service.js';
 
 export interface RetentionResult {
@@ -97,20 +98,18 @@ export class RetentionService {
   }
 
   /**
-   * Die Abfragen tragen `RETURNING id`, damit die Anzahl aus der Laenge des
-   * Ergebnisses kommt.
+   * Die Abfragen tragen `RETURNING id`, damit die Anzahl aus der Zahl der
+   * zurueckgegebenen Zeilen kommt.
    *
-   * `dataSource.query()` reicht bei einem DELETE ohne RETURNING nur ein leeres
-   * Array durch — die Zeilenzahl waere immer 0 gewesen, die Schleife nach dem
-   * ersten Stapel stehengeblieben und die Meldung falsch. Die zurueckgegebenen
-   * Schluessel kosten wenig und sind der einzige treiberunabhaengige Weg an
-   * die Zahl.
+   * Ueber `returnedRows`: TypeORM liefert fuer ein DELETE das Paar
+   * `[zeilen, anzahl]`. Dessen Laenge ist immer 2 — die Schleife hoerte damit
+   * nach dem ersten Stapel auf, und die Meldung nannte 2 statt der Anzahl.
    */
   private async deleteInBatches(sql: string, days: number): Promise<number> {
     let total = 0;
 
     for (let batch = 0; batch < MAX_BATCHES; batch++) {
-      const rows: unknown[] = await this.dataSource.query(sql, [days]);
+      const rows = returnedRows(await this.dataSource.query(sql, [days]));
       total += rows.length;
 
       if (rows.length < BATCH_SIZE) {

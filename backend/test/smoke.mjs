@@ -236,8 +236,10 @@ await step('Schwellwerte und Aufbewahrung', async () => {
   await api.put('/api/settings/thresholds', settings.thresholds);
   await api.put('/api/settings/retention', settings.retention);
   await api.request('PUT', '/api/settings/retention', { body: { eventDays: 1 }, expect: 400 });
+  // Alles von heute - innerhalb jeder Frist, also nichts zu loeschen.
   const run = await api.post('/api/maintenance/retention');
-  assert.equal(typeof run.eventsDeleted, 'number');
+  assert.equal(run.eventsDeleted, 0);
+  assert.equal(run.checkinsDeleted, 0);
 });
 
 await step('Neues Enrollment-Token: das alte gilt nicht mehr', async () => {
@@ -254,13 +256,16 @@ await step('Erneute Registrierung: gleiche Geraete-ID, altes Secret gesperrt', a
   device = again;
 });
 
-await step('Archiviertes Geraet wird abgewiesen, wiederhergestellt nicht mehr', async () => {
+await step('Archiviert: Check-in abgewiesen; wiederhergestellt: angenommen', async () => {
   const archived = await api.post(`/api/devices/${device.deviceId}/archive`, { reason: 'Smoke-Test' });
   assert.equal(archived.status, 'archived');
+  assert.equal(archived.archivedReason, 'Smoke-Test');
   await checkin(agent, device.token, snapshot({ hostInfo, collectedAt: minutesAgo(3) }), 403);
   const restored = await api.post(`/api/devices/${device.deviceId}/restore`);
   assert.equal(restored.status, 'active');
+  assert.equal(restored.archivedReason, null);
   await checkin(agent, device.token, snapshot({ hostInfo, collectedAt: minutesAgo(2), available: [U.defender, U.late], pendingReboot: true }));
+  await api.request('POST', '/api/devices/00000000-0000-4000-8000-000000000000/archive', { body: {}, expect: 404 });
 });
 
 await step('AD-Abgleich ohne Konfiguration: 409', async () => {
@@ -279,6 +284,28 @@ await step('Mitgelieferter Agent ist hinterlegt und ladbar', async () => {
   assert.equal(res.headers.get('content-length'), String(current.sizeBytes));
   await res.body?.cancel();
   assert.ok(Array.isArray(await api.get('/api/agent-update-jobs')));
+});
+
+await step('Selbst-Update: Auftrag, Auslieferung beim Check-in, Download, Rueckmeldung', async () => {
+  const current = (await api.get('/api/agent-releases')).find((r) => r.isCurrent);
+  const created = await api.post('/api/agent-update-jobs', { deviceIds: [device.deviceId] });
+  assert.equal(created.created, 1);
+  assert.equal(created.targetVersion, current.version);
+
+  const res = await checkin(agent, device.token, snapshot({ hostInfo, collectedAt: minutesAgo(1), available: [U.defender, U.late], pendingReboot: true }));
+  assert.ok(res.agentUpdate, 'der Check-in liefert keinen Auftrag aus');
+  assert.equal(res.agentUpdate.targetVersion, current.version);
+  assert.match(res.agentUpdate.sha256, /^[0-9a-f]{64}$/);
+
+  const binary = await fetch(base + res.agentUpdate.downloadPath, { headers: { authorization: `Bearer ${device.token}` } });
+  assert.equal(binary.status, 200);
+  await binary.body?.cancel();
+
+  await agent.post('/api/agent/v1/update-result', { jobId: res.agentUpdate.jobId, state: 'done', agentVersion: current.version }, { token: device.token });
+  const jobs = await api.get(`/api/agent-update-jobs?deviceId=${device.deviceId}`);
+  assert.equal(jobs.find((j) => j.id === res.agentUpdate.jobId)?.state, 'done');
+  assert.equal((await api.get(`/api/devices/${device.deviceId}`)).agentVersion, current.version);
+  assert.equal((await api.post('/api/agent-update-jobs/cancel-open')).cancelled, 0);
 });
 
 // --- Auslieferung des Frontends -------------------------------------------------

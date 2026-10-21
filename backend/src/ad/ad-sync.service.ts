@@ -5,6 +5,7 @@ import {
   ARCHIVE_REASON_GONE,
   ARCHIVE_REASON_OUT_OF_SCOPE,
 } from '../database/archive-reasons.js';
+import { returnedRows } from '../common/query-result.js';
 import { AdSyncStatus, AdSyncTrigger, DeviceStatus } from '../database/enums.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { effectiveSearchBases, isAdConfigured } from '../settings/settings.types.js';
@@ -252,7 +253,7 @@ export class AdSyncService {
   ): Promise<number> {
     const guids = computers.map((c) => c.objectGuid);
 
-    const result: Array<{ id: string }> = await manager.query(
+    const result: unknown = await manager.query(
       `UPDATE devices d SET
          status          = 'archived',
          archived_at     = now(),
@@ -277,7 +278,7 @@ export class AdSyncService {
       [guids, ARCHIVE_REASON_GONE, ARCHIVE_REASON_OUT_OF_SCOPE, searchBases],
     );
 
-    return result.length;
+    return returnedRows(result).length;
   }
 
   private async startRun(trigger: AdSyncTrigger): Promise<string> {

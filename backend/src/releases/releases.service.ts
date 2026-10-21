@@ -14,6 +14,7 @@ import { constants, createReadStream } from 'node:fs';
 import { access, copyFile, mkdir, rename, rm, stat } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { DataSource } from 'typeorm';
+import { returnedRows } from '../common/query-result.js';
 import { AgentUpdateJobState } from '../database/enums.js';
 import {
   AgentReleaseDto,
@@ -508,7 +509,7 @@ export class ReleasesService implements OnModuleInit {
     // gleich denselben wieder.
     await this.abandonStalled(deviceId);
 
-    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+    const result: unknown = await this.dataSource.query(
       `UPDATE agent_update_jobs j SET
          state = CASE WHEN j.state = 'pending' THEN 'delivered' ELSE j.state END
        WHERE j.id = (
@@ -521,7 +522,7 @@ export class ReleasesService implements OnModuleInit {
       [deviceId],
     );
 
-    const job = rows[0];
+    const job = returnedRows<Record<string, unknown>>(result)[0];
     if (!job) {
       return null;
     }
@@ -561,7 +562,7 @@ export class ReleasesService implements OnModuleInit {
    * stattgefunden, und das Protokoll soll ihn zeigen.
    */
   async cancelJobs(id?: string): Promise<number> {
-    const rows: Array<{ id: string }> = await this.dataSource.query(
+    const result: unknown = await this.dataSource.query(
       `UPDATE agent_update_jobs SET
          state        = 'failed',
          completed_at = now(),
@@ -571,6 +572,7 @@ export class ReleasesService implements OnModuleInit {
        RETURNING id`,
       [id ?? null],
     );
+    const rows = returnedRows<{ id: string }>(result);
 
     if (id && rows.length === 0) {
       throw new NotFoundException('Auftrag nicht gefunden oder bereits abgeschlossen.');
@@ -612,7 +614,7 @@ export class ReleasesService implements OnModuleInit {
    * das keinen Unterschied.
    */
   private async abandonStalled(deviceId?: string): Promise<number> {
-    const rows: Array<{ id: string }> = await this.dataSource.query(
+    const result: unknown = await this.dataSource.query(
       `UPDATE agent_update_jobs j SET
          state        = 'failed',
          completed_at = now(),
@@ -630,6 +632,7 @@ export class ReleasesService implements OnModuleInit {
        RETURNING j.id`,
       [deviceId ?? null, ReleasesService.STALLED_AFTER_HOURS],
     );
+    const rows = returnedRows<{ id: string }>(result);
 
     if (rows.length > 0) {
       this.logger.warn(
@@ -648,7 +651,7 @@ export class ReleasesService implements OnModuleInit {
    * aus der Vergangenheit nicht bei jedem Check-in einzeln auffaellt.
    */
   private async closeOrphaned(version?: string, deviceId?: string): Promise<number> {
-    const rows: Array<{ id: string }> = await this.dataSource.query(
+    const result: unknown = await this.dataSource.query(
       `UPDATE agent_update_jobs j SET
          state        = 'failed',
          completed_at = now(),
@@ -660,6 +663,7 @@ export class ReleasesService implements OnModuleInit {
        RETURNING j.id`,
       [version ?? null, deviceId ?? null],
     );
+    const rows = returnedRows<{ id: string }>(result);
 
     if (rows.length > 0) {
       this.logger.warn(
@@ -675,7 +679,7 @@ export class ReleasesService implements OnModuleInit {
   async reportResult(deviceId: string, dto: UpdateResultDto): Promise<void> {
     const terminal = dto.state === 'done' || dto.state === 'failed';
 
-    const rows: Array<{ id: string }> = await this.dataSource.query(
+    const result: unknown = await this.dataSource.query(
       `UPDATE agent_update_jobs SET
          state        = $3,
          completed_at = CASE WHEN $4 THEN now() ELSE completed_at END,
@@ -684,6 +688,7 @@ export class ReleasesService implements OnModuleInit {
        RETURNING id`,
       [dto.jobId, deviceId, dto.state, terminal, dto.error ?? null],
     );
+    const rows = returnedRows<{ id: string }>(result);
 
     if (rows.length === 0) {
       throw new NotFoundException('Auftrag nicht gefunden.');

@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { returnedRows } from '../common/query-result.js';
 import { SqlParams, toCsv } from '../common/sql-params.js';
-import { DeviceStatus, UpdateEventType, UpdateSource, UpdateState } from '../database/enums.js';
+import { DeviceStatus, PG_ENUM, UpdateEventType, UpdateSource, UpdateState } from '../database/enums.js';
 import {
   DeviceCheckinDto,
   DeviceDetailDto,
@@ -434,18 +435,21 @@ export class DevicesService {
    * es wieder zurueck. Das ist gewollt — das AD ist die fuehrende Quelle.
    */
   async setArchived(id: string, archived: boolean, reason: string | null): Promise<DeviceDetailDto> {
-    const result: Array<{ id: string }> = await this.dataSource.query(
+    // $2 ueberall mit demselben Typ: Ohne die Angabe leitet PostgreSQL aus der
+    // Zuweisung den Enum, aus dem Vergleich mit 'archived' Text ab und lehnt
+    // die Abfrage ab ("inconsistent types deduced for parameter $2").
+    const result: unknown = await this.dataSource.query(
       `UPDATE devices SET
-         status          = $2,
-         archived_at     = CASE WHEN $2 = 'archived' THEN now() ELSE NULL END,
-         archived_reason = CASE WHEN $2 = 'archived' THEN $3 ELSE NULL END,
+         status          = $2::${PG_ENUM.deviceStatus},
+         archived_at     = CASE WHEN $2::${PG_ENUM.deviceStatus} = 'archived' THEN now() ELSE NULL END,
+         archived_reason = CASE WHEN $2::${PG_ENUM.deviceStatus} = 'archived' THEN $3 ELSE NULL END,
          updated_at      = now()
        WHERE id = $1
        RETURNING id`,
       [id, archived ? DeviceStatus.Archived : DeviceStatus.Active, reason],
     );
 
-    if (result.length === 0) {
+    if (returnedRows(result).length === 0) {
       throw new NotFoundException('Geraet nicht gefunden.');
     }
 

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/c
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { definedOnly } from '../common/defined-only.js';
 import { Setting } from '../database/entities/index.js';
 import { randomBytes } from 'node:crypto';
 import {
@@ -68,8 +69,12 @@ export class SettingsService implements OnModuleInit {
     return migrateAuthSettings(await this.read(SETTING_KEYS.auth, DEFAULT_AUTH));
   }
 
+  // Die update-Methoden bekommen die DTOs des Controllers. Dort steht jedes
+  // nicht gesendete Feld als `undefined` — definedOnly laesst es weg, sonst
+  // ueberschriebe es den gespeicherten Wert.
+
   async updateAuth(patch: Partial<AuthSettings>): Promise<AuthSettings> {
-    const next = { ...(await this.getAuth()), ...patch };
+    const next = { ...(await this.getAuth()), ...definedOnly(patch) };
 
     // Beide Wege abzuschalten wuerde jeden aussperren, ohne Weg zurueck ueber
     // die Oberflaeche. Das darf die Anwendung nicht zulassen.
@@ -136,7 +141,7 @@ export class SettingsService implements OnModuleInit {
     // Das Token laesst sich hier nicht mitaendern — dafuer gibt es einen
     // eigenen Weg, der auch eines erzeugen kann.
     const { enrollmentToken: _ignoriert, ...rest } = patch;
-    const next: AgentSettings = { ...(await this.getAgent()), ...rest };
+    const next: AgentSettings = { ...(await this.getAgent()), ...definedOnly(rest) };
 
     await this.write(SETTING_KEYS.agent, next, 'Einstellungen der Agents.');
     return next;
@@ -151,20 +156,20 @@ export class SettingsService implements OnModuleInit {
         ? current.bindPassword
         : patch.bindPassword;
 
-    const next: AdSettings = { ...current, ...patch, bindPassword };
+    const next: AdSettings = { ...current, ...definedOnly(patch), bindPassword };
     await this.write(SETTING_KEYS.ad, next, 'Anbindung an das Active Directory.');
     this.notify();
     return next;
   }
 
   async updateThresholds(patch: Partial<ThresholdSettings>): Promise<ThresholdSettings> {
-    const next = { ...(await this.getThresholds()), ...patch };
+    const next = { ...(await this.getThresholds()), ...definedOnly(patch) };
     await this.write(SETTING_KEYS.thresholds, next, 'Schwellwerte fuer Auswertungen.');
     return next;
   }
 
   async updateRetention(patch: Partial<RetentionSettings>): Promise<RetentionSettings> {
-    const next = { ...(await this.getRetention()), ...patch };
+    const next = { ...(await this.getRetention()), ...definedOnly(patch) };
     await this.write(SETTING_KEYS.retention, next, 'Aufbewahrungsfristen.');
     return next;
   }

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SessionGuard } from '../auth/session.guard.js';
+import { definedOnly } from '../common/defined-only.js';
 import { AdSyncStatus, AdSyncTrigger } from '../database/enums.js';
 import { AdSettingsDto } from '../settings/dto/settings.dto.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -150,7 +151,7 @@ export class AdController {
   private async merge(dto: AdSettingsDto): Promise<AdSettings> {
     const stored = await this.settings.getAd();
     const bindPassword = dto.bindPassword ? dto.bindPassword : stored.bindPassword;
-    return { ...stored, ...dto, bindPassword };
+    return { ...stored, ...definedOnly(dto), bindPassword };
   }
 
   @Post('sync')
