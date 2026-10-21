@@ -219,15 +219,25 @@ await step('Berichte', async () => {
   }
   const sources = await api.get('/api/reports/update-sources');
   assert.ok(sources.distribution.some((d) => d.source === 'wsus'));
+
+  const versions = await api.get('/api/reports/agent-version-trend?days=7');
+  const today = versions.at(-1)?.date;
+  assert.ok(
+    versions.some((p) => p.date === today && p.version === AGENT_VERSION && p.devices >= 1),
+    'die Version des Testgeraets fehlt im Versionsverlauf',
+  );
 });
 
 // --- Einstellungen --------------------------------------------------------------
 
-await step('Melde-Intervall geht mit dem Check-in an den Agent', async () => {
+await step('Melde-Intervall: Vorgabe 15 Minuten, geht mit dem Check-in an den Agent', async () => {
+  // Die Instanz im Test-Stack ist frisch, es gilt also die Vorgabe.
+  const before = (await api.get('/api/settings')).agent.checkIntervalMinutes;
+  assert.equal(before, 15, 'Vorgabe des Melde-Intervalls');
   await api.put('/api/settings/agent', { checkIntervalMinutes: 45 });
   const res = await checkin(agent, device.token, snapshot({ hostInfo, collectedAt: minutesAgo(5), available: [U.defender, U.late], pendingReboot: true }));
   assert.equal(res.checkIntervalMinutes, 45);
-  await api.put('/api/settings/agent', { checkIntervalMinutes: 60 });
+  await api.put('/api/settings/agent', { checkIntervalMinutes: before });
   await api.request('PUT', '/api/settings/agent', { body: { checkIntervalMinutes: 1 }, expect: 400 });
 });
 
@@ -266,6 +276,21 @@ await step('Archiviert: Check-in abgewiesen; wiederhergestellt: angenommen', asy
   assert.equal(restored.archivedReason, null);
   await checkin(agent, device.token, snapshot({ hostInfo, collectedAt: minutesAgo(2), available: [U.defender, U.late], pendingReboot: true }));
   await api.request('POST', '/api/devices/00000000-0000-4000-8000-000000000000/archive', { body: {}, expect: 404 });
+});
+
+await step('Loeschen: nur archivierte, samt Historie, Agent danach abgemeldet', async () => {
+  const name = `DEL-${RUN}`;
+  const other = await enroll(agent, enrollmentToken, host(name));
+  await checkin(agent, other.token, snapshot({ hostInfo: host(name), collectedAt: minutesAgo(1), available: [U.defender] }));
+
+  await api.request('DELETE', `/api/devices/${other.deviceId}`, { expect: 409 });
+  await api.post(`/api/devices/${other.deviceId}/archive`, { reason: 'Smoke-Test' });
+  await api.request('DELETE', `/api/devices/${other.deviceId}`);
+
+  await api.request('GET', `/api/devices/${other.deviceId}`, { expect: 404 });
+  await api.request('DELETE', `/api/devices/${other.deviceId}`, { expect: 404 });
+  assert.equal((await api.get(`/api/devices?search=${name}`)).total, 0);
+  await checkin(agent, other.token, snapshot({ hostInfo: host(name), collectedAt: minutesAgo(0.5) }), 401);
 });
 
 await step('AD-Abgleich ohne Konfiguration: 409', async () => {

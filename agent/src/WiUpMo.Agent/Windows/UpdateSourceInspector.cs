@@ -17,6 +17,30 @@ public sealed class UpdateSourceInspector(ILogger<UpdateSourceInspector> logger)
     private const string PolicyAuKey = PolicyKey + @"\AU";
     private const string EnrollmentsKey = @"SOFTWARE\Microsoft\Enrollments";
 
+    /// <summary>
+    /// Der wirksame Zustand, wie der Windows-Update-Dienst ihn selbst
+    /// berechnet — aus Gruppenrichtlinie, MDM und Voreinstellungen zusammen.
+    /// Er beantwortet die Frage nach Dual Scan, statt sie aus einzelnen
+    /// Richtlinien zu erraten.
+    /// </summary>
+    private const string PolicyStateKey = @"SOFTWARE\Microsoft\WindowsUpdate\UpdatePolicy\PolicyState";
+
+    /// <summary>
+    /// Quellrichtlinie je Update-Klasse ("Specify source service for specific
+    /// classes of Windows Updates"), der Nachfolger von Dual Scan ab Windows 10
+    /// 2004 und unter Windows 11. Wert 0 heisst Windows Update, 1 heisst WSUS,
+    /// alles andere (meist 0xFFFFFFFF) nicht gesetzt.
+    /// </summary>
+    private static readonly string[] ClassSourcePolicies =
+    [
+        "SetPolicyDrivenUpdateSourceForFeatureUpdates",
+        "SetPolicyDrivenUpdateSourceForQualityUpdates",
+        "SetPolicyDrivenUpdateSourceForDriverUpdates",
+        "SetPolicyDrivenUpdateSourceForOtherUpdates",
+    ];
+
+    private const int SourceWindowsUpdate = 0;
+
     /// <summary>Feste Dienst-IDs der WUApi.</summary>
     private static readonly Guid WindowsUpdateService = new("9482f4b4-e343-43b6-b170-9a65bc822c77");
 
@@ -33,11 +57,6 @@ public sealed class UpdateSourceInspector(ILogger<UpdateSourceInspector> logger)
         string? wsusServerUrl = ReadString(hklm, PolicyKey, "WUServer");
         int? useWuServer = ReadDword(hklm, PolicyAuKey, "UseWUServer");
 
-        // Beide Schalter verhindern, dass ein WSUS-Client nebenbei auf
-        // Microsoft Update zugreift. Einer genuegt.
-        bool dualScanBlocked = ReadDword(hklm, PolicyKey, "DisableDualScan") == 1
-            || ReadDword(hklm, PolicyKey, "DoNotConnectToWindowsUpdateInternetLocations") == 1;
-
         bool mdmEnrolled = IsMdmEnrolled(hklm);
         RegisteredService[] services = ReadRegisteredServices();
 
@@ -45,7 +64,7 @@ public sealed class UpdateSourceInspector(ILogger<UpdateSourceInspector> logger)
 
         return new UpdateSourceInfo
         {
-            Source = Decide(wsusConfigured, dualScanBlocked, mdmEnrolled, services),
+            Source = Decide(wsusConfigured, ReadWsusMix(hklm), mdmEnrolled, services),
             WsusServerUrl = Limits.TruncateOrNull(wsusServerUrl, Limits.WsusServerUrl),
             UseWuServer = useWuServer is null ? null : useWuServer == 1,
             RegisteredServices = services.Length > 0
@@ -56,22 +75,42 @@ public sealed class UpdateSourceInspector(ILogger<UpdateSourceInspector> logger)
     }
 
     /// <summary>
+    /// Was ein WSUS-Client zusaetzlich direkt bei Microsoft holt.
+    /// </summary>
+    private enum WsusMix
+    {
+        /// <summary>Alles vom WSUS.</summary>
+        None,
+
+        /// <summary>Ein Teil vom WSUS, ein Teil von Windows Update.</summary>
+        Partly,
+
+        /// <summary>WSUS eingetragen, aber jede Klasse kommt von Windows Update.</summary>
+        Entirely,
+    }
+
+    /// <summary>
     /// Die Richtlinie schlaegt die registrierten Dienste: ist WSUS per GPO
     /// gesetzt, holt das Geraet seine Updates dort — unabhaengig davon, welche
-    /// Dienste daneben noch registriert sind. Bleibt Dual Scan dabei offen,
-    /// zieht Windows Feature-Updates trotzdem aus dem Internet; das ist ein
-    /// eigener Zustand und keine Nebensaechlichkeit, weil solche Geraete in der
-    /// Migrationsauswertung sonst falsch einsortiert werden.
+    /// Dienste daneben noch registriert sind. Holt es einen Teil trotzdem aus
+    /// dem Internet, ist das ein eigener Zustand (<c>dual_scan</c>) und keine
+    /// Nebensaechlichkeit, weil solche Geraete in der Migrationsauswertung sonst
+    /// falsch einsortiert werden.
     /// </summary>
     private static UpdateSourceKind Decide(
         bool wsusConfigured,
-        bool dualScanBlocked,
+        WsusMix mix,
         bool mdmEnrolled,
         RegisteredService[] services)
     {
         if (wsusConfigured)
         {
-            return dualScanBlocked ? UpdateSourceKind.Wsus : UpdateSourceKind.DualScan;
+            return mix switch
+            {
+                WsusMix.Partly => UpdateSourceKind.DualScan,
+                WsusMix.Entirely => UpdateSourceKind.MicrosoftUpdate,
+                _ => UpdateSourceKind.Wsus,
+            };
         }
 
         if (mdmEnrolled)
@@ -93,6 +132,49 @@ public sealed class UpdateSourceInspector(ILogger<UpdateSourceInspector> logger)
         }
 
         return UpdateSourceKind.Unknown;
+    }
+
+    /// <summary>
+    /// Ob ein WSUS-Client einen Teil seiner Updates bei Windows Update holt.
+    ///
+    /// Bis Version 0.6.2 galt jedes Geraet ohne <c>DisableDualScan</c> als Dual
+    /// Scan. Das war falsch: Dual Scan entsteht erst, wenn zum WSUS
+    /// Zurueckstellungsrichtlinien von Windows Update for Business kommen, und
+    /// unter Windows 11 gibt es den Schalter gar nicht mehr — dort regeln die
+    /// Quellrichtlinien je Klasse, was woher kommt. Jedes Windows-11-Geraet am
+    /// WSUS landete so unter Dual Scan.
+    ///
+    /// Gelesen wird deshalb, was Windows selbst als wirksam festhaelt
+    /// (<c>PolicyState</c>). Nur wo es das nicht gibt, aeltere Windows-10-Staende,
+    /// wird aus den Richtlinien geschlossen.
+    /// </summary>
+    private static WsusMix ReadWsusMix(RegistryKey hklm)
+    {
+        if (ReadDword(hklm, PolicyStateKey, "UseUpdateClassPolicySource") == 1)
+        {
+            int fromWindowsUpdate = ClassSourcePolicies
+                .Count(name => ReadDword(hklm, PolicyStateKey, name) == SourceWindowsUpdate);
+
+            return fromWindowsUpdate == 0 ? WsusMix.None
+                : fromWindowsUpdate == ClassSourcePolicies.Length ? WsusMix.Entirely
+                : WsusMix.Partly;
+        }
+
+        int? dualScanActive = ReadDword(hklm, PolicyStateKey, "IsWUfBDualScanActive");
+        if (dualScanActive is not null)
+        {
+            return dualScanActive == 1 ? WsusMix.Partly : WsusMix.None;
+        }
+
+        // Ohne PolicyState: Dual Scan setzt Zurueckstellungen voraus, und einer
+        // der beiden Schalter schaltet ihn ab.
+        bool deferralConfigured = ReadDword(hklm, PolicyKey, "DeferQualityUpdates") == 1
+            || ReadDword(hklm, PolicyKey, "DeferFeatureUpdates") == 1
+            || ReadDword(hklm, PolicyKey, "BranchReadinessLevel") is not null;
+        bool dualScanBlocked = ReadDword(hklm, PolicyKey, "DisableDualScan") == 1
+            || ReadDword(hklm, PolicyKey, "DoNotConnectToWindowsUpdateInternetLocations") == 1;
+
+        return deferralConfigured && !dualScanBlocked ? WsusMix.Partly : WsusMix.None;
     }
 
     private readonly record struct RegisteredService(string Name, Guid Id);

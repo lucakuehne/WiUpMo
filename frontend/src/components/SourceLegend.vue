@@ -12,16 +12,18 @@ import HelpLegend from '@/components/HelpLegend.vue';
  *
  * Die Formulierungen folgen dem, was der Agent tatsächlich auswertet (siehe
  * UpdateSourceInspector.cs); eine Legende, die etwas anderes verspricht als die
- * Erkennung leistet, wäre schlimmer als keine.
+ * Erkennung leistet, wäre schlimmer als keine. Agents bis 0.6.2 meldeten jedes
+ * Gerät am WSUS ohne DisableDualScan als Dual Scan — unter Windows 11 also
+ * praktisch alle.
  */
 const ENTRIES = [
   {
     label: 'WSUS',
-    text: 'Der interne WSUS-Server ist per Richtlinie gesetzt und der Zugriff aufs Internet gesperrt. Das Gerät bekommt ausschliesslich, was dort freigegeben ist.',
+    text: 'Der interne WSUS-Server ist per Richtlinie gesetzt, und Windows meldet, dass es alle Updates dort sucht. Das Gerät bekommt ausschliesslich, was dort freigegeben ist.',
   },
   {
     label: 'Dual Scan',
-    text: 'WSUS ist per Richtlinie gesetzt, der Zugriff aufs Internet aber nicht gesperrt. Windows holt sich daneben Updates direkt bei Microsoft — die Freigabe auf dem WSUS gilt für dieses Gerät also nicht mehr zuverlässig. Abstellen lässt sich das mit DisableDualScan bzw. DoNotConnectToWindowsUpdateInternetLocations.',
+    text: 'WSUS ist per Richtlinie gesetzt, Windows holt aber einen Teil der Updates direkt bei Microsoft — die Freigabe auf dem WSUS gilt für dieses Gerät also nicht vollständig. Unter Windows 11 legt das die Richtlinie „Quelldienst für bestimmte Klassen von Windows-Updates angeben" fest, unter älterem Windows 10 entsteht es durch Zurückstellungen von Windows Update for Business. Massgeblich ist, was Windows selbst als wirksam meldet, nicht eine einzelne Richtlinie.',
   },
   {
     label: 'Intune',
@@ -29,7 +31,7 @@ const ENTRIES = [
   },
   {
     label: 'Microsoft Update',
-    text: 'Weder WSUS noch MDM. Das Gerät bezieht direkt von Microsoft.',
+    text: 'Das Gerät bezieht direkt von Microsoft: weder WSUS noch MDM, oder ein WSUS ist eingetragen, aber jede Update-Klasse ist auf Windows Update umgestellt.',
   },
   {
     label: 'unbekannt',

@@ -136,9 +136,10 @@ export class AdSyncService {
     return this.dataSource.transaction(async (manager) => {
       let created = 0;
       let reactivated = 0;
+      const presentGuids = computers.map((c) => c.objectGuid);
 
       for (const computer of computers) {
-        const outcome = await this.upsert(manager, computer);
+        const outcome = await this.upsert(manager, computer, presentGuids);
         if (outcome === 'created') created++;
         if (outcome === 'reactivated') reactivated++;
       }
@@ -154,30 +155,60 @@ export class AdSyncService {
     });
   }
 
+  /**
+   * Legt ein Computerkonto an oder fuehrt es mit dem bestehenden Geraet
+   * zusammen.
+   *
+   * Zuerst ueber die GUID: sie ueberlebt Umbenennungen und Verschiebungen.
+   * Ohne Treffer kommt ein Vorgaenger gleichen Namens in Frage — ein Geraet
+   * ohne AD-Bezug (der Agent war schneller als der erste Abgleich) oder eines,
+   * dessen GUID im AD nicht mehr vorkommt. Letzteres ist der haeufige Fall
+   * einer Neuinstallation oder eines erneuten Domaenenbeitritts: Das Konto
+   * wird mit demselben Namen neu angelegt und bekommt eine neue objectGUID.
+   *
+   * Ohne diese Zuordnung archivierte der Abgleich das bisherige Geraet samt
+   * Historie und legte ein zweites ohne Agent an; der Agent selbst hing weiter
+   * am archivierten Datensatz und wurde abgewiesen. Hatte ein frueherer Lauf
+   * das zweite schon angelegt, wird es hier wieder aufgeloest — es traegt
+   * nichts als die AD-Angaben, die auf den Vorgaenger uebergehen.
+   */
   private async upsert(
     manager: EntityManager,
     computer: AdComputer,
+    presentGuids: string[],
   ): Promise<'created' | 'updated' | 'reactivated'> {
-    // Zuerst ueber die GUID: sie ueberlebt Umbenennungen und Verschiebungen.
-    const byGuid: Array<{ id: string; status: DeviceStatus }> = await manager.query(
-      'SELECT id, status FROM devices WHERE ad_object_guid = $1',
+    const byGuid: Array<{ id: string; status: DeviceStatus; enrolled: boolean }> = await manager.query(
+      'SELECT id, status, enrolled_at IS NOT NULL AS enrolled FROM devices WHERE ad_object_guid = $1',
       [computer.objectGuid],
     );
 
-    let existing = byGuid[0];
+    // Nur ein Vorgaenger, dessen Konto im AD fehlt: Zwei gleichnamige Konten,
+    // die beide noch existieren (etwa in verschiedenen OUs), bleiben getrennt.
+    const predecessors: Array<{ id: string; status: DeviceStatus }> = await manager.query(
+      `SELECT id, status FROM devices
+        WHERE lower(hostname) = lower($1)
+          AND ($2::uuid IS NULL OR id <> $2::uuid)
+          AND (ad_object_guid IS NULL OR NOT (ad_object_guid = ANY($3::uuid[])))
+        ORDER BY enrolled_at DESC NULLS LAST, created_at ASC
+        LIMIT 1`,
+      [computer.hostname, byGuid[0]?.id ?? null, presentGuids],
+    );
 
-    if (!existing) {
-      // Kein Treffer ueber die GUID: Moeglicherweise hat sich der Agent schon
-      // gemeldet, bevor der erste Abgleich lief. Dann gibt es das Geraet
-      // bereits — nur ohne AD-Bezug, den wir hier nachtragen.
-      const byHostname: Array<{ id: string; status: DeviceStatus }> = await manager.query(
-        `SELECT id, status FROM devices
-          WHERE ad_object_guid IS NULL AND lower(hostname) = lower($1)
-          ORDER BY enrolled_at DESC NULLS LAST
-          LIMIT 1`,
-        [computer.hostname],
+    let existing: { id: string; status: DeviceStatus } | undefined = byGuid[0];
+    const predecessor = predecessors[0];
+
+    // Hat der Datensatz zur neuen GUID einen eigenen Agent, steckt dort eigene
+    // Historie — die wird nicht ungefragt verschmolzen.
+    if (predecessor && (!existing || !byGuid[0].enrolled)) {
+      if (existing) {
+        // Vor dem Uebertragen der GUID: Sie ist eindeutig.
+        await manager.query('DELETE FROM devices WHERE id = $1', [existing.id]);
+      }
+      this.logger.log(
+        `${computer.hostname}: Computerkonto im AD neu angelegt, bisheriges Geraet uebernommen` +
+          (existing ? ' und doppelten Datensatz aufgeloest.' : '.'),
       );
-      existing = byHostname[0];
+      existing = predecessor;
     }
 
     if (!existing) {

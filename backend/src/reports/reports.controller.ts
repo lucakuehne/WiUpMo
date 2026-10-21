@@ -3,6 +3,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SessionGuard } from '../auth/session.guard.js';
 import {
   AgentTrendPointDto,
+  AgentVersionTrendPointDto,
   AgentVersionCountDto,
   ComplianceDeviceDto,
   FailureGroupDto,
@@ -87,5 +88,11 @@ export class ReportsController {
   @ApiOperation({ summary: 'Verlauf der Agent-Abdeckung ueber die Zeit.' })
   agentTrend(@Query() query: TrendQueryDto): Promise<AgentTrendPointDto[]> {
     return this.reports.agentTrend(query.days);
+  }
+
+  @Get('agent-version-trend')
+  @ApiOperation({ summary: 'Verlauf der Agent-Versionen ueber die Zeit.' })
+  agentVersionTrend(@Query() query: TrendQueryDto): Promise<AgentVersionTrendPointDto[]> {
+    return this.reports.agentVersionTrend(query.days);
   }
 }

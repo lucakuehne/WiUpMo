@@ -222,6 +222,13 @@ export interface AgentTrendPoint {
   silentAgents: number;
 }
 
+/** Ein Tag und eine Version; ein Tag hat so viele Einträge, wie Versionen liefen. */
+export interface AgentVersionTrendPoint {
+  date: string;
+  version: string;
+  devices: number;
+}
+
 export interface Summary {
   devicesTotal: number;
   devicesActive: number;

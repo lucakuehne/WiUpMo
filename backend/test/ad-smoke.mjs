@@ -11,6 +11,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
+// Beide aus den node_modules des Backend-Images, in dem der Runner laeuft.
+import { Client as LdapClient } from 'ldapts';
+import pg from 'pg';
 import { Client, assertTestTarget, checkin, createRunner, enroll, host, minutesAgo, signIn, snapshot } from './smoke-lib.mjs';
 
 const [base = 'http://backend:3000', caPath = '/testfiles/tls/ca.pem'] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
@@ -86,6 +89,49 @@ async function deviceByName(hostname) {
 
 const login = (username, password, expect = 200) =>
   new Client(base).request('POST', '/api/auth/login', { body: { username, password }, expect });
+
+/** Alle Geraete dieses Namens, archivierte eingeschlossen. */
+async function devicesNamed(hostname) {
+  const list = await api.get(`/api/devices?search=${hostname}&limit=10`);
+  return list.items.filter((d) => d.hostname.toLowerCase() === hostname.toLowerCase());
+}
+
+/**
+ * Loescht ein Computerkonto und legt es unter gleichem Namen neu an — so wie
+ * bei einer Neuinstallation mit erneutem Domaenenbeitritt. Das neue Konto hat
+ * eine neue objectGUID.
+ */
+async function recreateComputer(name, ou) {
+  const ldap = new LdapClient({ url: connection.url, tlsOptions: { ca: [connection.caCertificate] } });
+  await ldap.bind('Administrator@test.wiupmo', 'Adm1n-Passw0rd!');
+  try {
+    const dn = `CN=${name},${ou}`;
+    await ldap.del(dn);
+    await ldap.add(dn, {
+      objectClass: 'computer',
+      sAMAccountName: `${name}$`,
+      // Arbeitsstation, ohne Passwort aktiv — wie ad-setup.sh.
+      userAccountControl: '4128',
+      operatingSystem: 'Windows 11 Pro',
+      operatingSystemVersion: '10.0 (26100)',
+    });
+  } finally {
+    await ldap.unbind();
+  }
+}
+
+/** Direkt auf die Datenbank des Test-Stacks, um einen Altbestand nachzustellen. */
+async function withDatabase(work) {
+  const db = new pg.Client({
+    connectionString: process.env.TEST_DATABASE_URL ?? 'postgres://wiupmo:nur-fuer-den-test-stack@testdb:5432/wiupmo',
+  });
+  await db.connect();
+  try {
+    return await work(db);
+  } finally {
+    await db.end();
+  }
+}
 
 await step('Anmeldung und Agent von NB-001 vor dem ersten Abgleich', async () => {
   await signIn(api);
@@ -204,6 +250,65 @@ await step('Bereich abgewaehlt: SRV-001 liegt ausserhalb, sein Agent holt es nic
   assert.equal(widened.run.status, 'success', widened.run.error ?? '');
   assert.equal((await deviceByName('SRV-001')).status, 'active', 'zurueck im Bereich');
   assert.equal(narrowed.run.devicesArchived, 1, 'Zahl der archivierten Geraete');
+});
+
+await step('Konto im AD neu angelegt: dasselbe Geraet, kein zweites, Agent meldet weiter', async () => {
+  const before = await deviceByName('NB-001');
+  await recreateComputer('NB-001', NOTEBOOKS);
+
+  const run = await api.post('/api/ad/sync');
+  assert.equal(run.status, 'success', run.error ?? '');
+
+  const all = await devicesNamed('NB-001');
+  assert.equal(all.length, 1, `${all.length} Geraete namens NB-001`);
+  const after = await deviceByName('NB-001');
+  assert.equal(after.id, before.id, 'neuer Datensatz statt des bisherigen');
+  assert.equal(after.status, 'active');
+  assert.notEqual(after.adObjectGuid, before.adObjectGuid, 'GUID nicht nachgefuehrt');
+  assert.ok(after.enrolledAt, 'Agent-Bezug verloren');
+
+  const res = await checkin(agent, notebook.token, snapshot({ hostInfo: host('NB-001'), collectedAt: minutesAgo(0.5) }));
+  assert.deepEqual(res.results.map((r) => r.outcome), ['accepted']);
+  assert.equal(run.devicesCreated, 0);
+  assert.equal(run.devicesArchived, 0);
+});
+
+// Der Zustand, den die Produktion vor der Korrektur hinterlassen hat: Das
+// bisherige Geraet mit Agent ist mit einer alten GUID archiviert, daneben
+// steht ein zweites nur aus dem AD. Der naechste Abgleich muss beide
+// zusammenfuehren.
+await step('Doppelter Datensatz aus einem frueheren Abgleich wird aufgeloest', async () => {
+  const agentNb2 = await enroll(agent, enrollmentToken, host('NB-002'));
+  await checkin(agent, agentNb2.token, snapshot({ hostInfo: host('NB-002'), collectedAt: minutesAgo(2) }));
+
+  await withDatabase(async (db) => {
+    const { rows } = await db.query('SELECT ad_object_guid, ad_dn, ad_ou FROM devices WHERE id = $1', [agentNb2.deviceId]);
+    const { ad_object_guid: guid, ad_dn: dn, ad_ou: ou } = rows[0];
+    await db.query(
+      `UPDATE devices SET ad_object_guid = gen_random_uuid(), status = 'archived', archived_at = now(),
+              archived_reason = 'Im Active Directory nicht mehr vorhanden.'
+        WHERE id = $1`,
+      [agentNb2.deviceId],
+    );
+    await db.query(
+      `INSERT INTO devices (hostname, ad_dn, ad_object_guid, ad_ou, status) VALUES ('NB-002', $1, $2, $3, 'active')`,
+      [dn, guid, ou],
+    );
+  });
+  assert.equal((await devicesNamed('NB-002')).length, 2, 'Altbestand nicht nachgestellt');
+
+  const run = await api.post('/api/ad/sync');
+  assert.equal(run.status, 'success', run.error ?? '');
+
+  const all = await devicesNamed('NB-002');
+  assert.equal(all.length, 1, `${all.length} Geraete namens NB-002`);
+  const merged = await deviceByName('NB-002');
+  assert.equal(merged.id, agentNb2.deviceId, 'der Datensatz mit Agent muss bleiben');
+  assert.equal(merged.status, 'active');
+  assert.equal(merged.archivedReason, null);
+
+  const res = await checkin(agent, agentNb2.token, snapshot({ hostInfo: host('NB-002'), collectedAt: minutesAgo(0.5) }));
+  assert.deepEqual(res.results.map((r) => r.outcome), ['accepted']);
 });
 
 await step('Protokoll der Abgleiche', async () => {

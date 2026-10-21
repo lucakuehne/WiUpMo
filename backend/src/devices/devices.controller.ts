@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -79,6 +80,14 @@ export class DevicesController {
   @ApiOperation({ summary: 'Hebt die Archivierung auf.' })
   restore(@Param('id', ParseUUIDPipe) id: string): Promise<DeviceDetailDto> {
     return this.devices.setArchived(id, false, null);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Loescht ein archiviertes Geraet endgueltig, samt Historie.' })
+  async remove(@Param('id', ParseUUIDPipe) id: string): Promise<{ ok: true }> {
+    await this.devices.remove(id);
+    return { ok: true };
   }
 
   @Get(':id/timeline')

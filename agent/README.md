@@ -81,12 +81,10 @@ sich nicht mehr". Wer das vermeiden will, archiviert es dort von Hand.
 
 Im Dienstbetrieb läuft ein Durchlauf:
 
-- **im zentral eingestellten Abstand** (Voreinstellung 60 Minuten) — der Wert
+- **im zentral eingestellten Abstand** (Voreinstellung 15 Minuten) — der Wert
   kommt aus den Einstellungen des Backends und geht mit jeder Check-in-Antwort
-  mit; `CheckIntervalMinutes` ist nur der Rückfall, bis sich das Gerät zum ersten
-  Mal gemeldet hat, und liegt mit 15 Minuten bewusst darunter: Ein frisch
-  installiertes Gerät soll nicht bis zu einer Stunde brauchen, bis es in der
-  Oberfläche auftaucht,
+  mit; `CheckIntervalMinutes` (ebenfalls 15 Minuten) ist nur der Rückfall, bis
+  sich das Gerät zum ersten Mal gemeldet hat,
 - **einmalig 90 Sekunden nach Dienststart** (`StartupDelaySeconds`) — nicht
   sofort, weil eine Update-Suche während des Systemhochlaufs mit allem anderen um
   Platte und Netz konkurriert,

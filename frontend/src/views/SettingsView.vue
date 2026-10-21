@@ -142,7 +142,7 @@ const bindPassword = ref('');
 
 const url = reactive<LdapUrlParts>({ host: '', port: LDAPS_PORT, secure: true });
 
-const agent = reactive<AgentSettingsView>({ enrollmentToken: '', checkIntervalMinutes: 60 });
+const agent = reactive<AgentSettingsView>({ enrollmentToken: '', checkIntervalMinutes: 15 });
 const authSettings = reactive<AuthSettings>({
   localEnabled: true,
   ldapEnabled: false,

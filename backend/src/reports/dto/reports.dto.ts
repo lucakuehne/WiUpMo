@@ -164,6 +164,18 @@ export class AgentVersionCountDto {
   isCurrent: boolean;
 }
 
+/**
+ * Ein Punkt im Verlauf der Agent-Versionen: an einem Tag so viele Geraete mit
+ * dieser Version. Lang statt breit — welche Versionen vorkommen, steht erst
+ * nach der Abfrage fest, und ein Objekt mit Versionsnummern als Schluessel
+ * liesse sich nicht beschreiben.
+ */
+export class AgentVersionTrendPointDto {
+  date: string;
+  version: string;
+  devices: number;
+}
+
 export class TrendQueryDto {
   @toInt()
   @IsInt()

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { returnedRows } from '../common/query-result.js';
@@ -428,8 +428,9 @@ export class DevicesService {
   /**
    * Archiviert bzw. reaktiviert von Hand.
    *
-   * Geloescht wird nie — auch hier nicht. Ein ausgemustertes Geraet behaelt
-   * seine Historie, damit Auswertungen ueber vergangene Zeitraeume stimmen.
+   * Archivieren loescht nichts. Ein ausgemustertes Geraet behaelt seine
+   * Historie, damit Auswertungen ueber vergangene Zeitraeume stimmen —
+   * endgueltig loeschen ist ein eigener Schritt, siehe {@link remove}.
    *
    * Zu beachten: Steht das Geraet weiterhin im AD, holt der naechste Abgleich
    * es wieder zurueck. Das ist gewollt — das AD ist die fuehrende Quelle.
@@ -454,6 +455,34 @@ export class DevicesService {
     }
 
     return this.detail(id);
+  }
+
+  /**
+   * Loescht ein archiviertes Geraet endgueltig, samt Check-ins, Update-
+   * Zustaenden, Ereignissen, Secrets und Auftraegen (alle per ON DELETE
+   * CASCADE).
+   *
+   * Nur archivierte: Ein aktives Geraet steht im AD oder meldet sich ueber
+   * seinen Agent, und beide legten es sofort wieder an — dann ohne Historie.
+   * Der Umweg ueber das Archiv ist die Rueckfrage, ob es wirklich weg ist.
+   */
+  async remove(id: string): Promise<void> {
+    const deleted = returnedRows(
+      await this.dataSource.query(
+        `DELETE FROM devices WHERE id = $1 AND status = 'archived' RETURNING id`,
+        [id],
+      ),
+    );
+
+    if (deleted.length > 0) {
+      return;
+    }
+
+    const exists: unknown[] = await this.dataSource.query('SELECT 1 FROM devices WHERE id = $1', [id]);
+    if (exists.length === 0) {
+      throw new NotFoundException('Geraet nicht gefunden.');
+    }
+    throw new ConflictException('Nur archivierte Geraete lassen sich loeschen.');
   }
 
   async timeline(deviceId: string, query: TimelineQueryDto): Promise<TimelineDto> {

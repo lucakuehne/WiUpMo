@@ -6,6 +6,7 @@ import { get } from '@/api/client';
 import type {
   AgentTrendPoint,
   AgentVersionCount,
+  AgentVersionTrendPoint,
   Summary,
   TrendPoint,
   UpdateSourcesReport,
@@ -32,6 +33,7 @@ const summary = ref<Summary | null>(null);
 const trend = ref<TrendPoint[]>([]);
 const agentTrend = ref<AgentTrendPoint[]>([]);
 const agentVersions = ref<AgentVersionCount[]>([]);
+const agentVersionTrend = ref<AgentVersionTrendPoint[]>([]);
 const sources = ref<UpdateSourcesReport | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -240,25 +242,131 @@ const agentTrendOptions = computed(() => ({
   },
 }));
 
+/** Versionsnummern der Reihe nach, `1.10.0` nach `1.9.0`; Zusätze wie `-beta` als Text. */
+function compareVersions(a: string, b: string): number {
+  const left = a.split(/[.-]/);
+  const right = b.split(/[.-]/);
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const x = left[i] ?? '';
+    const y = right[i] ?? '';
+    const byNumber = /^\d+$/.test(x) && /^\d+$/.test(y) ? Number(x) - Number(y) : x.localeCompare(y);
+    if (byNumber !== 0) {
+      return byNumber;
+    }
+  }
+  return 0;
+}
+
+const currentVersion = computed(
+  () => agentVersions.value.find((entry) => entry.isCurrent)?.version ?? null,
+);
+
 /**
- * Die aktuelle Version bekommt Grün, die übrigen die Reihenfolge der Palette.
+ * Drei Versionen tragen eine eigene Farbe, alles Ältere teilt sich Grau —
+ * derselbe Ton im Kreis wie im Verlauf. Die aktuelle Version ist grün, wie
+ * ihr Abzeichen; die neueste übrige blau, die nächste amber. Ohne markierte
+ * Version übernimmt die neueste das Grün.
  *
- * Das ist die einzige Aussage, die im Kreis überhaupt zu treffen ist: Wie gross
- * ist der Anteil, der schon dort ist, wo er hin soll. Welche Nummer welcher
- * Rest trägt, sagt die Liste darunter.
+ * Bewusst nur drei: Mehr Farben lassen sich im Stapel nicht mehr sicher
+ * auseinanderhalten (Blau und Violett etwa fallen bei einer Rot-Grün-Schwäche
+ * zusammen), und für einen Rollout zählen ohnehin die aktuelle, die vorige
+ * und der Rest. Die Folge Grau, Amber, Blau, Grün von unten nach oben ist
+ * gegen Farbfehlsichtigkeit geprüft, hell wie dunkel; Grau taucht erst ab vier
+ * Versionen auf und liegt dann unter Amber.
+ */
+const versionColors = computed(() => {
+  const versions = new Set<string>();
+  for (const entry of agentVersions.value) {
+    if (entry.version) versions.add(entry.version);
+  }
+  for (const point of agentVersionTrend.value) {
+    versions.add(point.version);
+  }
+
+  const newestFirst = [...versions].sort((a, b) => compareVersions(b, a));
+  const lead =
+    currentVersion.value && versions.has(currentVersion.value) ? currentVersion.value : newestFirst[0];
+  const others = newestFirst.filter((version) => version !== lead).slice(0, 2);
+
+  const colors = new Map<string, string>();
+  if (lead) colors.set(lead, palette.value.series[1]);
+  others.forEach((version, index) => colors.set(version, palette.value.series[index === 0 ? 0 : 2]));
+  return colors;
+});
+
+const OLDER_COLOR_INDEX = 4;
+
+function versionColor(version: string | null): string {
+  return (version && versionColors.value.get(version)) || palette.value.series[OLDER_COLOR_INDEX];
+}
+
+/**
+ * Im Kreis ist die einzige Aussage, wie gross der Anteil ist, der schon dort
+ * ist, wo er hin soll. Welche Nummer welcher Rest trägt, sagt die Liste
+ * darunter.
  */
 const agentVersionData = computed(() => ({
   labels: agentVersions.value.map((entry) => entry.version ?? 'unbekannt'),
   datasets: [
     {
       data: agentVersions.value.map((entry) => entry.devices),
-      backgroundColor: agentVersions.value.map((entry, index) =>
-        entry.isCurrent ? palette.value.series[1] : palette.value.series[(index % 4) + 2],
-      ),
+      backgroundColor: agentVersions.value.map((entry) => versionColor(entry.version)),
       borderWidth: 0,
     },
   ],
 }));
+
+/**
+ * Gestapelt wie die Abdeckung darüber: Die Gesamthöhe ist die Flotte, und ein
+ * Rollout ist die grüne Fläche der aktuellen Version, die wächst.
+ *
+ * Von unten nach oben: Ältere, dann die benannten Versionen aufsteigend — die
+ * neueste liegt obenauf. Die Legende steht umgekehrt, damit sie sich von oben
+ * nach unten so liest wie der Stapel.
+ */
+const agentVersionTrendData = computed(() => {
+  const dates = [...new Set(agentVersionTrend.value.map((point) => point.date))].sort();
+  const named = [...versionColors.value.keys()].sort(compareVersions);
+
+  const count = (date: string, match: (version: string) => boolean): number =>
+    agentVersionTrend.value
+      .filter((point) => point.date === date && match(point.version))
+      .reduce((sum, point) => sum + point.devices, 0);
+
+  const older = agentVersionTrend.value.some((point) => !versionColors.value.has(point.version));
+
+  return {
+    labels: dates.map((date) => date.slice(5)),
+    datasets: [
+      ...(older
+        ? [
+            {
+              label: 'Ältere',
+              data: dates.map((date) => count(date, (version) => !versionColors.value.has(version))),
+              backgroundColor: palette.value.series[OLDER_COLOR_INDEX],
+            },
+          ]
+        : []),
+      ...named.map((version) => ({
+        label: version === currentVersion.value ? `${version} (aktuell)` : version,
+        data: dates.map((date) => count(date, (v) => v === version)),
+        backgroundColor: versionColor(version),
+      })),
+    ],
+  };
+});
+
+const agentVersionTrendOptions = computed(() => ({
+  ...agentTrendOptions.value,
+  plugins: {
+    legend: { ...baseOptions.value.plugins.legend, reverse: true },
+  },
+}));
+
+/** Tage mit Daten — weiter zurück, als Check-ins aufbewahrt werden, reicht der Verlauf nicht. */
+const agentVersionTrendDays = computed(
+  () => new Set(agentVersionTrend.value.map((point) => point.date)).size,
+);
 
 const agentVersionOptions = computed(() => ({
   ...baseOptions.value,
@@ -305,16 +413,18 @@ const sourceOptions = computed(() => ({
   },
 }));
 
-/** Nur die beiden Verläufe — sie allein hängen am Zeitraum. */
+/** Nur die Verläufe — sie allein hängen am Zeitraum. */
 async function loadTrends(): Promise<void> {
   try {
-    const [t, a] = await Promise.all([
+    const [t, a, v] = await Promise.all([
       get<TrendPoint[]>('/api/reports/trend', { days: rangeDays.value }),
       get<AgentTrendPoint[]>('/api/reports/agent-trend', { days: rangeDays.value }),
+      get<AgentVersionTrendPoint[]>('/api/reports/agent-version-trend', { days: rangeDays.value }),
     ]);
 
     trend.value = t;
     agentTrend.value = a;
+    agentVersionTrend.value = v;
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Die Verläufe konnten nicht geladen werden.';
   }
@@ -486,6 +596,35 @@ onMounted(load);
         </CardHeader>
         <CardContent>
           <ChartCanvas type="bar" :data="agentTrendData" :options="agentTrendOptions" height="18rem" />
+        </CardContent>
+      </Card>
+
+      <Card class="xl:col-span-3">
+        <CardHeader>
+          <CardTitle>Agent-Versionen über die Zeit</CardTitle>
+          <CardDescription>
+            Welche Version an jedem Tag lief — die zuletzt gemeldete jedes registrierten Geräts. Ein
+            Rollout zeigt sich als grüne Fläche, die wächst. Die drei neuesten Versionen sind
+            einzeln aufgeführt, alles davor unter „Ältere".
+            <template
+              v-if="agentVersionTrendDays > 0 && agentVersionTrendDays < rangeDays"
+            >
+              Gezeigt werden {{ agentVersionTrendDays }} Tage statt {{ rangeDays }}: Weiter zurück
+              reichen die aufbewahrten Check-ins nicht.
+            </template>
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p v-if="agentVersionTrend.length === 0" class="text-muted-foreground text-sm">
+            Noch keine Check-ins im gewählten Zeitraum.
+          </p>
+          <ChartCanvas
+            v-else
+            type="bar"
+            :data="agentVersionTrendData"
+            :options="agentVersionTrendOptions"
+            height="18rem"
+          />
         </CardContent>
       </Card>
     </div>

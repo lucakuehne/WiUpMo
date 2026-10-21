@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { AlertTriangle, Archive, ArrowLeft, ArrowUpCircle, Loader2 } from '@lucide/vue';
+import { AlertTriangle, Archive, ArrowLeft, ArrowUpCircle, Loader2, Trash2 } from '@lucide/vue';
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { toast } from 'vue-sonner';
-import { get, post } from '@/api/client';
+import { del, get, post } from '@/api/client';
 import type {
   AgentUpdateJobView,
   CreateUpdateJobsResult,
@@ -15,6 +15,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -182,6 +190,30 @@ async function requestUpdate(): Promise<void> {
   }
 }
 
+/**
+ * Nur für archivierte Geräte angeboten — das Backend lehnt die übrigen ab.
+ * Archivieren ist damit die erste Stufe und dieser Dialog die Rückfrage.
+ */
+const confirmDelete = ref(false);
+const deleting = ref(false);
+
+async function deleteDevice(): Promise<void> {
+  const hostname = device.value?.hostname ?? '';
+  deleting.value = true;
+  error.value = null;
+
+  try {
+    await del(`/api/devices/${props.id}`);
+    toast.success(`${hostname} gelöscht.`);
+    await router.push({ name: 'devices' });
+  } catch (e) {
+    confirmDelete.value = false;
+    error.value = e instanceof Error ? e.message : 'Das Gerät konnte nicht gelöscht werden.';
+  } finally {
+    deleting.value = false;
+  }
+}
+
 function kbUrl(article: string): string {
   return `https://support.microsoft.com/help/${article}`;
 }
@@ -232,13 +264,40 @@ onMounted(load);
            gelöscht wurde oder ob nur seine OU aus dem Abgleich fiel. -->
       <Alert v-if="device.status === 'archived'" class="mb-4">
         <Archive class="size-4" />
-        <AlertDescription>
-          {{ device.archivedReason ?? 'Von Hand archiviert.' }}
-          <span v-if="device.archivedAt" class="text-muted-foreground">
-            ({{ formatDateTime(device.archivedAt) }})
+        <AlertDescription class="flex flex-wrap items-center justify-between gap-3">
+          <span>
+            {{ device.archivedReason ?? 'Von Hand archiviert.' }}
+            <span v-if="device.archivedAt" class="text-muted-foreground">
+              ({{ formatDateTime(device.archivedAt) }})
+            </span>
           </span>
+          <Button variant="outline" size="sm" @click="confirmDelete = true">
+            <Trash2 class="size-4" />
+            Endgültig löschen
+          </Button>
         </AlertDescription>
       </Alert>
+
+      <Dialog :open="confirmDelete" @update:open="confirmDelete = false">
+        <DialogContent class="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{{ device.hostname }} endgültig löschen?</DialogTitle>
+            <DialogDescription>
+              Das Gerät verschwindet samt Check-ins, Update-Historie und Aufträgen; die
+              Auswertungen vergangener Zeiträume zählen es danach nicht mehr mit. Das lässt sich
+              nicht rückgängig machen. Meldet sich der Agent noch einmal oder taucht das Konto im
+              AD wieder auf, entsteht ein neues Gerät ohne Historie.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" @click="confirmDelete = false">Abbrechen</Button>
+            <Button variant="destructive" :disabled="deleting" @click="deleteDevice">
+              <Loader2 v-if="deleting" class="size-4 animate-spin" />
+              Löschen
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Card class="mb-4">
         <CardContent>

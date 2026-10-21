@@ -127,9 +127,17 @@ export const MIN_ENROLLMENT_TOKEN_LENGTH = 16;
 export const MIN_CHECK_INTERVAL_MINUTES = 5;
 export const MAX_CHECK_INTERVAL_MINUTES = 360;
 
+/**
+ * 15 Minuten wie die eigene Vorgabe des Agents: So steht ein Geraet, das einen
+ * Neustart hinter sich oder ein Update installiert hat, innerhalb einer
+ * Viertelstunde richtig in der Oberflaeche.
+ *
+ * Gilt nur, solange in der Datenbank nichts gespeichert ist. Eine bestehende
+ * Installation behaelt ihren Wert, bis er unter Einstellungen geaendert wird.
+ */
 export const DEFAULT_AGENT: AgentSettings = {
   enrollmentToken: '',
-  checkIntervalMinutes: 60,
+  checkIntervalMinutes: 15,
 };
 
 export interface AdSettings {

@@ -5,6 +5,7 @@ import { UpdateSource } from '../database/enums.js';
 import { SettingsService } from '../settings/settings.service.js';
 import {
   AgentTrendPointDto,
+  AgentVersionTrendPointDto,
   AgentVersionCountDto,
   ComplianceDeviceDto,
   FailureGroupDto,
@@ -574,6 +575,62 @@ export class ReportsService {
       withoutAgent: num(row.ohne_agent),
       activeAgents: num(row.aktiv),
       silentAgents: num(row.stumm),
+    }));
+  }
+
+  /**
+   * Verlauf der Agent-Versionen: an jedem Tag, welche Version auf wie vielen
+   * Geraeten lief.
+   *
+   * Massgeblich ist der letzte Check-in bis zum Ende des Tages — er traegt die
+   * Version, die der Agent selbst gemeldet hat. Die Spalte am Geraet taugt
+   * dafuer nicht, sie kennt nur den heutigen Stand. Gezaehlt werden Geraete,
+   * die an dem Tag registriert und nicht archiviert waren und bis dahin
+   * mindestens einmal gemeldet haben; ein stummes Geraet zaehlt mit seiner
+   * zuletzt gemeldeten Version, denn die laeuft dort vermutlich noch.
+   *
+   * Zurueck reicht der Verlauf hoechstens so weit wie die aufbewahrten
+   * Check-ins. Davor fehlte der Nachweis, und die Kurve zeigte still zu wenige
+   * Geraete.
+   */
+  async agentVersionTrend(days: number): Promise<AgentVersionTrendPointDto[]> {
+    const { checkinDays } = await this.settings.getRetention();
+    days = Math.min(days, checkinDays);
+
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      `WITH tage AS (
+         SELECT generate_series(
+                  current_date - make_interval(days => $1::int - 1),
+                  current_date,
+                  interval '1 day'
+                )::date AS tag
+       )
+       SELECT t.tag, letzte.agent_version, count(*) AS geraete
+         FROM tage t
+         JOIN devices d
+           ON d.enrolled_at IS NOT NULL
+          AND d.enrolled_at::date <= t.tag
+          AND (d.archived_at IS NULL OR d.archived_at::date > t.tag)
+         -- Wie beim Verlauf der Abdeckung gegen die Spalte selbst verglichen,
+         -- damit idx_device_checkins_device_collected greift.
+         JOIN LATERAL (
+           SELECT c.agent_version
+             FROM device_checkins c
+            WHERE c.device_id = d.id
+              AND c.collected_at < (t.tag + 1)::timestamptz
+              AND c.agent_version IS NOT NULL
+            ORDER BY c.collected_at DESC
+            LIMIT 1
+         ) letzte ON true
+        GROUP BY t.tag, letzte.agent_version
+        ORDER BY t.tag, letzte.agent_version`,
+      [days],
+    );
+
+    return rows.map((row) => ({
+      date: (row.tag as Date).toISOString().slice(0, 10),
+      version: row.agent_version as string,
+      devices: num(row.geraete),
     }));
   }
 }
