@@ -137,3 +137,30 @@ export function put<T>(path: string, body?: unknown): Promise<T> {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 }
+
+/**
+ * Lädt eine Datei, die per POST erzeugt wird — etwa den Export einer Auswahl,
+ * deren Kennungen nicht in eine Adresse passen. Ein Navigationsaufruf wie beim
+ * gefilterten Export geht hier nicht, der kann keinen Körper mitschicken.
+ */
+export async function downloadPost(path: string, body: unknown, filename: string): Promise<void> {
+  const response = await fetch(path, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const error = new ApiError(response.status, await readError(response));
+    handleUnauthorized(error);
+    throw error;
+  }
+
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}

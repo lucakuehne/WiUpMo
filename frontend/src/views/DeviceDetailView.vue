@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { AlertTriangle, Archive, ArrowLeft, ArrowUpCircle, Loader2, Trash2 } from '@lucide/vue';
+import {
+  AlertTriangle,
+  Archive,
+  ArrowLeft,
+  ArrowUpCircle,
+  ChevronRight,
+  Loader2,
+  Trash2,
+} from '@lucide/vue';
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { toast } from 'vue-sonner';
@@ -8,6 +16,7 @@ import type {
   AgentUpdateJobView,
   CreateUpdateJobsResult,
   DeviceDetail,
+  DeviceUpdate,
   Timeline,
   TimelineEntry,
 } from '@/api/types';
@@ -42,14 +51,12 @@ import {
   EVENT_TYPE_LABELS,
   JOB_STATE_LABELS,
   UPDATE_SOURCE_LABELS,
-  UPDATE_STATE_LABELS,
   eventBadgeClass,
   formatBytes,
   formatDateTime,
   formatRelative,
   jobBadgeClass,
   sourceBadgeClass,
-  stateBadgeClass,
 } from '@/format';
 
 const props = defineProps<{ id: string }>();
@@ -75,8 +82,36 @@ const updateLimit = ref(25);
 const timelinePage = ref(1);
 const timelineLimit = ref(25);
 
+/**
+ * Nur, was Windows dem Gerät gerade anbietet.
+ *
+ * Installierte, abgelöste und gescheiterte Updates, die nicht mehr angeboten
+ * werden, sind erledigt — sie stehen im Verlauf. Hier mitgelistet sahen sie
+ * aus wie Arbeit, die noch ansteht; bei den gescheiterten waren das fast nur
+ * Store-Apps, deren Download einmal fehlschlug.
+ */
+const openUpdates = computed(() =>
+  (device.value?.updates ?? []).filter((update) => update.state === 'available'),
+);
+
+/** Aufgeklappte Updates, deren Installationsversuche darunter stehen. */
+const expandedUpdates = ref(new Set<string>());
+
+function toggleAttempts(updateId: string): void {
+  const next = new Set(expandedUpdates.value);
+  if (!next.delete(updateId)) next.add(updateId);
+  expandedUpdates.value = next;
+}
+
+function attemptSummary(update: DeviceUpdate): string {
+  const failed = update.attempts.filter((attempt) => !attempt.succeeded).length;
+  const count = update.attempts.length;
+  const noun = count === 1 ? 'Versuch' : 'Versuche';
+  return failed === count ? `${count} ${noun} gescheitert` : `${count} ${noun}, ${failed} gescheitert`;
+}
+
 const pagedUpdates = computed(() =>
-  (device.value?.updates ?? []).slice(
+  openUpdates.value.slice(
     (updatePage.value - 1) * updateLimit.value,
     updatePage.value * updateLimit.value,
   ),
@@ -374,7 +409,7 @@ onMounted(load);
 
       <Tabs default-value="updates">
         <TabsList>
-          <TabsTrigger value="updates">Updates ({{ device.updates.length }})</TabsTrigger>
+          <TabsTrigger value="updates">Offene Updates ({{ openUpdates.length }})</TabsTrigger>
           <TabsTrigger value="timeline">Verlauf ({{ timelineTotal }})</TabsTrigger>
           <TabsTrigger value="checkins">Check-ins ({{ device.checkins.length }})</TabsTrigger>
           <TabsTrigger value="agent">Agent-Updates ({{ jobs.length }})</TabsTrigger>
@@ -383,73 +418,119 @@ onMounted(load);
 
         <!-- ===================== Updates ===================== -->
         <TabsContent value="updates">
+          <p class="text-muted-foreground mb-2 text-sm">
+            Was Windows diesem Gerät gerade anbietet. Installierte, abgelöste und gescheiterte
+            Updates, die nicht mehr angeboten werden, stehen im Verlauf.
+          </p>
           <div class="rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead class="w-28">Status</TableHead>
                   <TableHead class="w-28">KB</TableHead>
                   <TableHead>Titel</TableHead>
                   <TableHead class="w-32">Einstufung</TableHead>
                   <TableHead class="w-24 text-right">Grösse</TableHead>
                   <TableHead class="w-40">Offen seit</TableHead>
-                  <TableHead class="w-72">Fehlercode</TableHead>
+                  <!-- Gescheitert, aber weiter angeboten: Windows versucht es
+                       erneut. Aufgeklappt stehen alle bisherigen Versuche. -->
+                  <TableHead class="w-72">Installationsversuche</TableHead>
                 </TableRow>
               </TableHeader>
 
               <TableBody>
-                <TableRow v-if="device.updates.length === 0">
-                  <TableCell :colspan="7" class="text-muted-foreground py-8 text-center">
-                    Für dieses Gerät sind keine Updates bekannt.
+                <TableRow v-if="openUpdates.length === 0">
+                  <TableCell :colspan="6" class="text-muted-foreground py-8 text-center">
+                    Keine offenen Updates.
                   </TableCell>
                 </TableRow>
 
-                <TableRow v-for="update in pagedUpdates" :key="update.updateId">
-                  <TableCell>
-                    <Badge variant="outline" :class="stateBadgeClass(update.state)">
-                      {{ UPDATE_STATE_LABELS[update.state] }}
-                    </Badge>
-                  </TableCell>
+                <template v-for="update in pagedUpdates" :key="update.updateId">
+                  <TableRow>
+                    <TableCell>
+                      <a
+                        v-if="update.kbArticle"
+                        :href="kbUrl(update.kbArticle)"
+                        target="_blank"
+                        rel="noreferrer"
+                        class="text-primary hover:underline"
+                      >
+                        KB{{ update.kbArticle }}
+                      </a>
+                      <span v-else class="text-muted-foreground">—</span>
+                    </TableCell>
 
-                  <TableCell>
-                    <a
-                      v-if="update.kbArticle"
-                      :href="kbUrl(update.kbArticle)"
-                      target="_blank"
-                      rel="noreferrer"
-                      class="text-primary hover:underline"
-                    >
-                      KB{{ update.kbArticle }}
-                    </a>
-                    <span v-else class="text-muted-foreground">—</span>
-                  </TableCell>
+                    <TableCell>
+                      <div>{{ update.title }}</div>
+                      <div v-if="update.categories.length" class="text-muted-foreground text-xs">
+                        {{ update.categories.join(', ') }}
+                      </div>
+                    </TableCell>
 
-                  <TableCell>
-                    <div>{{ update.title }}</div>
-                    <div v-if="update.categories.length" class="text-muted-foreground text-xs">
-                      {{ update.categories.join(', ') }}
-                    </div>
-                  </TableCell>
+                    <TableCell>
+                      <Badge
+                        v-if="update.isSecurity"
+                        variant="outline"
+                        class="bg-destructive/15 text-destructive border-destructive/30"
+                      >
+                        {{ update.severity ?? 'Sicherheit' }}
+                      </Badge>
+                      <span v-else class="text-muted-foreground">—</span>
+                    </TableCell>
 
-                  <TableCell>
-                    <Badge
-                      v-if="update.isSecurity"
-                      variant="outline"
-                      class="bg-destructive/15 text-destructive border-destructive/30"
-                    >
-                      {{ update.severity ?? 'Sicherheit' }}
-                    </Badge>
-                    <span v-else class="text-muted-foreground">—</span>
-                  </TableCell>
+                    <TableCell class="tabular text-right">
+                      {{ formatBytes(update.sizeBytes) }}
+                    </TableCell>
 
-                  <TableCell class="tabular text-right">
-                    {{ formatBytes(update.sizeBytes) }}
-                  </TableCell>
+                    <TableCell>{{ formatDateTime(update.firstAvailableAt) }}</TableCell>
 
-                  <TableCell>{{ formatDateTime(update.firstAvailableAt) }}</TableCell>
+                    <TableCell>
+                      <span v-if="update.attempts.length === 0" class="text-muted-foreground">—</span>
+                      <template v-else>
+                        <button
+                          type="button"
+                          class="hover:text-foreground text-muted-foreground flex items-center gap-1 text-sm"
+                          :aria-expanded="expandedUpdates.has(update.updateId)"
+                          @click="toggleAttempts(update.updateId)"
+                        >
+                          <ChevronRight
+                            class="size-4 transition-transform"
+                            :class="expandedUpdates.has(update.updateId) ? 'rotate-90' : ''"
+                          />
+                          {{ attemptSummary(update) }}
+                        </button>
+                        <HresultCell :value="update.hresult" />
+                      </template>
+                    </TableCell>
+                  </TableRow>
 
-                  <TableCell><HresultCell :value="update.hresult" /></TableCell>
-                </TableRow>
+                  <TableRow
+                    v-if="expandedUpdates.has(update.updateId)"
+                    class="bg-muted/30 hover:bg-muted/30"
+                  >
+                    <TableCell :colspan="6" class="py-2">
+                      <ul class="space-y-1.5 pl-6 text-sm">
+                        <li
+                          v-for="attempt in update.attempts"
+                          :key="attempt.occurredAt"
+                          class="flex flex-wrap items-center gap-x-3 gap-y-1"
+                        >
+                          <span class="tabular w-40 shrink-0">{{ formatDateTime(attempt.occurredAt) }}</span>
+                          <Badge
+                            variant="outline"
+                            :class="
+                              attempt.succeeded
+                                ? 'bg-success/15 text-success border-success/30'
+                                : 'bg-destructive/15 text-destructive border-destructive/30'
+                            "
+                          >
+                            {{ attempt.succeeded ? 'installiert' : 'gescheitert' }}
+                          </Badge>
+                          <HresultCell v-if="!attempt.succeeded" :value="attempt.hresult" />
+                        </li>
+                      </ul>
+                    </TableCell>
+                  </TableRow>
+                </template>
               </TableBody>
             </Table>
           </div>
@@ -457,7 +538,7 @@ onMounted(load);
           <TablePager
             v-model:page="updatePage"
             v-model:limit="updateLimit"
-            :total="device.updates.length"
+            :total="openUpdates.length"
           />
         </TabsContent>
 

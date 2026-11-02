@@ -1,11 +1,15 @@
 import { Transform } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsEnum,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
@@ -119,6 +123,27 @@ export class DeviceQueryDto {
   @IsBoolean()
   @IsOptional()
   hasAgent?: boolean;
+}
+
+/**
+ * Eine Auswahl aus der Geraeteliste, fuer Aktionen auf mehreren Geraeten.
+ *
+ * Im Koerper statt als Abfrageparameter: Bei einer grossen Auswahl wuerde die
+ * Adresse zu lang.
+ */
+export class DeviceSelectionDto {
+  @IsArray()
+  @IsUUID('4', { each: true })
+  @ArrayMinSize(1)
+  @ArrayMaxSize(5000)
+  ids: string[];
+}
+
+export class DeviceBulkDeleteResultDto {
+  deleted: number;
+
+  /** Ausgewaehlt, aber nicht archiviert oder nicht mehr vorhanden. */
+  skipped: number;
 }
 
 export class DeviceOuQueryDto {

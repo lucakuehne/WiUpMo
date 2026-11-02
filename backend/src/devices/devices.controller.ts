@@ -18,10 +18,12 @@ import { SessionGuard } from '../auth/session.guard.js';
 import { DevicesService } from './devices.service.js';
 import { ArchiveDeviceDto, DeviceDetailDto, TimelineDto, TimelineQueryDto } from './dto/device-detail.dto.js';
 import {
+  DeviceBulkDeleteResultDto,
   DeviceListDto,
   DeviceOuDto,
   DeviceOuQueryDto,
   DeviceQueryDto,
+  DeviceSelectionDto,
 } from './dto/device-query.dto.js';
 
 @ApiTags('devices')
@@ -43,13 +45,22 @@ export class DevicesController {
   @Get('export')
   @ApiOperation({ summary: 'Die gefilterte Geraeteliste als CSV.' })
   async export(@Query() query: DeviceQueryDto, @Res() response: Response): Promise<void> {
-    const csv = await this.devices.exportCsv(query);
-    const stamp = new Date().toISOString().slice(0, 10);
+    sendCsv(response, await this.devices.exportCsv(query));
+  }
 
-    response
-      .header('Content-Type', 'text/csv; charset=utf-8')
-      .header('Content-Disposition', `attachment; filename="geraete-${stamp}.csv"`)
-      .send(csv);
+  @Post('export')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Die ausgewaehlten Geraete als CSV.' })
+  async exportSelection(@Body() dto: DeviceSelectionDto, @Res() response: Response): Promise<void> {
+    sendCsv(response, await this.devices.exportCsv(new DeviceQueryDto(), dto.ids));
+  }
+
+  /** Mehrere auf einmal; nur archivierte werden geloescht, aktive uebergangen. */
+  @Post('delete')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Loescht die archivierten Geraete einer Auswahl endgueltig.' })
+  removeMany(@Body() dto: DeviceSelectionDto): Promise<DeviceBulkDeleteResultDto> {
+    return this.devices.removeMany(dto.ids);
   }
 
   /** Ebenfalls vor `:id` — aus demselben Grund wie `export`. */
@@ -98,4 +109,13 @@ export class DevicesController {
   ): Promise<TimelineDto> {
     return this.devices.timeline(id, query);
   }
+}
+
+function sendCsv(response: Response, csv: string): void {
+  const stamp = new Date().toISOString().slice(0, 10);
+
+  response
+    .header('Content-Type', 'text/csv; charset=utf-8')
+    .header('Content-Disposition', `attachment; filename="geraete-${stamp}.csv"`)
+    .send(csv);
 }

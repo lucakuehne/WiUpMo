@@ -70,14 +70,19 @@ const second = snapshot({
   pendingReboot: true,
 });
 
-// Nachgereicht aus der Warteschlange: zwei neue Updates, .NET installiert.
+// Nachgereicht aus der Warteschlange: zwei neue Updates, .NET installiert. Das
+// spaete Sicherheitsupdate scheitert einmal und bleibt offen — Windows bietet es
+// weiter an.
 const queued = [
   snapshot({ hostInfo, collectedAt: minutesAgo(30), available: [U.dotnet, U.defender, U.late], pendingReboot: true }),
   snapshot({
     hostInfo,
     collectedAt: minutesAgo(10),
     available: [U.defender, U.late],
-    entries: [history(U.dotnet, { resultCode: 2, occurredAt: minutesAgo(20) })],
+    entries: [
+      history(U.dotnet, { resultCode: 2, occurredAt: minutesAgo(20) }),
+      history(U.late, { resultCode: 4, hresult: HRESULT_FAILED, occurredAt: minutesAgo(15) }),
+    ],
     pendingReboot: true,
   }),
 ];
@@ -182,6 +187,15 @@ await step('Geraetedetail mit Update-Zustaenden', async () => {
   assert.equal(state[U.late.kbArticle], 'available');
   const failed = detail.updates.find((u) => u.kbArticle === U.quality.kbArticle);
   assert.equal(failed.hresult, HRESULT_FAILED);
+  assert.deepEqual(failed.attempts, [], 'Versuche nur bei offenen Updates');
+
+  // Offen trotz Fehlversuch: der Versuch steht am Update.
+  const late = detail.updates.find((u) => u.kbArticle === U.late.kbArticle);
+  assert.equal(late.hresult, HRESULT_FAILED);
+  assert.equal(late.attempts.length, 1);
+  assert.equal(late.attempts[0].succeeded, false);
+  assert.equal(late.attempts[0].hresult, HRESULT_FAILED);
+  assert.equal(detail.updates.find((u) => u.kbArticle === U.defender.kbArticle).attempts.length, 0);
   assert.equal(detail.checkins.length, 4);
   assert.equal(detail.agentDiagnostics?.queuedSnapshots, 0);
 });
@@ -297,6 +311,28 @@ await step('Loeschen: nur archivierte, samt Historie, Agent danach abgemeldet', 
   await api.request('DELETE', `/api/devices/${other.deviceId}`, { expect: 404 });
   assert.equal((await api.get(`/api/devices?search=${name}`)).total, 0);
   await checkin(agent, other.token, snapshot({ hostInfo: host(name), collectedAt: minutesAgo(0.5) }), 401);
+});
+
+await step('Auswahl: Export und Loeschen mehrerer Geraete', async () => {
+  const names = [`BULK-A-${RUN}`, `BULK-B-${RUN}`];
+  const ids = [];
+  for (const name of names) {
+    const enrolled = await enroll(agent, enrollmentToken, host(name));
+    await checkin(agent, enrolled.token, snapshot({ hostInfo: host(name), collectedAt: minutesAgo(1) }));
+    ids.push(enrolled.deviceId);
+  }
+
+  // Genau die Auswahl, nicht mehr: sep-Zeile, Kopfzeile und drei Geraete.
+  const csv = await api.request('POST', '/api/devices/export', { body: { ids: [...ids, device.deviceId] }, raw: true });
+  for (const name of [...names, HOST]) assert.ok(csv.data.includes(name), `${name} fehlt im Export`);
+  assert.equal(csv.data.trim().split(/\r?\n/).length, 5);
+
+  // Nur das archivierte wird geloescht, das aktive bleibt.
+  await api.post(`/api/devices/${ids[0]}/archive`, { reason: 'Smoke-Test' });
+  assert.deepEqual(await api.post('/api/devices/delete', { ids }), { deleted: 1, skipped: 1 });
+  await api.request('GET', `/api/devices/${ids[0]}`, { expect: 404 });
+  await api.get(`/api/devices/${ids[1]}`);
+  await api.request('POST', '/api/devices/delete', { body: { ids: [] }, expect: 400 });
 });
 
 await step('AD-Abgleich ohne Konfiguration: 409', async () => {

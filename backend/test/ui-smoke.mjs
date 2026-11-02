@@ -113,6 +113,14 @@ await step('Geraeteliste', async () => {
   await capture(page, 'geraete');
 });
 
+await step('Mehrfachauswahl in der Geraeteliste', async () => {
+  await page.getByRole('checkbox', { name: 'Alle Geräte dieser Seite auswählen' }).click();
+  await page.getByText(/\d+ ausgewählt/).waitFor({ timeout: 5_000 });
+  await capture(page, 'geraete-auswahl');
+  await page.getByRole('button', { name: 'Auswahl aufheben' }).click();
+  await page.getByText(/\d+ ausgewählt/).waitFor({ state: 'detached', timeout: 5_000 });
+});
+
 await step('Geraetedetail', async () => {
   // Das Geraet mit den meisten offenen Updates zeigt am meisten.
   const list = await (await page.request.get(`${base}/api/devices?sortBy=openUpdates&sortDir=desc&limit=1`)).json();
@@ -120,6 +128,14 @@ await step('Geraetedetail', async () => {
   await page.goto(`${base}/devices/${list.items[0].id}`);
   await page.getByText(list.items[0].hostname).first().waitFor({ timeout: 15_000 });
   await capture(page, 'geraet');
+
+  // Ein offenes Update mit gescheitertem Versuch (aus smoke.mjs) klappt auf.
+  const attempts = page.getByRole('button', { name: /Versuch/ }).first();
+  if ((await attempts.count()) > 0) {
+    await attempts.click();
+    await page.getByText('gescheitert', { exact: true }).first().waitFor({ timeout: 5_000 });
+    await capture(page, 'geraet-versuche');
+  }
 });
 
 await step('Updates', async () => {

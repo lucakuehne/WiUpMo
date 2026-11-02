@@ -1,10 +1,21 @@
 <script setup lang="ts">
-import { AlertTriangle, Download, RotateCcw, Search } from '@lucide/vue';
-import { onMounted, ref } from 'vue';
+import {
+  AlertTriangle,
+  ArrowUpCircle,
+  Download,
+  Loader2,
+  RotateCcw,
+  Search,
+  Trash2,
+  X,
+} from '@lucide/vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { get } from '@/api/client';
+import { toast } from 'vue-sonner';
+import { downloadPost, get, post } from '@/api/client';
 import type {
   AgentVersionCount,
+  CreateUpdateJobsResult,
   DeviceListItem,
   DeviceOu,
   DeviceStatus,
@@ -14,6 +25,15 @@ import type {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -169,6 +189,29 @@ function onTriChange(name: keyof typeof triFilters, value: unknown): void {
   onFilterChange();
 }
 
+/**
+ * Die Filter, wie das Backend sie erwartet — an einer Stelle, weil Liste,
+ * Export und „alle Treffer auswählen" dieselbe Menge meinen müssen. Der Export
+ * hatte die Agent-Version einmal vergessen und enthielt dann mehr Geräte, als
+ * die Liste zeigte.
+ */
+function filterParams(): Record<string, unknown> {
+  return {
+    sortBy: sortBy.value,
+    sortDir: sortDir.value,
+    search: search.value || undefined,
+    status: status.value === 'all' ? undefined : status.value,
+    ou: ou.value ?? undefined,
+    agentVersion: agentVersion.value ?? undefined,
+    updateSource: updateSource.value ?? undefined,
+    staleDays: staleDays.value ?? undefined,
+    hasOpenSecurity: hasOpenSecurity.value || undefined,
+    // Hier bewusst `??` statt `||`: `false` ist ein Filter, kein leerer Wert.
+    pendingReboot: pendingReboot.value ?? undefined,
+    hasAgent: hasAgent.value ?? undefined,
+  };
+}
+
 async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
@@ -177,20 +220,9 @@ async function load(): Promise<void> {
     // Serverseitig filtern, sortieren und blättern — die Tabelle lädt niemals
     // die ganze Flotte in den Browser.
     const result = await get<Paged<DeviceListItem>>('/api/devices', {
+      ...filterParams(),
       page: page.value,
       limit: limit.value,
-      sortBy: sortBy.value,
-      sortDir: sortDir.value,
-      search: search.value || undefined,
-      status: status.value === 'all' ? undefined : status.value,
-      ou: ou.value ?? undefined,
-      agentVersion: agentVersion.value ?? undefined,
-      updateSource: updateSource.value ?? undefined,
-      staleDays: staleDays.value ?? undefined,
-      hasOpenSecurity: hasOpenSecurity.value || undefined,
-      // Hier bewusst `??` statt `||`: `false` ist ein Filter, kein leerer Wert.
-      pendingReboot: pendingReboot.value ?? undefined,
-      hasAgent: hasAgent.value ?? undefined,
     });
 
     rows.value = result.items;
@@ -209,10 +241,143 @@ function onSort(field: string, dir: 'asc' | 'desc'): void {
   void load();
 }
 
-/** Jede Filteränderung springt zurück auf Seite 1 — sonst zeigt die Tabelle Leere. */
+/**
+ * Jede Filteränderung springt zurück auf Seite 1 — sonst zeigt die Tabelle
+ * Leere. Die Auswahl fällt dabei weg: Sie enthielte sonst Geräte, die nicht
+ * mehr zu sehen sind, und eine Aktion träfe sie trotzdem.
+ */
 function onFilterChange(): void {
   page.value = 1;
+  clearSelection();
   void load();
+}
+
+// --- Auswahl ------------------------------------------------------------------
+
+/**
+ * Ausgewählte Geräte über die Seiten hinweg, mit ihrer Zeile: Die Aktionen
+ * brauchen den Status (nur archivierte lassen sich löschen) auch für Geräte,
+ * deren Seite gerade nicht angezeigt wird.
+ */
+const selected = ref(new Map<string, DeviceListItem>());
+
+const pageSelection = computed<boolean | 'indeterminate'>(() => {
+  const onPage = rows.value.filter((row) => selected.value.has(row.id)).length;
+  if (onPage === 0) return false;
+  return onPage === rows.value.length ? true : 'indeterminate';
+});
+
+const archivedSelected = computed(() =>
+  [...selected.value.values()].filter((row) => row.status === 'archived'),
+);
+
+const updatableSelected = computed(() =>
+  [...selected.value.values()].filter((row) => row.status === 'active' && row.enrolledAt),
+);
+
+/** Ganze Seite gewählt, aber nicht alle Treffer — dann lohnt das Angebot, den Rest dazuzunehmen. */
+const canSelectAllMatching = computed(
+  () => pageSelection.value === true && selected.value.size < total.value,
+);
+
+function toggleRow(row: DeviceListItem, checked: boolean): void {
+  const next = new Map(selected.value);
+  if (checked) next.set(row.id, row);
+  else next.delete(row.id);
+  selected.value = next;
+}
+
+function togglePage(checked: boolean): void {
+  const next = new Map(selected.value);
+  for (const row of rows.value) {
+    if (checked) next.set(row.id, row);
+    else next.delete(row.id);
+  }
+  selected.value = next;
+}
+
+function clearSelection(): void {
+  selected.value = new Map();
+}
+
+const selectingAll = ref(false);
+
+/** Holt die übrigen Treffer seitenweise; die Liste selbst bleibt auf ihrer Seite. */
+async function selectAllMatching(): Promise<void> {
+  selectingAll.value = true;
+  try {
+    const next = new Map(selected.value);
+    for (let p = 1; next.size < total.value; p++) {
+      const result = await get<Paged<DeviceListItem>>('/api/devices', { ...filterParams(), page: p, limit: 200 });
+      result.items.forEach((row) => next.set(row.id, row));
+      if (result.items.length < 200) break;
+    }
+    selected.value = next;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Die Treffer konnten nicht ausgewählt werden.';
+  } finally {
+    selectingAll.value = false;
+  }
+}
+
+async function exportSelected(): Promise<void> {
+  try {
+    const stamp = new Date().toISOString().slice(0, 10);
+    await downloadPost('/api/devices/export', { ids: [...selected.value.keys()] }, `geraete-${stamp}.csv`);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Der Export ist fehlgeschlagen.';
+  }
+}
+
+/**
+ * Beide Aktionen mit Rückfrage: Ein Agent-Update setzt die ausgewählten
+ * Geräte in Bewegung, das Löschen lässt sich nicht zurücknehmen.
+ */
+const confirmAgentUpdate = ref(false);
+const confirmDelete = ref(false);
+const busy = ref(false);
+
+async function updateAgents(): Promise<void> {
+  busy.value = true;
+  try {
+    const ids = updatableSelected.value.map((row) => row.id);
+    const result = await post<CreateUpdateJobsResult>('/api/agent-update-jobs', { deviceIds: ids });
+    const current = ids.length - result.created - result.skipped;
+    toast.success(`${result.created} Update-Auftrag/-Aufträge auf ${result.targetVersion} angelegt.`, {
+      description:
+        [
+          result.skipped > 0 ? `${result.skipped} mit bereits offenem Auftrag` : '',
+          current > 0 ? `${current} schon auf dieser Version` : '',
+        ]
+          .filter(Boolean)
+          .join(', ') || 'Die Geräte holen den Auftrag beim nächsten Check-in ab.',
+    });
+    clearSelection();
+    void load();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Die Aufträge konnten nicht angelegt werden.';
+  } finally {
+    busy.value = false;
+    confirmAgentUpdate.value = false;
+  }
+}
+
+async function deleteSelected(): Promise<void> {
+  busy.value = true;
+  try {
+    const result = await post<{ deleted: number; skipped: number }>('/api/devices/delete', {
+      ids: archivedSelected.value.map((row) => row.id),
+    });
+    toast.success(`${result.deleted} Gerät(e) endgültig gelöscht.`);
+    clearSelection();
+    void load();
+    void loadUnits();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Das Löschen ist fehlgeschlagen.';
+  } finally {
+    busy.value = false;
+    confirmDelete.value = false;
+  }
 }
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -259,20 +424,8 @@ function openDevice(id: string): void {
  */
 function exportCsv(): void {
   const params = new URLSearchParams();
-  const filters: Record<string, unknown> = {
-    sortBy: sortBy.value,
-    sortDir: sortDir.value,
-    search: search.value || undefined,
-    status: status.value === 'all' ? undefined : status.value,
-    ou: ou.value ?? undefined,
-    updateSource: updateSource.value ?? undefined,
-    staleDays: staleDays.value ?? undefined,
-    hasOpenSecurity: hasOpenSecurity.value || undefined,
-    pendingReboot: pendingReboot.value ?? undefined,
-    hasAgent: hasAgent.value ?? undefined,
-  };
 
-  for (const [key, value] of Object.entries(filters)) {
+  for (const [key, value] of Object.entries(filterParams())) {
     if (value !== undefined && value !== '') {
       params.set(key, String(value));
     }
@@ -447,10 +600,67 @@ onMounted(() => {
       </aside>
 
       <div class="min-w-0 flex-1">
+        <!-- Erscheint nur mit Auswahl, damit die Tabelle sonst nicht nach unten rutscht. -->
+        <div
+          v-if="selected.size > 0"
+          class="bg-muted/50 mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border px-3 py-2 text-sm"
+        >
+          <span class="font-medium tabular">{{ selected.size }} ausgewählt</span>
+          <button
+            v-if="canSelectAllMatching"
+            type="button"
+            class="text-primary hover:underline disabled:opacity-50"
+            :disabled="selectingAll"
+            @click="selectAllMatching"
+          >
+            Alle {{ total }} Treffer auswählen
+          </button>
+
+          <div class="ml-auto flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" @click="exportSelected">
+              <Download class="size-4" />
+              Exportieren
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              :disabled="updatableSelected.length === 0"
+              :title="updatableSelected.length === 0 ? 'Keines der ausgewählten Geräte ist aktiv und hat einen Agent.' : undefined"
+              @click="confirmAgentUpdate = true"
+            >
+              <ArrowUpCircle class="size-4" />
+              Agent aktualisieren
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              :disabled="archivedSelected.length === 0"
+              :title="archivedSelected.length === 0 ? 'Nur archivierte Geräte lassen sich löschen.' : undefined"
+              @click="confirmDelete = true"
+            >
+              <Trash2 class="size-4" />
+              Endgültig löschen
+              <span v-if="archivedSelected.length > 0" class="tabular">({{ archivedSelected.length }})</span>
+            </Button>
+            <Button size="sm" variant="ghost" @click="clearSelection">
+              <X class="size-4" />
+              Auswahl aufheben
+            </Button>
+          </div>
+        </div>
+
         <div class="rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead class="w-10">
+                  <Checkbox
+                    aria-label="Alle Geräte dieser Seite auswählen"
+                    :model-value="pageSelection"
+                    :disabled="loading || rows.length === 0"
+                    @update:model-value="togglePage($event === true)"
+                  />
+                </TableHead>
                 <SortHead field="hostname" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
                   Hostname
                 </SortHead>
@@ -507,14 +717,14 @@ onMounted(() => {
             <TableBody>
               <template v-if="loading">
                 <TableRow v-for="n in 6" :key="n">
-                  <TableCell v-for="column in 9" :key="column">
+                  <TableCell v-for="column in 10" :key="column">
                     <Skeleton class="h-4 w-full" />
                   </TableCell>
                 </TableRow>
               </template>
 
               <TableRow v-else-if="rows.length === 0">
-                <TableCell :colspan="9" class="text-muted-foreground py-8 text-center">
+                <TableCell :colspan="10" class="text-muted-foreground py-8 text-center">
                   Keine Geräte gefunden.
                 </TableCell>
               </TableRow>
@@ -523,8 +733,18 @@ onMounted(() => {
                 v-for="row in loading ? [] : rows"
                 :key="row.id"
                 class="cursor-pointer"
+                :data-state="selected.has(row.id) ? 'selected' : undefined"
                 @click="openDevice(row.id)"
               >
+                <!-- Der Klick aufs Kästchen wählt aus und öffnet nicht das Gerät. -->
+                <TableCell @click.stop>
+                  <Checkbox
+                    :aria-label="`${row.hostname} auswählen`"
+                    :model-value="selected.has(row.id)"
+                    @update:model-value="toggleRow(row, $event === true)"
+                  />
+                </TableCell>
+
                 <TableCell>
                   <div class="flex items-center gap-2">
                     <span class="font-medium">{{ row.hostname }}</span>
@@ -612,5 +832,54 @@ onMounted(() => {
         />
       </div>
     </div>
+
+    <Dialog :open="confirmAgentUpdate" @update:open="confirmAgentUpdate = false">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Agent auf {{ updatableSelected.length }} Geräten aktualisieren?</DialogTitle>
+          <DialogDescription>
+            Jedes Gerät bekommt einen Auftrag auf die als aktuell markierte Agent-Version und holt
+            ihn beim nächsten Check-in ab. Geräte, die schon darauf laufen oder einen offenen
+            Auftrag haben, werden übergangen.
+            <template v-if="updatableSelected.length < selected.size">
+              {{ selected.size - updatableSelected.length }} der ausgewählten sind archiviert oder
+              haben keinen Agent und bleiben aussen vor.
+            </template>
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" @click="confirmAgentUpdate = false">Abbrechen</Button>
+          <Button :disabled="busy" @click="updateAgents">
+            <Loader2 v-if="busy" class="size-4 animate-spin" />
+            Aufträge anlegen
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog :open="confirmDelete" @update:open="confirmDelete = false">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{{ archivedSelected.length }} archivierte Geräte endgültig löschen?</DialogTitle>
+          <DialogDescription>
+            Die Geräte verschwinden samt Check-ins, Update-Historie und Aufträgen; die Auswertungen
+            vergangener Zeiträume zählen sie danach nicht mehr mit. Das lässt sich nicht rückgängig
+            machen. Meldet sich ein Agent noch einmal oder taucht ein Konto im AD wieder auf,
+            entsteht ein neues Gerät ohne Historie.
+            <template v-if="archivedSelected.length < selected.size">
+              {{ selected.size - archivedSelected.length }} der ausgewählten sind nicht archiviert
+              und bleiben bestehen.
+            </template>
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" @click="confirmDelete = false">Abbrechen</Button>
+          <Button variant="destructive" :disabled="busy" @click="deleteSelected">
+            <Loader2 v-if="busy" class="size-4 animate-spin" />
+            Löschen
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

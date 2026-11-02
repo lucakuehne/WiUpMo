@@ -4,6 +4,18 @@ import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validato
 import { AgentDiagnosticsDto } from '../../agent-api/dto/snapshot.dto.js';
 import { DeviceStatus, UpdateEventType, UpdateSource, UpdateState } from '../../database/enums.js';
 
+/** Ein Installationsversuch aus der Historie des Geraets. */
+export class InstallAttemptDto {
+  /** Zeitpunkt auf dem Geraet. */
+  occurredAt: string;
+
+  /** Installiert — bei einem weiter offenen Update meist eine fruehere Revision. */
+  succeeded: boolean;
+
+  resultCode: number | null;
+  hresult: number | null;
+}
+
 export class DeviceUpdateDto {
   updateId: string;
   wuUpdateId: string;
@@ -21,6 +33,13 @@ export class DeviceUpdateDto {
   hresult: number | null;
   rebootRequired: boolean;
   lastReportedAt: string;
+
+  /**
+   * Bisherige Installationsversuche, neueste zuerst — nur bei offenen
+   * Updates. Ein offenes Update mit Versuchen ist eines, an dem Windows
+   * gescheitert ist und das es weiter anbietet.
+   */
+  attempts: InstallAttemptDto[];
 }
 
 export class DeviceCheckinDto {

@@ -77,6 +77,15 @@ export interface DeviceUpdate {
   hresult: number | null;
   rebootRequired: boolean;
   lastReportedAt: string;
+  /** Bisherige Installationsversuche, neueste zuerst — nur bei offenen Updates. */
+  attempts: InstallAttempt[];
+}
+
+export interface InstallAttempt {
+  occurredAt: string;
+  succeeded: boolean;
+  resultCode: number | null;
+  hresult: number | null;
 }
 
 export interface DeviceCheckin {

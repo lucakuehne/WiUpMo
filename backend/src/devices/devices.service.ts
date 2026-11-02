@@ -8,6 +8,7 @@ import {
   DeviceCheckinDto,
   DeviceDetailDto,
   DeviceUpdateDto,
+  InstallAttemptDto,
   TimelineDto,
   TimelineEntryDto,
   TimelineQueryDto,
@@ -101,9 +102,10 @@ export class DevicesService {
     )
   `;
 
-  async list(query: DeviceQueryDto): Promise<DeviceListDto> {
+  /** `ids` schraenkt zusaetzlich auf eine Auswahl ein — fuer Aktionen auf mehreren Geraeten. */
+  async list(query: DeviceQueryDto, ids?: string[]): Promise<DeviceListDto> {
     const params = new SqlParams();
-    const where = this.buildWhere(query, params);
+    const where = this.buildWhere(query, params, ids);
 
     const sort = SORT_COLUMNS[query.sortBy] ?? SORT_COLUMNS.hostname;
     const direction = sort.invert
@@ -140,7 +142,7 @@ export class DevicesService {
 
     // Eigene Parameterliste: die Zaehlung kennt weder LIMIT noch OFFSET.
     const countParams = new SqlParams();
-    const countWhere = this.buildWhere(query, countParams);
+    const countWhere = this.buildWhere(query, countParams, ids);
     const countRows: Array<{ total: string }> = await this.dataSource.query(
       `${DevicesService.ANNOTATED_DEVICES}
        SELECT count(*)::text AS total
@@ -166,9 +168,9 @@ export class DevicesService {
    * baut die gesamte Datei im Speicher auf, und eine unbegrenzte Abfrage waere
    * bei einer grossen Flotte ein Weg, das Backend umzubringen.
    */
-  async exportCsv(query: DeviceQueryDto): Promise<string> {
+  async exportCsv(query: DeviceQueryDto, ids?: string[]): Promise<string> {
     const full: DeviceQueryDto = { ...query, page: 1, limit: 50_000 };
-    const { items } = await this.list(full);
+    const { items } = await this.list(full, ids);
 
     return toCsv(
       [
@@ -239,8 +241,12 @@ export class DevicesService {
     return rows.map((row) => ({ dn: row.ad_ou, devices: Number(row.devices) }));
   }
 
-  private buildWhere(query: DeviceQueryDto, params: SqlParams): string {
+  private buildWhere(query: DeviceQueryDto, params: SqlParams, ids?: string[]): string {
     const conditions: string[] = [];
+
+    if (ids) {
+      conditions.push(`d.id = ANY(${params.add(ids)}::uuid[])`);
+    }
 
     if (query.search) {
       const term = params.add(`%${query.search}%`);
@@ -383,6 +389,8 @@ export class DevicesService {
       [deviceId],
     );
 
+    const attempts = await this.installAttempts(deviceId);
+
     return rows.map((row) => ({
       updateId: row.id as string,
       wuUpdateId: row.update_id as string,
@@ -400,7 +408,42 @@ export class DevicesService {
       hresult: (row.hresult as number | null) ?? null,
       rebootRequired: row.reboot_required as boolean,
       lastReportedAt: toIso(row.last_reported_at) ?? '',
+      attempts: attempts.get(row.id as string) ?? [],
     }));
+  }
+
+  /**
+   * Installationsversuche der offenen Updates, aus der Zeitreihe.
+   *
+   * Nur fuer offene: Bei einem installierten oder nicht mehr angebotenen
+   * Update ist die Geschichte abgeschlossen und steht im Verlauf. Bei einem
+   * offenen erklaert sie, warum es noch offen ist. Was die Aufbewahrungsfrist
+   * geloescht hat, fehlt auch hier.
+   */
+  private async installAttempts(deviceId: string): Promise<Map<string, InstallAttemptDto[]>> {
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT e.update_id, e.event_type, e.occurred_at, e.details
+         FROM device_update_events e
+         JOIN device_update_states s
+           ON s.device_id = e.device_id AND s.update_id = e.update_id AND s.state = 'available'
+        WHERE e.device_id = $1 AND e.event_type IN ('installed', 'failed')
+        ORDER BY e.occurred_at DESC`,
+      [deviceId],
+    );
+
+    const byUpdate = new Map<string, InstallAttemptDto[]>();
+    for (const row of rows) {
+      const details = (row.details as Record<string, unknown> | null) ?? {};
+      const list = byUpdate.get(row.update_id as string) ?? [];
+      list.push({
+        occurredAt: toIso(row.occurred_at) ?? '',
+        succeeded: row.event_type === UpdateEventType.Installed,
+        resultCode: typeof details.resultCode === 'number' ? details.resultCode : null,
+        hresult: typeof details.hresult === 'number' ? details.hresult : null,
+      });
+      byUpdate.set(row.update_id as string, list);
+    }
+    return byUpdate;
   }
 
   private async deviceCheckins(deviceId: string): Promise<DeviceCheckinDto[]> {
@@ -483,6 +526,23 @@ export class DevicesService {
       throw new NotFoundException('Geraet nicht gefunden.');
     }
     throw new ConflictException('Nur archivierte Geraete lassen sich loeschen.');
+  }
+
+  /**
+   * Loescht aus einer Auswahl die archivierten Geraete; aktive bleiben, aus
+   * demselben Grund wie bei {@link remove}. Kein Fehler, wenn darunter aktive
+   * sind — die Auswahl stammt aus einer Liste, die beides zeigen kann, und
+   * die Antwort sagt, wie viele uebrig geblieben sind.
+   */
+  async removeMany(ids: string[]): Promise<{ deleted: number; skipped: number }> {
+    const deleted = returnedRows(
+      await this.dataSource.query(
+        `DELETE FROM devices WHERE id = ANY($1::uuid[]) AND status = 'archived' RETURNING id`,
+        [ids],
+      ),
+    ).length;
+
+    return { deleted, skipped: new Set(ids).size - deleted };
   }
 
   async timeline(deviceId: string, query: TimelineQueryDto): Promise<TimelineDto> {
