@@ -33,7 +33,14 @@ async function step(name, fn) {
   } catch (error) {
     results.push({ name, ok: false });
     console.log('FEHLER');
-    console.log(`    ${(error instanceof Error ? error.message : String(error)).split('\n')[0]}`);
+    // Die erste Zeile nennt nur die Zeitueberschreitung; welcher Locator es
+    // war, steht im Protokoll darunter.
+    const lines = (error instanceof Error ? error.message : String(error)).split('\n');
+    console.log(`    ${lines[0]}`);
+    const waiting = lines.find((line) => /waiting for/.test(line));
+    if (waiting) console.log(`    ${waiting.trim()}`);
+    // `page` gibt es erst nach den ersten Schritten.
+    await globalThis.failurePage?.screenshot({ path: join(out, `fehler-${results.length}.png`), fullPage: true }).catch(() => {});
   }
 }
 
@@ -76,6 +83,7 @@ async function signIn(page) {
 const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'de-CH', colorScheme: 'light' });
 const page = await context.newPage();
+globalThis.failurePage = page;
 watch(page, 'hell');
 
 await step('Einrichtung, falls die Instanz leer ist', async () => {
@@ -117,6 +125,14 @@ await step('Mehrfachauswahl in der Geraeteliste', async () => {
   await page.getByRole('checkbox', { name: 'Alle Geräte dieser Seite auswählen' }).click();
   await page.getByText(/\d+ ausgewählt/).waitFor({ timeout: 5_000 });
   await capture(page, 'geraete-auswahl');
+
+  // Nur ansehen: Angelegt wird im Geraetedetail.
+  await page.getByRole('button', { name: /Offene Updates installieren/ }).click();
+  await page.getByRole('dialog').waitFor({ timeout: 5_000 });
+  await capture(page, 'geraete-installieren');
+  await page.getByRole('dialog').getByRole('button', { name: 'Abbrechen' }).click();
+  await page.getByRole('dialog').waitFor({ state: 'detached', timeout: 5_000 });
+
   await page.getByRole('button', { name: 'Auswahl aufheben' }).click();
   await page.getByText(/\d+ ausgewählt/).waitFor({ state: 'detached', timeout: 5_000 });
 });
@@ -136,6 +152,39 @@ await step('Geraetedetail', async () => {
     await page.getByText('gescheitert', { exact: true }).first().waitFor({ timeout: 5_000 });
     await capture(page, 'geraet-versuche');
   }
+});
+
+await step('Installationsauftrag im Geraetedetail', async () => {
+  // Das INST-Geraet aus smoke.mjs meldet einen Agent ab 0.7.0; das obige steht
+  // nach dem Selbst-Update auf der Version im Image und wuerde uebergangen.
+  const list = await (await page.request.get(`${base}/api/devices?search=INST-&sortBy=openUpdates&sortDir=desc&limit=1`)).json();
+  if (list.items.length === 0) throw new Error('kein INST-Geraet - lief smoke.mjs vorher?');
+  await page.goto(`${base}/devices/${list.items[0].id}`);
+  await page.getByText(list.items[0].hostname).first().waitFor({ timeout: 15_000 });
+
+  // Ein Update auswaehlen und einen Auftrag anlegen - es sei denn, ein frueherer
+  // Lauf hat schon einen offenen hinterlassen; dann ist der Knopf gesperrt.
+  const install = page.getByRole('button', { name: /Installieren …/ });
+  if (await install.isEnabled()) {
+    await page.locator('table tbody').getByRole('checkbox').first().click();
+    await install.click();
+    await page.getByRole('dialog').waitFor({ timeout: 5_000 });
+    await capture(page, 'geraet-installieren');
+
+    // Umschalten auf die Typen; angelegt wird mit allen.
+    await page.getByRole('radio', { name: 'Nach Update-Typ' }).check();
+    await page.getByText('Alle Typen').waitFor({ timeout: 5_000 });
+    await page.getByText(/\d+ offen/).first().waitFor({ timeout: 5_000 });
+    await capture(page, 'geraet-installieren-typen');
+    await page.getByRole('button', { name: 'Aufträge anlegen' }).click();
+    await page.getByRole('dialog').waitFor({ state: 'detached', timeout: 10_000 });
+  }
+  await page.getByText(/Installationsauftrag|Installation läuft/).first().waitFor({ timeout: 10_000 });
+  await capture(page, 'geraet-auftrag');
+
+  await page.getByRole('tab', { name: /Installationen/ }).click();
+  await page.locator('table tbody tr').first().waitFor({ timeout: 5_000 });
+  await capture(page, 'geraet-installationen');
 });
 
 await step('Updates', async () => {

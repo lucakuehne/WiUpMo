@@ -73,6 +73,7 @@ sich nicht mehr". Wer das vermeiden will, archiviert es dort von Hand.
 | `--install` / `--uninstall` | Dienst und Updater-Task einrichten bzw. entfernen (Administratorrechte) |
 | `--uninstall --purge` | Zusätzlich das Datenverzeichnis mit Identität, Warteschlange und Protokollen |
 | `--updater` | Ein Updater-Lauf. Wird vom geplanten Task aufgerufen, nicht von Hand. |
+| `--install-probe` | Geht den Installationsweg bis vor Download und Installation: zeigt die angebotenen Updates und ob Windows bereit ist. Installiert nichts. |
 
 > `--once` greift auf dieselbe Warteschlange zu wie der Dienst. Läuft der
 > Dienst, sind zwei gleichzeitige Durchläufe zwar unschädlich — SQLite
@@ -131,6 +132,7 @@ Drei Quellen, die einander in dieser Reihenfolge überschreiben:
 | `Agent:QueueMaxAgeDays` | — | 30 | Höchstalter in der Warteschlange. |
 | `Agent:SearchOnline` | `--search-online` | true | `false` liest nur den lokalen Zwischenspeicher. |
 | `Agent:ComTimeoutSeconds` | — | 300 | Obergrenze pro WUApi-Aufruf. |
+| `Agent:InstallTimeoutMinutes` | — | 180 | Obergrenze für einen Installationsauftrag, Download und Installation zusammen. |
 | `Agent:InitialHistoryDays` | — | 90 | Rückblick beim allerersten Check-in. |
 | `Agent:LogRetentionDays` | — | 14 | Aufbewahrung der Protokolldateien. |
 
@@ -142,6 +144,7 @@ Unter `%ProgramData%\WiUpMo`:
 |---|---|
 | `identity.dat` | Geräte-ID und Secret, mit DPAPI im Maschinenkontext verschlüsselt |
 | `queue.db` | Offline-Warteschlange und Fortschrittsmarker der Historie |
+| `install.json` | Stand eines Installationsauftrags, bis das Backend das Ergebnis hat |
 | `logs\agent-*.log` | Tagesrotierendes Protokoll |
 
 Geht `identity.dat` verloren, registriert sich der Agent neu. Das Backend erkennt
@@ -183,6 +186,9 @@ Vier-Stunden-Durchlauf vollgeschrieben wäre es dafür wertlos.
 | `Install/ServiceInstaller.cs` | `--install` / `--uninstall` |
 | `Windows/Com.cs` | Späte Bindung an COM über IDispatch |
 | `Windows/WindowsUpdateReader.cs` | Offene Updates und Installationshistorie |
+| `Windows/WindowsUpdateInstaller.cs` | Suchen, Lizenz annehmen, herunterladen, installieren |
+| `Installation/InstallJobRunner.cs` | Installationsaufträge annehmen, im Hintergrund ausführen, melden |
+| `Installation/InstallMarker.cs` | Stand eines Auftrags in `install.json` |
 | `Windows/UpdateSourceInspector.cs` | WSUS / Microsoft Update / Intune / Dual Scan |
 | `Windows/HostInspector.cs` | Stammdaten und Neustart-Status |
 | `Backend/BackendClient.cs` | HTTP gegen `/api/agent/v1/...` |
@@ -244,3 +250,36 @@ keine Gelegenheit zur Bestätigung hatte.
 wird abgebrochen, nicht getauscht. Eine Datei unbekannter Herkunft als Dienst
 unter `LocalSystem` zu starten wäre der schlimmste denkbare Ausgang dieses
 Vorgangs.
+
+## Installationsaufträge
+
+Ab 0.7.0 installiert der Agent offene Updates auf Auftrag aus der Oberfläche.
+Der Auftrag kommt wie das Selbst-Update mit der Check-in-Antwort
+(`installRequest`), und zwar erst ab dem gewählten Zeitpunkt — was ankommt, ist
+fällig.
+
+Installiert wird über Windows Update aus der Quelle des Geräts. Der Agent sucht
+unmittelbar davor noch einmal und nimmt nur, was Windows dann anbietet; am WSUS
+also nur Freigegebenes. **Neu gestartet wird nie.** Verlangt ein Update einen
+Neustart, steht das im Ergebnis und im nächsten Snapshot.
+
+| Schritt | Was passiert |
+|---|---|
+| Annehmen | Nur, wenn kein anderer Auftrag läuft, kein Selbst-Update ansteht und Windows nicht selbst installiert. Sonst bleibt der Auftrag im Backend „zugestellt" und kommt beim nächsten Check-in wieder. |
+| Neustart ausstehend | Verlangt Windows vor weiteren Installationen einen Neustart, scheitert der Auftrag sofort mit dieser Begründung. |
+| Start | `install.json` anlegen, `running` melden. Antwortet das Backend mit 404 — inzwischen abgebrochen —, wird nicht installiert. |
+| Ausführen | Im Hintergrund: suchen, Lizenz annehmen, herunterladen, installieren (`AllowSourcePrompts` aus, `ForceQuiet` an). Zeitlimit `InstallTimeoutMinutes`. |
+| Melden | `done`, wenn alles Angebotene installiert ist, sonst `failed` — mit dem Ergebnis je Update. Danach sofort ein Durchlauf, damit der neue Stand im Backend steht. |
+
+Während einer Installation sucht der Agent nicht — die Suche wartete auf Windows
+und liefe ins Zeitlimit —, meldet aber weiter. Ein Selbst-Update wartet bis zum
+Ende.
+
+`install.json` ist der Grund, warum kein Auftrag verloren geht: Wird der Dienst
+mittendrin beendet, meldet er ihn beim nächsten Start als unterbrochen. Ist das
+Backend beim Abschluss nicht erreichbar, holt der nächste Durchlauf die Meldung
+nach.
+
+Vor dem ersten Auftrag auf einem Gerät zeigt `wiupmo-agent.exe --install-probe`
+(als Administrator), ob der Weg trägt. Mit `--once` bleibt der Prozess bis zum
+Ende einer angenommenen Installation offen.

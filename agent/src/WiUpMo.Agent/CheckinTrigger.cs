@@ -60,18 +60,46 @@ public sealed class CheckinTrigger(AgentOptions options, ILogger<CheckinTrigger>
 
             _lastSignal = now;
 
-            // Mehr als ein ausstehendes Signal ergibt keinen Sinn: der naechste
-            // Durchlauf erfasst den aktuellen Stand ohnehin vollstaendig.
-            if (_pending)
+            if (!Release())
             {
                 return;
             }
-
-            _pending = true;
-            _signal.Release();
         }
 
         logger.LogInformation("Ausserplanmaessiger Durchlauf angefordert: {Grund}.", reason);
+    }
+
+    /// <summary>
+    /// Fordert einen Durchlauf an, ohne Entprellung — fuer seltene Ereignisse
+    /// im Agent selbst, etwa das Ende einer Installation, deren Ergebnis sofort
+    /// im Backend stehen soll.
+    /// </summary>
+    public void RequestRun(string reason)
+    {
+        lock (_gate)
+        {
+            if (!Release())
+            {
+                return;
+            }
+        }
+
+        logger.LogInformation("Ausserplanmaessiger Durchlauf angefordert: {Grund}.", reason);
+    }
+
+    /// <summary>Unter <see cref="_gate"/> aufzurufen. Liefert <c>false</c>, wenn schon einer aussteht.</summary>
+    private bool Release()
+    {
+        // Mehr als ein ausstehendes Signal ergibt keinen Sinn: der naechste
+        // Durchlauf erfasst den aktuellen Stand ohnehin vollstaendig.
+        if (_pending)
+        {
+            return false;
+        }
+
+        _pending = true;
+        _signal.Release();
+        return true;
     }
 
     /// <summary>

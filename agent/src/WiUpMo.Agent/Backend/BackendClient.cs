@@ -110,6 +110,16 @@ public sealed class BackendClient : IDisposable
         PostAsync<UpdateResultRequest, UpdateAck>("api/agent/v1/update-result", identity, request, ct);
 
     /// <summary>
+    /// Rueckmeldung zu einem Installationsauftrag. 404 heisst: Der Auftrag ist
+    /// im Backend nicht mehr offen — abgebrochen, abgelaufen oder schon gemeldet.
+    /// </summary>
+    public Task ReportInstallResultAsync(
+        DeviceIdentity identity,
+        InstallResultRequest request,
+        CancellationToken ct) =>
+        PostAsync<InstallResultRequest, UpdateAck>("api/agent/v1/install-result", identity, request, ct);
+
+    /// <summary>
     /// Laedt ein Agent-Binary in eine Datei.
     ///
     /// Ueber einen Datenstrom statt ueber ein Byte-Array: Das Binary ist rund

@@ -375,6 +375,147 @@ await step('Selbst-Update: Auftrag, Auslieferung beim Check-in, Download, Rueckm
   assert.equal((await api.post('/api/agent-update-jobs/cancel-open')).cancelled, 0);
 });
 
+// --- Installationsauftraege -----------------------------------------------------
+// Der Test spielt den Agent ab 0.7.0: Er holt den Auftrag beim Check-in ab und
+// meldet Start und Ergebnis. Eigene Geraete, damit das Selbst-Update oben die
+// gemeldete Version nicht verschiebt.
+
+const installHost = host(`INST-${RUN}`);
+const secondHost = host(`INST2-${RUN}`);
+let installDevice = null;
+let secondDevice = null;
+let lateCatalogId = '';
+
+const installJobs = async (deviceId) => api.get(`/api/install-jobs?deviceId=${deviceId}`);
+let allTypes = [];
+
+await step('Installationsauftrag: angelegt, ausgeliefert, zurueckgemeldet', async () => {
+  installDevice = await enroll(agent, enrollmentToken, installHost);
+  await checkin(agent, installDevice.token, snapshot({ hostInfo: installHost, collectedAt: minutesAgo(3), available: [U.late, U.defender] }));
+  lateCatalogId = (await api.get(`/api/updates?search=${U.late.kbArticle}`)).items[0].id;
+
+  // Vorschau: alle Typen in fester Reihenfolge, gezaehlt wird nur, was offen ist.
+  const preview = await api.post('/api/install-jobs/preview', { deviceIds: [installDevice.deviceId] });
+  allTypes = preview.classifications.map((c) => c.classification);
+  assert.equal(allTypes[0], 'security');
+  assert.equal(allTypes.at(-1), 'other');
+  const counts = Object.fromEntries(preview.classifications.map((c) => [c.classification, [c.updates, c.devices]]));
+  assert.deepEqual([counts.security, counts.definition, counts.drivers], [[1, 1], [1, 1], [0, 0]]);
+
+  const created = await api.post('/api/install-jobs', { deviceIds: [installDevice.deviceId], scope: 'selected', updateIds: [lateCatalogId] });
+  assert.equal(created.created, 1);
+  assert.equal(created.expiryDays, 14, 'Vorgabe der Frist');
+  const again = await api.post('/api/install-jobs', { deviceIds: [installDevice.deviceId], scope: 'types', classifications: allTypes });
+  assert.deepEqual([again.created, again.skipped.openJob], [0, 1]);
+
+  // Ausgeliefert, und bis zum Start bei jedem Check-in erneut.
+  const first = await checkin(agent, installDevice.token, snapshot({ hostInfo: installHost, collectedAt: minutesAgo(2), available: [U.late, U.defender] }));
+  assert.deepEqual(first.installRequest?.updateIds, [U.late.updateId]);
+  const repeat = await checkin(agent, installDevice.token, snapshot({ hostInfo: installHost, collectedAt: minutesAgo(1.5), available: [U.late, U.defender] }));
+  assert.equal(repeat.installRequest?.jobId, first.installRequest.jobId);
+
+  const jobId = first.installRequest.jobId;
+  await agent.post('/api/agent/v1/install-result', { jobId, state: 'running' }, { token: installDevice.token });
+  const running = await checkin(agent, installDevice.token, snapshot({ hostInfo: installHost, collectedAt: minutesAgo(1), available: [U.late, U.defender] }));
+  assert.equal(running.installRequest, null, 'ein laufender Auftrag geht nicht noch einmal hinaus');
+
+  await agent.post(
+    '/api/agent/v1/install-result',
+    { jobId, state: 'done', results: [{ updateId: U.late.updateId, offered: true, resultCode: 2, hresult: 0, rebootRequired: true }] },
+    { token: installDevice.token },
+  );
+  const [job] = await installJobs(installDevice.deviceId);
+  assert.equal(job.state, 'done');
+  assert.equal(job.createdBy, ADMIN.username);
+  assert.equal(job.selectedCount, 1);
+  assert.equal(job.results[0].kbArticle, U.late.kbArticle);
+  assert.match(job.results[0].title, /Spaetes Sicherheitsupdate/);
+  assert.equal(job.results[0].rebootRequired, true);
+
+  // Fremde Auftraege kann ein Geraet nicht abschliessen.
+  await agent.request('POST', '/api/agent/v1/install-result', { body: { jobId, state: 'failed' }, token: device.token, expect: 404 });
+});
+
+await step('Installationsauftrag: Zeitpunkt, Frist aus den Einstellungen, Abbruch', async () => {
+  await api.put('/api/settings/install', { expiryDays: 3 });
+  assert.equal((await api.get('/api/settings')).install.expiryDays, 3);
+  await api.request('PUT', '/api/settings/install', { body: { expiryDays: 0 }, expect: 400 });
+
+  const notBefore = new Date(Date.now() + 2 * 3_600_000).toISOString();
+  const created = await api.post('/api/install-jobs', { deviceIds: [installDevice.deviceId], scope: 'types', classifications: allTypes, notBefore });
+  assert.deepEqual([created.created, created.expiryDays], [1, 3]);
+
+  const early = await checkin(agent, installDevice.token, snapshot({ hostInfo: installHost, collectedAt: minutesAgo(0.8), available: [U.late, U.defender] }));
+  assert.equal(early.installRequest, null, 'vor dem Zeitpunkt nicht ausgeliefert');
+
+  const [job] = await installJobs(installDevice.deviceId);
+  assert.equal(job.state, 'pending');
+  assert.equal(new Date(job.notBefore).toISOString(), notBefore, 'ein einzelnes Geraet wird nicht gestreut');
+  assert.equal(new Date(job.expiresAt) - new Date(job.notBefore), 3 * 86_400_000);
+
+  await api.post(`/api/install-jobs/${job.id}/cancel`);
+  assert.equal((await installJobs(installDevice.deviceId))[0].state, 'cancelled');
+  await api.request('POST', `/api/install-jobs/${job.id}/cancel`, { expect: 409 });
+  await api.put('/api/settings/install', { expiryDays: 14 });
+});
+
+await step('Installationsauftrag: Streuung, uebergangene Geraete', async () => {
+  secondDevice = await enroll(agent, enrollmentToken, secondHost);
+  await checkin(agent, secondDevice.token, snapshot({ hostInfo: secondHost, collectedAt: minutesAgo(1), available: [U.defender] }));
+
+  // Ein alter Agent: registriert mit 0.6.3, ohne dass ein Check-in die Version ueberschreibt.
+  const old = (
+    await agent.request('POST', '/api/agent/v1/enroll', {
+      body: { enrollmentToken, host: host(`OLD-${RUN}`), agentVersion: '0.6.3' },
+    })
+  ).data;
+
+  // Zwei Geraete bekommen einen Auftrag, also wird gestreut; OLD ist zu alt.
+  const start = Date.now() + 3_600_000;
+  const spread = await api.post('/api/install-jobs', {
+    deviceIds: [installDevice.deviceId, secondDevice.deviceId, old.deviceId],
+    scope: 'types',
+    classifications: allTypes,
+    notBefore: new Date(start).toISOString(),
+    spreadMinutes: 15,
+  });
+  assert.equal(spread.created, 2);
+  assert.deepEqual(spread.skipped, { openJob: 0, agentTooOld: 1, notEligible: 0, nothingOpen: 0 });
+  assert.equal(spread.minimumAgentVersion, '0.7.0');
+
+  for (const id of [installDevice.deviceId, secondDevice.deviceId]) {
+    const [job] = await installJobs(id);
+    const offset = new Date(job.notBefore).getTime() - start;
+    assert.ok(offset >= 0 && offset <= 15 * 60_000, `Start ${offset / 60_000} min nach dem Zeitpunkt`);
+    await api.post(`/api/install-jobs/${job.id}/cancel`);
+  }
+
+  // Nur Sicherheitsupdates: INST hat eines offen, INST2 nur eine Definition.
+  const security = await api.post('/api/install-jobs', {
+    deviceIds: [installDevice.deviceId, secondDevice.deviceId],
+    scope: 'types',
+    classifications: ['security'],
+    notBefore: new Date(start).toISOString(),
+  });
+  assert.deepEqual([security.created, security.skipped.nothingOpen], [1, 1]);
+  await api.post(`/api/install-jobs/${(await installJobs(installDevice.deviceId))[0].id}/cancel`);
+
+  // Faellig, nach Typ: beim Check-in gegen die Verfuegbar-Liste aufgeloest.
+  // INST hat ein Sicherheits- und ein Definitionsupdate offen, nur Letzteres passt.
+  await api.post('/api/install-jobs', { deviceIds: [installDevice.deviceId], scope: 'types', classifications: ['definition', 'drivers'] });
+  const due = await checkin(agent, installDevice.token, snapshot({ hostInfo: installHost, collectedAt: minutesAgo(0.5), available: [U.late, U.defender] }));
+  assert.deepEqual(due.installRequest?.updateIds, [U.defender.updateId]);
+  await api.post(`/api/install-jobs/${due.installRequest.jobId}/cancel`);
+
+  const drivers = await api.post('/api/install-jobs', { deviceIds: [installDevice.deviceId], scope: 'types', classifications: ['drivers'] });
+  assert.deepEqual([drivers.created, drivers.skipped.nothingOpen], [0, 1]);
+
+  await api.request('POST', '/api/install-jobs', { body: { deviceIds: [secondDevice.deviceId], scope: 'selected' }, expect: 400 });
+  await api.request('POST', '/api/install-jobs', { body: { deviceIds: [secondDevice.deviceId], scope: 'types', classifications: [] }, expect: 400 });
+  await api.request('POST', '/api/install-jobs', { body: { deviceIds: [secondDevice.deviceId], scope: 'types', classifications: ['gibt-es-nicht'] }, expect: 400 });
+  await api.request('POST', '/api/install-jobs', { body: { deviceIds: [secondDevice.deviceId], scope: 'all' }, expect: 400 });
+});
+
 // --- Auslieferung des Frontends -------------------------------------------------
 
 await step('Frontend und API-Grenze', async () => {

@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.Extensions.Logging;
 using WiUpMo.Agent.Backend;
 using WiUpMo.Agent.Contracts;
+using WiUpMo.Agent.Installation;
 using WiUpMo.Agent.Storage;
 using WiUpMo.Agent.Update;
 using WiUpMo.Agent.Windows;
@@ -23,6 +24,7 @@ public sealed class AgentCycle(
     DeviceIdentityStore identityStore,
     BackendClient backend,
     SelfUpdateService selfUpdate,
+    InstallJobRunner installs,
     CheckinSchedule schedule,
     AgentHealth health,
     ILogger<AgentCycle> logger)
@@ -44,15 +46,25 @@ public sealed class AgentCycle(
          * gepufferte Snapshots blieben liegen. Ein Geraet, das die Update-Quelle
          * nicht erreicht, das Backend aber sehr wohl, meldete damit gar nichts.
          */
-        try
+        if (installs.IsRunning)
         {
-            await CollectAsync(ct).ConfigureAwait(false);
+            // Eine Suche neben einer laufenden Installation wartet auf Windows
+            // und liefe ins Zeitlimit. Gemeldet wird trotzdem: Die Warteschlange
+            // geht hinaus, und nach der Installation folgt sofort ein Durchlauf.
+            logger.LogInformation("Eine Installation laeuft; die Erfassung setzt bis zu ihrem Ende aus.");
         }
-        catch (WindowsUpdateException ex)
+        else
         {
-            // Kein Programmfehler, sondern ein Zustand der Umgebung: als
-            // Warnung im Klartext, ohne Stapelspur.
-            logger.LogWarning("Update-Zustand nicht lesbar. {Meldung}", ex.Message);
+            try
+            {
+                await CollectAsync(ct).ConfigureAwait(false);
+            }
+            catch (WindowsUpdateException ex)
+            {
+                // Kein Programmfehler, sondern ein Zustand der Umgebung: als
+                // Warnung im Klartext, ohne Stapelspur.
+                logger.LogWarning("Update-Zustand nicht lesbar. {Meldung}", ex.Message);
+            }
         }
 
         await FlushAsync(ct).ConfigureAwait(false);
@@ -149,10 +161,25 @@ public sealed class AgentCycle(
             // Warteschlange draussen ist. Ein Selbst-Update mitten in einer
             // vollen Warteschlange wuerde im Fehlerfall beides mitnehmen.
             await selfUpdate.ReportPendingOutcomeAsync(identity, ct).ConfigureAwait(false);
+            await installs.ReportPendingOutcomeAsync(identity, ct).ConfigureAwait(false);
 
             if (letzte?.AgentUpdate is { } job)
             {
-                await selfUpdate.PrepareAsync(identity, job, ct).ConfigureAwait(false);
+                if (installs.IsRunning)
+                {
+                    // Der Tausch haelt den Dienst an — mitten in der Installation
+                    // waere der Auftrag verloren. Der Auftrag kommt wieder.
+                    logger.LogInformation("Das Selbst-Update wartet auf das Ende der Installation.");
+                }
+                else
+                {
+                    await selfUpdate.PrepareAsync(identity, job, ct).ConfigureAwait(false);
+                }
+            }
+
+            if (letzte?.InstallRequest is { } install)
+            {
+                await installs.AcceptAsync(identity, install, ct).ConfigureAwait(false);
             }
         }
         catch (BackendException ex) when (ex.StatusCode == HttpStatusCode.Forbidden)
@@ -224,7 +251,8 @@ public sealed class AgentCycle(
     }
 
     /// <summary>
-    /// Meldet das Ergebnis eines Selbst-Updates ohne anhaengende Warteschlange.
+    /// Meldet die Ergebnisse von Selbst-Update und Installation ohne anhaengende
+    /// Warteschlange.
     ///
     /// Nur mit bereits vorhandener Identitaet: Eine Registrierung braucht
     /// Angaben zum Host, die hier gar nicht vorliegen — und ein nie
@@ -248,6 +276,9 @@ public sealed class AgentCycle(
             logger.LogWarning(
                 "Das Ergebnis des Selbst-Updates liess sich nicht melden: {Fehler}", ex.Message);
         }
+
+        // Faengt selbst ab, was beim Melden schiefgeht.
+        await installs.ReportPendingOutcomeAsync(identity, ct).ConfigureAwait(false);
     }
 
     private Task<CheckinResponse> SendAsync(

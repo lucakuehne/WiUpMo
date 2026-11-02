@@ -223,6 +223,22 @@ public sealed class AgentUpdateJob
     public string DownloadPath { get; init; } = string.Empty;
 }
 
+/// <summary>
+/// Installationsauftrag, den das Backend der Check-in-Antwort beilegt — erst ab
+/// <c>notBefore</c>, also faellig, sobald er hier ankommt.
+/// </summary>
+public sealed class InstallRequest
+{
+    public string JobId { get; init; } = string.Empty;
+
+    /// <summary>
+    /// WU-Update-IDs, im Backend gegen die zuletzt gemeldete Verfuegbar-Liste
+    /// aufgeloest. Der Agent sucht vor dem Installieren erneut und nimmt nur,
+    /// was Windows dann noch anbietet.
+    /// </summary>
+    public List<string> UpdateIds { get; init; } = [];
+}
+
 public sealed class CheckinResponse
 {
     public List<SnapshotResult> Results { get; init; } = [];
@@ -231,11 +247,49 @@ public sealed class CheckinResponse
     public AgentUpdateJob? AgentUpdate { get; init; }
 
     /// <summary>
+    /// Faelliger Installationsauftrag, sonst <c>null</c>. Ein Backend vor
+    /// Schritt 1 der Installationsauftraege kennt das Feld nicht.
+    /// </summary>
+    public InstallRequest? InstallRequest { get; init; }
+
+    /// <summary>
     /// Der zentral eingestellte Abstand bis zum naechsten Durchlauf, in
     /// Minuten. <c>null</c> bei einem Backend, das das Feld noch nicht kennt —
     /// dann gilt weiter die oertliche Einstellung.
     /// </summary>
     public int? CheckIntervalMinutes { get; init; }
+}
+
+/// <summary>Ergebnis eines Updates aus einem Installationsauftrag.</summary>
+public sealed class InstallUpdateResult
+{
+    public required string UpdateId { get; init; }
+
+    /// <summary>
+    /// <c>false</c>: Die Suche vor dem Installieren fand das Update nicht —
+    /// inzwischen installiert, zurueckgezogen oder am WSUS nicht freigegeben.
+    /// </summary>
+    public required bool Offered { get; init; }
+
+    /// <summary><c>OperationResultCode</c>, 0 bis 5. Fehlt bei nicht angebotenen.</summary>
+    public int? ResultCode { get; init; }
+
+    /// <summary>Ausgeschrieben aus demselben Grund wie bei <see cref="HistoryEntry.HResult"/>.</summary>
+    [JsonPropertyName("hresult")]
+    public int? HResult { get; init; }
+
+    public bool? RebootRequired { get; init; }
+}
+
+public sealed class InstallResultRequest
+{
+    public required string JobId { get; init; }
+
+    /// <summary><c>running</c> beim Start, am Ende <c>done</c> oder <c>failed</c>.</summary>
+    public required string State { get; init; }
+
+    public IReadOnlyList<InstallUpdateResult>? Results { get; init; }
+    public string? Error { get; init; }
 }
 
 public sealed class UpdateResultRequest

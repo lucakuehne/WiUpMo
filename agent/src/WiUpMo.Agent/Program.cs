@@ -10,6 +10,7 @@ using Serilog.Events;
 using WiUpMo.Agent;
 using WiUpMo.Agent.Backend;
 using WiUpMo.Agent.Install;
+using WiUpMo.Agent.Installation;
 using WiUpMo.Agent.Storage;
 using WiUpMo.Agent.Update;
 using WiUpMo.Agent.Windows;
@@ -22,6 +23,7 @@ using WiUpMo.Agent.Windows;
 ///   <item><term>--once</term><description>Ein einzelner Durchlauf, dann beenden — zum Pruefen</description></item>
 ///   <item><term>--install</term><description>Als Windows-Dienst einrichten und starten</description></item>
 ///   <item><term>--uninstall</term><description>Dienst entfernen, Daten behalten</description></item>
+///   <item><term>--install-probe</term><description>Installationsweg pruefen, ohne etwas zu installieren</description></item>
 /// </list>
 /// </summary>
 internal static class Program
@@ -36,7 +38,7 @@ internal static class Program
     /// Wert liest und bei einem alleinstehenden Schalter abbricht.
     /// </summary>
     private static readonly string[] Flags =
-        ["--install", "--uninstall", "--purge", "--once", "--service", "--updater"];
+        ["--install", "--uninstall", "--purge", "--once", "--service", "--updater", "--install-probe"];
 
     private static readonly Dictionary<string, string> SwitchMappings = new()
     {
@@ -69,6 +71,13 @@ internal static class Program
         if (HasFlag(args, "--updater"))
         {
             return Updater.Run(new AgentPaths(options.DataDirectory));
+        }
+
+        // Wie die Einrichtung ohne Host und ohne Backend: Die Probe beruehrt nur
+        // Windows Update und schreibt auf die Konsole.
+        if (HasFlag(args, "--install-probe"))
+        {
+            return await ProbeInstallAsync(options).ConfigureAwait(false);
         }
 
         // Der Schalter zaehlt zuerst: er steht im binPath der Dienstregistrierung
@@ -109,6 +118,16 @@ internal static class Program
 
                 await host.Services.GetRequiredService<AgentCycle>()
                     .RunAsync(cts.Token).ConfigureAwait(false);
+
+                // Ein Auftrag aus der Check-in-Antwort laeuft im Hintergrund.
+                // Endete der Prozess hier, braeche er ihn ab.
+                InstallJobRunner installs = host.Services.GetRequiredService<InstallJobRunner>();
+                if (installs.IsRunning)
+                {
+                    Serilog.Log.Information("Warte auf das Ende der Installation.");
+                    await installs.WhenIdleAsync().WaitAsync(cts.Token).ConfigureAwait(false);
+                }
+
                 return ExitOk;
             }
 
@@ -186,10 +205,47 @@ internal static class Program
         builder.Services.AddSingleton<AgentHealth>();
         builder.Services.AddSingleton(_ => new AgentPaths(options.DataDirectory));
         builder.Services.AddSingleton<SelfUpdateService>();
+        builder.Services.AddSingleton<WindowsUpdateInstaller>();
+        builder.Services.AddSingleton<InstallJobRunner>();
         builder.Services.AddSingleton<AgentCycle>();
         builder.Services.AddHostedService<Worker>();
 
         return builder.Build();
+    }
+
+    /// <summary>
+    /// Geht den Installationsweg fuer alle angebotenen Updates bis vor
+    /// Download und Installation. Zum Pruefen eines Geraets vor dem ersten
+    /// Auftrag; installiert wird nichts.
+    /// </summary>
+    private static async Task<int> ProbeInstallAsync(AgentOptions options)
+    {
+        try
+        {
+            InstallProbe probe = await new WindowsUpdateInstaller(options)
+                .ProbeAsync(CancellationToken.None).ConfigureAwait(false);
+
+            Console.WriteLine(probe.Readiness switch
+            {
+                InstallReadiness.Busy => "Windows Update: installiert gerade selbst - ein Auftrag wuerde warten.",
+                InstallReadiness.RebootRequired => "Windows Update: verlangt erst einen Neustart - ein Auftrag wuerde scheitern.",
+                _ => "Windows Update: bereit.",
+            });
+            Console.WriteLine($"{probe.Offered.Count} Update(s) angeboten:");
+            foreach (OfferedUpdate update in probe.Offered)
+            {
+                string kb = update.KbArticle is null ? "" : $"KB{update.KbArticle}  ";
+                Console.WriteLine($"  {update.UpdateId}  {kb}{update.Title}");
+            }
+
+            Console.WriteLine("Auswahl, Downloader und Installer liessen sich vorbereiten. Installiert wurde nichts.");
+            return ExitOk;
+        }
+        catch (WindowsUpdateException ex)
+        {
+            Console.Error.WriteLine($"Probe gescheitert: {ex.Message}");
+            return ExitError;
+        }
     }
 
     private static void PrepareStorage(IHost host, AgentOptions options)

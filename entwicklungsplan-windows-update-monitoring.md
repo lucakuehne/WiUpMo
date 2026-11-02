@@ -22,6 +22,7 @@
 12. [Deployment](#12-deployment)
 13. [Umsetzungsphasen](#13-umsetzungsphasen)
 14. [Risikopunkte](#14-risikopunkte)
+15. [Konzept: Offene Updates anstossen](#15-konzept-offene-updates-anstossen)
 
 ---
 
@@ -478,6 +479,11 @@ Der Auth-Provider wird hinter ein Interface gelegt (`AuthProvider` mit `validate
 - LDAP-Bind als zweiter Auth-Provider
 - Dokumentation
 
+### Phase 8 — Offene Updates anstossen (Konzept)
+
+Installationsaufträge aus der Oberfläche, ausgeführt vom Agent beim nächsten
+Check-in. Umsetzungsplan in [Abschnitt 15](#15-konzept-offene-updates-anstossen).
+
 ---
 
 ## 14. Risikopunkte
@@ -499,3 +505,218 @@ Punkte, die früh Aufmerksamkeit brauchen, weil sie später teuer zu korrigieren
 **API-Versionierung von Anfang an.** Ältere Agent-Versionen bleiben im Feld — das Backend muss mehrere Versionen gleichzeitig bedienen.
 
 **Queue-Begrenzung im Agent.** Ohne Obergrenze wächst die SQLite-Datei bei langer Offline-Zeit unkontrolliert.
+
+---
+
+## 15. Konzept: Offene Updates anstossen
+
+**Stand:** Umsetzungsplan vom 2026-11-02, noch nicht begonnen.
+
+### Ziel
+
+Offene Updates aus der Oberfläche heraus auf einem oder mehreren Geräten
+installieren lassen — wenn ein Gerät hängen geblieben ist, ein kritisches Update
+schnell auf eine Gruppe soll oder ein gescheiterter Versuch wiederholt werden
+soll.
+
+### Grundsatz
+
+Die Richtung der Kommunikation bleibt: Der Agent fragt, das Backend antwortet.
+Kein eingehender Port auf dem Client, keine Fernsteuerung. Ein
+Installationsauftrag funktioniert wie der Auftrag zum Selbst-Update — er liegt im
+Backend, bis sich das Gerät meldet, und geht mit der Check-in-Antwort hinaus.
+
+Damit gilt auch weiterhin die Quelle des Geräts: Am WSUS lässt sich nur
+installieren, was dort freigegeben ist. Die App umgeht keine Freigabe, sie
+beschleunigt nur, was das Gerät ohnehin bekäme.
+
+### Entscheide
+
+| Frage | Entscheid |
+|---|---|
+| Neustart | Nie automatisch. Das Gerät meldet „Neustart ausstehend"; es greifen die bestehenden Richtlinien. |
+| Berechtigung | Alle angemeldeten Benutzer, wie bei den übrigen Aktionen. Der Auftrag hält fest, wer ihn angelegt hat. |
+| Umfang | Alles, was die Quelle anbietet — auch Treiber und Feature-Updates. Wählbar: einzelne Updates oder Update-Typen als Kästchen (Sicherheitsupdates, Kritische Updates, Definitionsupdates, Update-Rollups, Updates, Treiber, Feature Packs, Service Packs, Upgrades, Tools, ohne Typ); Vorgabe alle Typen. |
+| Zeitpunkt | Je Auftrag „sofort" oder „ab Zeitpunkt X". Bei mehreren Geräten zufällig verteilt; die Spanne wird beim Anlegen gewählt, Vorgabe 15 Minuten. |
+| Ablauf | Ein Auftrag, den das Gerät nicht abholt, läuft nach einer Frist ab. Einstellbar unter Einstellungen, Vorgabe 14 Tage. |
+
+### Ablauf
+
+1. **Auftrag anlegen** — im Gerätedetail (einzelne Updates oder Umfang) oder
+   über die Mehrfachauswahl der Geräteliste (Umfang). Je Gerät ein Auftrag mit
+   `notBefore` = gewählter Zeitpunkt. Bei mehreren Geräten legt das Backend auf
+   jeden Zeitpunkt eine zufällige Verzögerung innerhalb der gewählten Spanne
+   (Vorgabe 15 Minuten, 0 bis 240), damit WSUS und Netz nicht alle Downloads
+   gleichzeitig sehen. Bei einem einzelnen Gerät entfällt sie.
+2. **Ausliefern** — erst ab `notBefore`, und nur an Agents ab 0.7.0 (an der
+   gemeldeten Version erkennbar). Die Check-in-Antwort trägt dann
+   `installRequest`. Der Agent braucht damit keine eigene Zeitsteuerung: Was er
+   bekommt, ist fällig.
+3. **Ausführen** — der Agent startet die Installation in einem eigenen
+   Hintergrund-Task, damit die regulären Durchläufe weiterlaufen. Ablauf:
+   Suche wie gewohnt (`IsInstalled=0 and IsHidden=0`), Schnittmenge mit dem
+   Auftrag, Lizenz annehmen (`AcceptEula`) nur für diese Updates, herunterladen
+   (`IUpdateDownloader`), installieren (`IUpdateInstaller`, `ForceQuiet`).
+   Eigenes Zeitlimit für Download und Installation (Vorgabe 3 Stunden), getrennt
+   vom kurzen Limit der Suche. Ist Windows gerade selbst am Installieren
+   (`IsBusy`), wartet der Agent und versucht es beim nächsten Durchlauf.
+4. **Zurückmelden** — `running` beim Start, am Ende `done` oder `failed` mit dem
+   Ergebnis je Update (ResultCode, HRESULT, Neustart nötig). Ein Update aus dem
+   Auftrag, das die Suche nicht findet (nicht freigegeben, inzwischen
+   installiert), steht als „nicht angeboten" darin. Danach löst der Agent einen
+   Durchlauf aus, damit der neue Stand sofort sichtbar ist.
+5. **Neustart** — nie automatisch.
+
+Die Zeitreihe braucht dafür nichts Neues: Der nächste Snapshot zeigt die
+Installation oder den Fehlschlag wie bisher, und die aufklappbaren Versuche im
+Gerätedetail zeigen ihn am Update.
+
+### Schnittstellen
+
+Neu im Backend (Sitzung):
+
+| Methode | Pfad | Zweck |
+|---|---|---|
+| `POST` | `/api/install-jobs` | `{ deviceIds, scope: types/selected, classifications?, updateIds?, notBefore?, spreadMinutes? }` (`spreadMinutes` Vorgabe 15) → `{ created, skipped }`; übersprungen werden Geräte mit offenem Auftrag, ohne Agent ab 0.7.0 oder ohne passendes offenes Update |
+| `POST` | `/api/install-jobs/preview` | `{ deviceIds }` → je Update-Typ die offenen Updates und die betroffenen Geräte, für die Kästchen im Dialog |
+| `GET` | `/api/install-jobs?deviceId=` | Protokoll mit Ergebnis je Update |
+| `POST` | `/api/install-jobs/:id/cancel` | Abbrechen, solange nicht `running` |
+
+Neu für den Agent:
+
+- Check-in-Antwort: `installRequest: { jobId, updateIds: string[] } | null` —
+  die WU-Update-IDs, auch bei `scope = types` aufgelöst gegen die zuletzt
+  gemeldete Verfügbar-Liste. Ältere Agents übergehen das Feld.
+- `POST /api/agent/v1/install-result`: `{ jobId, state: running/done/failed,
+  results?: [{ updateId, resultCode, hresult, rebootRequired, offered }],
+  error? }`.
+
+### Datenmodell
+
+Neue Tabelle `update_install_jobs` (Migration):
+
+| Spalte | Inhalt |
+|---|---|
+| `id`, `device_id` | Auftrag und Gerät (`ON DELETE CASCADE`) |
+| `scope` | `types` oder `selected` |
+| `update_ids` | Katalog-IDs bei `selected` |
+| `classifications` | Update-Typen bei `types` |
+| `state` | `pending` → `delivered` → `running` → `done` / `failed` / `expired` / `cancelled` |
+| `not_before`, `expires_at` | ab wann ausliefern, bis wann abholen (`not_before` plus Frist aus den Einstellungen, beim Anlegen festgehalten) |
+| `created_by`, `created_at` | wer und wann |
+| `delivered_at`, `started_at`, `completed_at` | Zeitpunkte |
+| `result` | Ergebnis je Update (jsonb) |
+| `error` | Meldung bei `failed` |
+
+Höchstens ein offener Auftrag je Gerät (Teilindex über `pending`, `delivered`,
+`running`). Ein Aufräumschritt wie bei den Agent-Aufträgen setzt abgelaufene auf
+`expired` und solche, die seit mehr als 6 Stunden `running` sind, während das
+Gerät sich meldet, auf `failed` („unterbrochen").
+
+Neue Einstellung `install` in der Tabelle `settings`, wie die übrigen
+Laufzeiteinstellungen:
+
+| Feld | Bedeutung | Vorgabe | Grenzen |
+|---|---|---|---|
+| `expiryDays` | Tage nach dem Zeitpunkt, bis ein nicht abgeholter Auftrag abläuft | 14 | 1 bis 90 |
+
+Die Frist wird beim Anlegen in `expires_at` festgehalten. Eine spätere Änderung
+gilt deshalb für neue Aufträge, nicht rückwirkend für offene.
+
+Den Typ eines Updates meldet der Agent nicht eigens; er steckt in den
+Kategorie-Namen (Klassifikation und Produkte gemischt, auf Englisch — auch bei
+Microsoft Update auf deutschem Windows, dort sind nur die Titel deutsch; die
+deutschen Namen stehen zur Sicherheit mit dabei). Das Backend erkennt ihn am Namen
+(`common/update-classification.ts`); ohne erkennbare Klassifikation zählt ein
+als Sicherheit markiertes Update als Sicherheitsupdate, alles Übrige als „ohne
+Typ".
+
+Merkposten aus dem Agent-Update: Ergebnisse von `UPDATE … RETURNING` über
+`returnedRows()` lesen; Teilaktualisierungen der Einstellungen über
+`definedOnly()`.
+
+### Oberfläche
+
+- **Gerätedetail, Tab „Offene Updates":** Kästchen je Update; darüber
+  „Installieren …" mit Dialog (ausgewählte Updates oder Update-Typen als
+  Kästchen mit der Zahl offener Updates je Typ, sofort oder ab Zeitpunkt). Ein laufender oder geplanter Auftrag steht als
+  Hinweis über der Tabelle.
+- **Gerätedetail, neuer Tab „Installationen":** Protokoll der Aufträge,
+  aufklappbar mit dem Ergebnis je Update.
+- **Geräteliste, Mehrfachauswahl:** „Offene Updates installieren …" mit Umfang,
+  Zeitpunkt und „Start verteilen über … Minuten" (Vorgabe 15); die Rückmeldung
+  nennt angelegte und übersprungene Geräte.
+- **Einstellungen, Abschnitt „Agent-Registrierung":** Feld „Installationsaufträge
+  verfallen nach … Tagen" (Vorgabe 14) neben dem Melde-Intervall. Der Dialog zum
+  Anlegen nennt die Frist, damit klar ist, bis wann ein Gerät den Auftrag abholen
+  muss.
+
+### Agent (0.7.0)
+
+- `Windows/WindowsUpdateInstaller.cs` — Suche, Auswahl, Download, Installation,
+  Ergebnis je Update; COM in eigenem Thread mit langem Zeitlimit.
+- `Installation/InstallJobRunner.cs` — nimmt den Auftrag aus der Check-in-Antwort
+  an, führt ihn im Hintergrund aus, meldet `running` und das Ergebnis, löst danach
+  einen Durchlauf aus. Der Stand liegt in `%ProgramData%\WiUpMo\install.json`
+  (`Installation/InstallMarker.cs`): Startet der Dienst während einer
+  Installation neu, meldet er den Auftrag als `failed` („unterbrochen") statt ihn
+  zu vergessen; ist das Backend beim Abschluss nicht erreichbar, meldet der
+  nächste Durchlauf.
+- `AgentOptions.InstallTimeoutMinutes` (Vorgabe 180).
+- Ein eigener Ordner `Installation/`, weil `Install/` schon die Einrichtung des
+  Dienstes (`--install`) enthält.
+
+Umgesetzt (Schritt 2), Regeln im Agent:
+
+- **Wann er annimmt:** nur, wenn kein anderer Auftrag läuft oder auf seine
+  Meldung wartet, kein Selbst-Update ansteht und Windows nicht selbst installiert
+  (`IsBusy`). Sonst bleibt der Auftrag im Backend „zugestellt" und kommt mit dem
+  nächsten Check-in wieder.
+- **Neustart ausstehend** (`RebootRequiredBeforeInstallation`): sofort
+  `failed` mit Begründung statt wochenlang „zugestellt"; nach dem Neustart neu
+  beauftragen.
+- **Abgebrochen im Backend:** Die Startmeldung `running` geht vor der
+  Installation hinaus; antwortet das Backend mit 404, wird nicht installiert.
+- **Ergebnis:** `done`, wenn alles Angebotene installiert ist; `failed` mit
+  „n von m Update(s) nicht installiert", wenn nicht. Nicht mehr angebotene
+  Updates zählen nicht als Fehler.
+- **Während der Installation** sucht der Agent nicht (die Suche wartete auf
+  Windows und liefe ins Zeitlimit), meldet aber weiter. Ein Selbst-Update wartet
+  bis zum Ende.
+- **`--install-probe`** geht den Weg bis vor Download und Installation und zeigt,
+  was angeboten ist und ob Windows bereit ist. Installiert nichts; zum Prüfen
+  eines Pilotgeräts.
+
+### Umsetzung in Schritten
+
+1. **Backend und Oberfläche** — Migration, Endpunkte, Auslieferung, Aufräumen,
+   Dialoge und Protokoll. Ausrollbar, ohne dass sich etwas ändert: Ohne Agent
+   0.7.0 wird kein Auftrag ausgeliefert, die Oberfläche sagt das. Getestet im
+   Test-Stack (Smoke-Test simuliert den Agent wie bisher).
+2. **Agent 0.7.0** — Installer und Runner. Die Installation selbst lässt sich nur
+   auf echtem Windows prüfen: auf einem Pilotgerät, mit einem kleinen Update
+   (etwa einer Defender-Definition) und einem kumulativen Update.
+3. **Pilot** — 0.7.0 auf das Pilotgerät, Auftrag über die Oberfläche, Ergebnis
+   und Zeitreihe prüfen. Danach Verteilung über Einstellungen → Agent-Versionen.
+
+### Risiken
+
+- **Feature-Updates und Treiber** sind erlaubt und dauern lange bzw. betreffen
+  Hardware. Der Dialog weist beim Umfang „alle" darauf hin.
+- **Laufende Arbeit am Gerät:** Installation im Hintergrund ohne Dialoge, aber
+  mit spürbarer Last; bei Feature-Updates lange.
+- **Ausstehender Neustart** kann weitere Installationen blockieren — das
+  Ergebnis je Update sagt es dann.
+- **Speicherplatz** auf dem Gerät bei Feature-Updates; der Fehler kommt als
+  HRESULT zurück.
+
+### Erwogene Alternativen
+
+- **Freigaben mit Stichtag im WSUS** — wirkt flottenweit und braucht keine
+  Änderung an der App, aber der WSUS wird abgelöst. Bleibt daneben möglich.
+- **Beschleunigte Updates über Intune bzw. Windows Update for Business
+  (Graph-API)** — nur Qualitätsupdates und nur für Intune-verwaltete Geräte. Das
+  Ziel nach der Ablösung; dieser Plan deckt die Übergangszeit und hängt von
+  keiner Quelle ab.
+- **`UsoClient StartInstall`** — nicht dokumentiert, das Verhalten wechselt
+  zwischen Windows-Versionen. Verworfen.

@@ -6,6 +6,7 @@ import {
   ArrowUpCircle,
   ChevronRight,
   Loader2,
+  MonitorDown,
   Trash2,
 } from '@lucide/vue';
 import { computed, onMounted, ref } from 'vue';
@@ -17,6 +18,8 @@ import type {
   CreateUpdateJobsResult,
   DeviceDetail,
   DeviceUpdate,
+  InstallJob,
+  InstallJobUpdateResult,
   Timeline,
   TimelineEntry,
 } from '@/api/types';
@@ -24,6 +27,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -43,18 +47,22 @@ import {
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import HresultCell from '@/components/HresultCell.vue';
+import InstallDialog from '@/components/InstallDialog.vue';
 import JobStateLegend from '@/components/JobStateLegend.vue';
 import SourceLegend from '@/components/SourceLegend.vue';
 import TablePager from '@/components/TablePager.vue';
 import { formatDnPath } from '@/dn';
 import {
   EVENT_TYPE_LABELS,
+  INSTALL_JOB_STATE_LABELS,
   JOB_STATE_LABELS,
   UPDATE_SOURCE_LABELS,
   eventBadgeClass,
   formatBytes,
   formatDateTime,
   formatRelative,
+  installJobBadgeClass,
+  installScopeLabel,
   jobBadgeClass,
   sourceBadgeClass,
 } from '@/format';
@@ -174,21 +182,112 @@ const agentIssues = computed<string[]>(() => {
   return issues;
 });
 
+// --- Installationsaufträge --------------------------------------------------------
+
+const installJobs = ref<InstallJob[]>([]);
+
+/** Höchstens einer je Gerät; er steht als Hinweis über den offenen Updates. */
+const openInstallJob = computed(() =>
+  installJobs.value.find((job) => ['pending', 'delivered', 'running'].includes(job.state)),
+);
+
+/** Zum Installieren ausgewählte Updates (Katalog-IDs). */
+const selectedUpdates = ref(new Set<string>());
+
+function toggleUpdate(updateId: string, checked: boolean): void {
+  const next = new Set(selectedUpdates.value);
+  if (checked) next.add(updateId);
+  else next.delete(updateId);
+  selectedUpdates.value = next;
+}
+
+const pageUpdateSelection = computed<boolean | 'indeterminate'>(() => {
+  const onPage = pagedUpdates.value.filter((update) => selectedUpdates.value.has(update.updateId)).length;
+  if (onPage === 0) return false;
+  return onPage === pagedUpdates.value.length ? true : 'indeterminate';
+});
+
+function togglePageUpdates(checked: boolean): void {
+  const next = new Set(selectedUpdates.value);
+  for (const update of pagedUpdates.value) {
+    if (checked) next.add(update.updateId);
+    else next.delete(update.updateId);
+  }
+  selectedUpdates.value = next;
+}
+
+const installDialog = ref(false);
+
+function onInstallCreated(): void {
+  selectedUpdates.value = new Set();
+  void load();
+}
+
+async function cancelInstall(job: InstallJob): Promise<void> {
+  try {
+    await post(`/api/install-jobs/${job.id}/cancel`);
+    toast.success('Installationsauftrag abgebrochen.');
+    void load();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Der Auftrag konnte nicht abgebrochen werden.';
+  }
+}
+
+/** Eine Zeile je Auftrag: wie viele installiert, wie viele gescheitert, wie viele nicht angeboten. */
+function installSummary(job: InstallJob): string {
+  if (!job.results) return '—';
+  if (job.results.length === 0) return job.error ?? 'nichts installiert';
+  const installed = job.results.filter((r) => r.offered && (r.resultCode === 2 || r.resultCode === 3)).length;
+  const notOffered = job.results.filter((r) => !r.offered).length;
+  const failed = job.results.length - installed - notOffered;
+  return [
+    installed > 0 ? `${installed} installiert` : '',
+    failed > 0 ? `${failed} gescheitert` : '',
+    notOffered > 0 ? `${notOffered} nicht angeboten` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+/** Ergebniscodes von Windows Update: 2 erfolgreich, 3 mit Fehlern, 4 gescheitert, 5 abgebrochen. */
+function installResultBadge(result: InstallJobUpdateResult): { label: string; class: string } {
+  if (!result.offered) return { label: 'nicht angeboten', class: 'text-muted-foreground' };
+  if (result.resultCode === 2 || result.resultCode === 3) {
+    return { label: 'installiert', class: 'bg-success/15 text-success border-success/30' };
+  }
+  if (result.resultCode === 5) return { label: 'abgebrochen', class: 'text-muted-foreground' };
+  return { label: 'gescheitert', class: 'bg-destructive/15 text-destructive border-destructive/30' };
+}
+
+const expandedInstalls = ref(new Set<string>());
+
+function toggleInstall(jobId: string): void {
+  const next = new Set(expandedInstalls.value);
+  if (!next.delete(jobId)) next.add(jobId);
+  expandedInstalls.value = next;
+}
+
 async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
 
   try {
-    const [detail, events, updateJobs] = await Promise.all([
+    const [detail, events, updateJobs, installs] = await Promise.all([
       get<DeviceDetail>(`/api/devices/${props.id}`),
       get<Timeline>(`/api/devices/${props.id}/timeline`, { limit: 100 }),
       get<AgentUpdateJobView[]>('/api/agent-update-jobs', { deviceId: props.id, limit: 50 }),
+      get<InstallJob[]>('/api/install-jobs', { deviceId: props.id, limit: 50 }),
     ]);
 
     device.value = detail;
     timeline.value = events.items;
     timelineTotal.value = events.total;
     jobs.value = updateJobs;
+    installJobs.value = installs;
+
+    // Was inzwischen installiert oder zurückgezogen ist, fällt aus der Auswahl.
+    const open = new Set(openUpdates.value.map((update) => update.updateId));
+    selectedUpdates.value = new Set([...selectedUpdates.value].filter((id) => open.has(id)));
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Das Gerät konnte nicht geladen werden.';
   } finally {
@@ -410,6 +509,7 @@ onMounted(load);
       <Tabs default-value="updates">
         <TabsList>
           <TabsTrigger value="updates">Offene Updates ({{ openUpdates.length }})</TabsTrigger>
+          <TabsTrigger value="installs">Installationen ({{ installJobs.length }})</TabsTrigger>
           <TabsTrigger value="timeline">Verlauf ({{ timelineTotal }})</TabsTrigger>
           <TabsTrigger value="checkins">Check-ins ({{ device.checkins.length }})</TabsTrigger>
           <TabsTrigger value="agent">Agent-Updates ({{ jobs.length }})</TabsTrigger>
@@ -418,14 +518,63 @@ onMounted(load);
 
         <!-- ===================== Updates ===================== -->
         <TabsContent value="updates">
-          <p class="text-muted-foreground mb-2 text-sm">
-            Was Windows diesem Gerät gerade anbietet. Installierte, abgelöste und gescheiterte
-            Updates, die nicht mehr angeboten werden, stehen im Verlauf.
-          </p>
+          <!-- Ein offener Auftrag gehört vor die Liste: Wer hier installieren
+               will, soll sehen, dass schon etwas unterwegs ist. -->
+          <Alert v-if="openInstallJob" class="mb-3">
+            <ArrowUpCircle class="size-4" />
+            <AlertDescription class="flex flex-wrap items-center justify-between gap-3">
+              <span>
+                <template v-if="openInstallJob.state === 'running'">
+                  Installation läuft seit {{ formatRelative(openInstallJob.startedAt) }}
+                </template>
+                <template v-else-if="openInstallJob.state === 'delivered'">
+                  Installationsauftrag zugestellt {{ formatRelative(openInstallJob.deliveredAt) }}, wartet
+                  auf den Start
+                </template>
+                <template v-else>
+                  Installationsauftrag geplant ab {{ formatDateTime(openInstallJob.notBefore) }}
+                </template>
+                ({{ installScopeLabel(openInstallJob) }}, von {{ openInstallJob.createdBy }})
+              </span>
+              <Button
+                v-if="openInstallJob.state !== 'running'"
+                variant="outline"
+                size="sm"
+                @click="cancelInstall(openInstallJob)"
+              >
+                Abbrechen
+              </Button>
+            </AlertDescription>
+          </Alert>
+
+          <div class="mb-2 flex flex-wrap items-center justify-between gap-3">
+            <p class="text-muted-foreground text-sm">
+              Was Windows diesem Gerät gerade anbietet. Installierte, abgelöste und gescheiterte
+              Updates, die nicht mehr angeboten werden, stehen im Verlauf.
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              :disabled="openUpdates.length === 0 || !!openInstallJob || device.status !== 'active'"
+              @click="installDialog = true"
+            >
+              <MonitorDown class="size-4" />
+              Installieren …
+              <span v-if="selectedUpdates.size > 0" class="tabular">({{ selectedUpdates.size }})</span>
+            </Button>
+          </div>
           <div class="rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead class="w-10">
+                    <Checkbox
+                      aria-label="Alle Updates dieser Seite auswählen"
+                      :model-value="pageUpdateSelection"
+                      :disabled="openUpdates.length === 0"
+                      @update:model-value="togglePageUpdates($event === true)"
+                    />
+                  </TableHead>
                   <TableHead class="w-28">KB</TableHead>
                   <TableHead>Titel</TableHead>
                   <TableHead class="w-32">Einstufung</TableHead>
@@ -439,13 +588,21 @@ onMounted(load);
 
               <TableBody>
                 <TableRow v-if="openUpdates.length === 0">
-                  <TableCell :colspan="6" class="text-muted-foreground py-8 text-center">
+                  <TableCell :colspan="7" class="text-muted-foreground py-8 text-center">
                     Keine offenen Updates.
                   </TableCell>
                 </TableRow>
 
                 <template v-for="update in pagedUpdates" :key="update.updateId">
                   <TableRow>
+                    <TableCell>
+                      <Checkbox
+                        :aria-label="`${update.kbArticle ? 'KB' + update.kbArticle : update.title} auswählen`"
+                        :model-value="selectedUpdates.has(update.updateId)"
+                        @update:model-value="toggleUpdate(update.updateId, $event === true)"
+                      />
+                    </TableCell>
+
                     <TableCell>
                       <a
                         v-if="update.kbArticle"
@@ -507,7 +664,7 @@ onMounted(load);
                     v-if="expandedUpdates.has(update.updateId)"
                     class="bg-muted/30 hover:bg-muted/30"
                   >
-                    <TableCell :colspan="6" class="py-2">
+                    <TableCell :colspan="7" class="py-2">
                       <ul class="space-y-1.5 pl-6 text-sm">
                         <li
                           v-for="attempt in update.attempts"
@@ -540,6 +697,105 @@ onMounted(load);
             v-model:limit="updateLimit"
             :total="openUpdates.length"
           />
+        </TabsContent>
+
+        <!-- ===================== Installationen ===================== -->
+        <TabsContent value="installs">
+          <p class="text-muted-foreground mb-3 text-sm">
+            Die Installationsaufträge dieses Geräts, neueste zuerst. Angelegt wird unter „Offene
+            Updates“; neu gestartet wird nie von selbst.
+          </p>
+
+          <div class="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead class="w-40">Angelegt</TableHead>
+                  <TableHead class="w-56">Umfang</TableHead>
+                  <TableHead class="w-32">Status</TableHead>
+                  <TableHead class="w-40">Ab</TableHead>
+                  <TableHead class="w-40">Abgeschlossen</TableHead>
+                  <TableHead>Ergebnis</TableHead>
+                </TableRow>
+              </TableHeader>
+
+              <TableBody>
+                <TableRow v-if="installJobs.length === 0">
+                  <TableCell :colspan="6" class="text-muted-foreground py-8 text-center">
+                    Für dieses Gerät wurde noch keine Installation beauftragt.
+                  </TableCell>
+                </TableRow>
+
+                <template v-for="job in installJobs" :key="job.id">
+                  <TableRow>
+                    <TableCell>
+                      <div>{{ formatDateTime(job.createdAt) }}</div>
+                      <div class="text-muted-foreground text-xs">{{ job.createdBy }}</div>
+                    </TableCell>
+                    <TableCell>{{ installScopeLabel(job) }}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" :class="installJobBadgeClass(job.state)">
+                        {{ INSTALL_JOB_STATE_LABELS[job.state] }}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{{ formatDateTime(job.notBefore) }}</TableCell>
+                    <TableCell>{{ formatDateTime(job.completedAt) }}</TableCell>
+                    <TableCell>
+                      <button
+                        v-if="job.results && job.results.length > 0"
+                        type="button"
+                        class="hover:text-foreground text-muted-foreground flex items-center gap-1 text-sm"
+                        :aria-expanded="expandedInstalls.has(job.id)"
+                        @click="toggleInstall(job.id)"
+                      >
+                        <ChevronRight
+                          class="size-4 transition-transform"
+                          :class="expandedInstalls.has(job.id) ? 'rotate-90' : ''"
+                        />
+                        {{ installSummary(job) }}
+                      </button>
+                      <span v-else-if="job.results" class="text-muted-foreground text-sm">
+                        {{ installSummary(job) }}
+                      </span>
+                      <span v-else-if="!job.error" class="text-muted-foreground">—</span>
+                      <!-- Rot nur, was gescheitert ist; „abgebrochen" ist kein Fehler. -->
+                      <span
+                        v-if="job.error && job.results?.length !== 0"
+                        class="block text-xs"
+                        :class="job.state === 'failed' ? 'text-destructive' : 'text-muted-foreground'"
+                      >
+                        {{ job.error }}
+                      </span>
+                    </TableCell>
+                  </TableRow>
+
+                  <TableRow v-if="expandedInstalls.has(job.id)" class="bg-muted/30 hover:bg-muted/30">
+                    <TableCell :colspan="6" class="py-2">
+                      <ul class="space-y-1.5 pl-6 text-sm">
+                        <li
+                          v-for="result in job.results ?? []"
+                          :key="result.updateId"
+                          class="flex flex-wrap items-center gap-x-3 gap-y-1"
+                        >
+                          <Badge variant="outline" :class="installResultBadge(result).class">
+                            {{ installResultBadge(result).label }}
+                          </Badge>
+                          <span class="tabular w-24 shrink-0">
+                            {{ result.kbArticle ? `KB${result.kbArticle}` : '—' }}
+                          </span>
+                          <span>{{ result.title ?? result.updateId }}</span>
+                          <span v-if="result.rebootRequired" class="text-warning-foreground dark:text-warning text-xs">
+                            Neustart nötig
+                          </span>
+                          <HresultCell v-if="result.hresult" :value="result.hresult" />
+                        </li>
+                      </ul>
+                    </TableCell>
+                  </TableRow>
+                </template>
+              </TableBody>
+            </Table>
+          </div>
         </TabsContent>
 
         <!-- ===================== Verlauf ===================== -->
@@ -723,6 +979,14 @@ onMounted(load);
           </div>
         </TabsContent>
       </Tabs>
+
+      <InstallDialog
+        v-model:open="installDialog"
+        :device-ids="[device.id]"
+        :selected-update-ids="[...selectedUpdates]"
+        :hostname="device.hostname"
+        @created="onInstallCreated"
+      />
     </template>
   </div>
 </template>

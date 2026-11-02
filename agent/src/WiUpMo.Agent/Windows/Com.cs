@@ -121,6 +121,11 @@ internal static class Com
         0x80248014 => "Die konfigurierte Update-Quelle ist dem Dienst unbekannt.",
         0x80240024 => "Es sind keine Updates verfuegbar.",
         0x80070005 => "Zugriff verweigert.",
+
+        // Beim Installieren.
+        0x80240016 => "Windows Update ist gerade mit einer anderen Installation beschaeftigt.",
+        0x80240044 => "Installieren darf nur ein Administrator bzw. der Dienst unter LocalSystem.",
+        0x80070070 => "Auf dem Geraet ist zu wenig Speicherplatz frei.",
         _ => $"Fehler 0x{(uint)hresult:X8} der Windows-Update-API.",
     };
 
@@ -135,6 +140,35 @@ internal static class Com
         catch (Exception ex) when (IsAccessFailure(ex))
         {
             return null;
+        }
+    }
+
+    public static object? TryCall(object target, string name, params object?[] args)
+    {
+        try
+        {
+            return Call(target, name, args);
+        }
+        catch (Exception ex) when (IsAccessFailure(ex))
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Setzt eine Eigenschaft, die es nicht ueberall gibt — etwa
+    /// <c>ForceQuiet</c>, das erst mit <c>IUpdateInstaller2</c> kam.
+    /// </summary>
+    public static bool TrySet(object target, string name, object? value)
+    {
+        try
+        {
+            Set(target, name, value);
+            return true;
+        }
+        catch (Exception ex) when (IsAccessFailure(ex))
+        {
+            return false;
         }
     }
 

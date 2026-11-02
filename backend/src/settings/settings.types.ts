@@ -10,6 +10,7 @@ export const SETTING_KEYS = {
   auth: 'auth',
   thresholds: 'thresholds',
   retention: 'retention',
+  install: 'install',
 } as const;
 
 export type AuthProviderName = 'local' | 'ldap';
@@ -261,6 +262,22 @@ export const DEFAULT_THRESHOLDS: ThresholdSettings = {
   staleAgentDays: 14,
   criticalOpenDays: 30,
   pendingRebootDays: 7,
+};
+
+export interface InstallSettings {
+  /**
+   * Tage nach dem gewaehlten Zeitpunkt, bis ein nicht abgeholter
+   * Installationsauftrag ablaeuft. Ein Laptop, der wochenlang nicht im Netz
+   * war, soll nicht unerwartet mit einer alten Anweisung loslegen.
+   */
+  expiryDays: number;
+}
+
+export const MIN_INSTALL_EXPIRY_DAYS = 1;
+export const MAX_INSTALL_EXPIRY_DAYS = 90;
+
+export const DEFAULT_INSTALL: InstallSettings = {
+  expiryDays: 14,
 };
 
 export const DEFAULT_RETENTION: RetentionSettings = {

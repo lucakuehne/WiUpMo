@@ -22,6 +22,9 @@ internal static class Limits
     public const int OsVersion = 64;
     public const int OsBuild = 64;
 
+    /// <summary>Fehlermeldung einer Installationsrueckmeldung.</summary>
+    public const int InstallError = 2048;
+
     /// <summary>Maximale Anzahl registrierter Dienste im Snapshot.</summary>
     public const int RegisteredServices = 20;
 

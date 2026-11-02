@@ -1,5 +1,8 @@
 import type {
   AgentUpdateJobState,
+  InstallJob,
+  InstallJobState,
+  UpdateClassification,
   UpdateSource,
   UpdateState,
   UpdateEventType,
@@ -90,6 +93,60 @@ export const EVENT_TYPE_LABELS: Record<UpdateEventType, string> = {
   disappeared: 'verschwunden',
   hidden: 'ausgeblendet',
 };
+
+export const INSTALL_JOB_STATE_LABELS: Record<InstallJobState, string> = {
+  pending: 'geplant',
+  delivered: 'zugestellt',
+  running: 'läuft',
+  done: 'erledigt',
+  failed: 'gescheitert',
+  expired: 'verfallen',
+  cancelled: 'abgebrochen',
+};
+
+/** In der Reihenfolge, in der das Backend die Typen liefert. */
+export const UPDATE_CLASSIFICATION_LABELS: Record<UpdateClassification, string> = {
+  security: 'Sicherheitsupdates',
+  critical: 'Kritische Updates',
+  definition: 'Definitionsupdates',
+  rollups: 'Update-Rollups',
+  updates: 'Updates',
+  drivers: 'Treiber',
+  'feature-packs': 'Feature Packs',
+  'service-packs': 'Service Packs',
+  upgrades: 'Upgrades (Feature-Updates)',
+  tools: 'Tools',
+  other: 'Ohne Typ',
+};
+
+/** Der Umfang eines Auftrags in einer Zeile: „ausgewählte (3)", „alle Typen" oder die Typen. */
+export function installScopeLabel(job: Pick<InstallJob, 'scope' | 'selectedCount' | 'classifications'>): string {
+  if (job.scope === 'selected') {
+    return `ausgewählte (${job.selectedCount})`;
+  }
+  if (job.classifications.length === Object.keys(UPDATE_CLASSIFICATION_LABELS).length) {
+    return 'alle Typen';
+  }
+  return job.classifications.map((type) => UPDATE_CLASSIFICATION_LABELS[type]).join(', ');
+}
+
+/** Dieselben Töne wie bei den Agent-Aufträgen; verfallen und abgebrochen sind neutral. */
+export function installJobBadgeClass(state: InstallJobState): string {
+  switch (state) {
+    case 'pending':
+      return 'bg-chart-1/15 text-chart-1 border-chart-1/30';
+    case 'delivered':
+      return 'bg-chart-4/15 text-chart-4 border-chart-4/30';
+    case 'running':
+      return 'bg-warning/15 text-warning-foreground border-warning/40 dark:text-warning';
+    case 'done':
+      return 'bg-success/15 text-success border-success/30';
+    case 'failed':
+      return 'bg-destructive/15 text-destructive border-destructive/30';
+    default:
+      return 'bg-muted text-muted-foreground border-transparent';
+  }
+}
 
 export const JOB_STATE_LABELS: Record<AgentUpdateJobState, string> = {
   pending: 'offen',

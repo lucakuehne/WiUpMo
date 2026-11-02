@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { InstallRequestDto } from '../../install-jobs/dto/install-job.dto.js';
 import { AgentUpdateJobDto } from '../../releases/dto/release.dto.js';
 import { ArrayMaxSize, ArrayMinSize, IsArray, ValidateNested } from 'class-validator';
 import { SnapshotDto } from './snapshot.dto.js';
@@ -62,4 +63,18 @@ export class CheckinResponseDto {
    * ignorieren das Feld und bleiben bei ihrer eigenen Einstellung.
    */
   checkIntervalMinutes: number;
+
+  /**
+   * Faelliger Installationsauftrag, sonst null. Nur fuer Agents ab 0.7.0;
+   * aeltere bekommen immer null und uebergehen das Feld ohnehin.
+   *
+   * Mit verzoegertem Verweis wie `agentUpdate`, aus demselben Grund.
+   */
+  @ApiProperty({
+    type: () => InstallRequestDto,
+    nullable: true,
+    required: false,
+    description: 'Faelliger Installationsauftrag, sonst null.',
+  })
+  installRequest: InstallRequestDto | null = null;
 }

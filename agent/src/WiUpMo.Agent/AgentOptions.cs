@@ -40,6 +40,18 @@ public sealed class AgentOptions
     public int DownloadTimeoutMinutes { get; set; } = 30;
 
     /// <summary>
+    /// Obergrenze fuer einen Installationsauftrag, Herunterladen und
+    /// Installieren zusammen.
+    ///
+    /// Getrennt vom Zeitlimit der Suche, das fuer eine Installation viel zu
+    /// knapp waere: Ein Feature-Update braucht auf einem langsamen Rechner
+    /// Stunden. Wird es ueberschritten, meldet der Agent den Auftrag als
+    /// gescheitert; Windows installiert womoeglich im Hintergrund weiter, und
+    /// der naechste Snapshot zeigt, wie es ausging.
+    /// </summary>
+    public int InstallTimeoutMinutes { get; set; } = 180;
+
+    /// <summary>
     /// <c>true</c> befragt die konfigurierte Update-Quelle (WSUS, Microsoft
     /// Update). <c>false</c> nutzt nur den lokalen Zwischenspeicher — schnell,
     /// aber moeglicherweise veraltet.

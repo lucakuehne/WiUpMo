@@ -4,6 +4,7 @@ import {
   ArrowUpCircle,
   Download,
   Loader2,
+  MonitorDown,
   RotateCcw,
   Search,
   Trash2,
@@ -51,6 +52,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import InstallDialog from '@/components/InstallDialog.vue';
 import OuNavigator from '@/components/OuNavigator.vue';
 import SortHead from '@/components/SortHead.vue';
 import SourceLegend from '@/components/SourceLegend.vue';
@@ -335,6 +337,13 @@ async function exportSelected(): Promise<void> {
  */
 const confirmAgentUpdate = ref(false);
 const confirmDelete = ref(false);
+
+/** Der Dialog fragt selbst nach Umfang und Zeitpunkt; ältere Agents übergeht das Backend. */
+const installDialog = ref(false);
+
+function onInstallCreated(): void {
+  clearSelection();
+}
 const busy = ref(false);
 
 async function updateAgents(): Promise<void> {
@@ -634,6 +643,16 @@ onMounted(() => {
             <Button
               size="sm"
               variant="outline"
+              :disabled="updatableSelected.length === 0"
+              :title="updatableSelected.length === 0 ? 'Keines der ausgewählten Geräte ist aktiv und hat einen Agent.' : undefined"
+              @click="installDialog = true"
+            >
+              <MonitorDown class="size-4" />
+              Offene Updates installieren …
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
               :disabled="archivedSelected.length === 0"
               :title="archivedSelected.length === 0 ? 'Nur archivierte Geräte lassen sich löschen.' : undefined"
               @click="confirmDelete = true"
@@ -881,5 +900,11 @@ onMounted(() => {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <InstallDialog
+      v-model:open="installDialog"
+      :device-ids="updatableSelected.map((row) => row.id)"
+      @created="onInstallCreated"
+    />
   </div>
 </template>

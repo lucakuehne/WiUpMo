@@ -9,6 +9,8 @@ import {
   AuthSettingsDto,
   AuthSettingsViewDto,
   EnrollmentTokenDto,
+  InstallSettingsDto,
+  InstallSettingsViewDto,
   RetentionSettingsDto,
   RetentionSettingsViewDto,
   SettingsViewDto,
@@ -32,15 +34,16 @@ export class SettingsController {
   @Get()
   @ApiOperation({ summary: 'Alle Laufzeiteinstellungen.' })
   async read(): Promise<SettingsViewDto> {
-    const [agent, ad, auth, thresholds, retention] = await Promise.all([
+    const [agent, ad, auth, thresholds, retention, install] = await Promise.all([
       this.settings.getAgent(),
       this.settings.getAd(),
       this.settings.getAuth(),
       this.settings.getThresholds(),
       this.settings.getRetention(),
+      this.settings.getInstall(),
     ]);
 
-    return { agent, ad: toAdView(ad), auth, thresholds, retention };
+    return { agent, ad: toAdView(ad), auth, thresholds, retention, install };
   }
 
   @Put('auth')
@@ -82,6 +85,12 @@ export class SettingsController {
   @ApiOperation({ summary: 'Aendert die Schwellwerte der Auswertungen.' })
   updateThresholds(@Body() dto: ThresholdSettingsDto): Promise<ThresholdSettingsViewDto> {
     return this.settings.updateThresholds(dto);
+  }
+
+  @Put('install')
+  @ApiOperation({ summary: 'Aendert die Frist fuer Installationsauftraege.' })
+  updateInstall(@Body() dto: InstallSettingsDto): Promise<InstallSettingsViewDto> {
+    return this.settings.updateInstall(dto);
   }
 
   @Put('retention')

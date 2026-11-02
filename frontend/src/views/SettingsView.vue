@@ -22,6 +22,7 @@ import type {
   AdSettingsView,
   AgentSettingsView,
   AuthSettings,
+  InstallSettings,
   OrganizationalUnit,
   RetentionResult,
   RetentionSettings,
@@ -204,6 +205,7 @@ const thresholds = reactive<ThresholdSettings>({
   pendingRebootDays: 7,
 });
 const retention = reactive<RetentionSettings>({ eventDays: 90, checkinDays: 90 });
+const install = reactive<InstallSettings>({ expiryDays: 14 });
 
 const probe = ref<AdProbeResult | null>(null);
 const probing = ref(false);
@@ -216,6 +218,7 @@ const savingAgent = ref(false);
 const savingAuth = ref(false);
 const savingThresholds = ref(false);
 const savingRetention = ref(false);
+const savingInstall = ref(false);
 const rotating = ref(false);
 const cleaning = ref(false);
 
@@ -238,6 +241,7 @@ async function load(): Promise<void> {
     dnMode.value = detectDnMode(settings.auth.userDnTemplate);
     Object.assign(thresholds, settings.thresholds);
     Object.assign(retention, settings.retention);
+    Object.assign(install, settings.install);
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Die Einstellungen konnten nicht geladen werden.';
   } finally {
@@ -249,7 +253,7 @@ async function load(): Promise<void> {
 const syncLog = ref<{ reload: () => Promise<void> } | null>(null);
 
 async function save(
-  section: 'ad' | 'agent' | 'auth' | 'thresholds' | 'retention',
+  section: 'ad' | 'agent' | 'auth' | 'thresholds' | 'retention' | 'install',
   busy: Ref<boolean>,
   payload: unknown,
 ): Promise<void> {
@@ -345,6 +349,7 @@ const saveAgent = () =>
 const saveAuth = () => void save('auth', savingAuth, { ...authSettings });
 const saveThresholds = () => void save('thresholds', savingThresholds, { ...thresholds });
 const saveRetention = () => void save('retention', savingRetention, { ...retention });
+const saveInstall = () => void save('install', savingInstall, { ...install });
 
 // --- Active Directory ------------------------------------------------------
 
@@ -1091,6 +1096,41 @@ onMounted(load);
             <CardFooter>
               <Button :disabled="savingAgent" @click="saveAgent">
                 <Loader2 v-if="savingAgent" class="size-4 animate-spin" />
+                Speichern
+              </Button>
+            </CardFooter>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Installationsaufträge</CardTitle>
+              <CardDescription>
+                Wie lange ein Auftrag zum Installieren offener Updates auf das Gerät wartet. Wer im
+                Urlaub ist, holt ihn nach der Rückkehr noch ab — danach verfällt er.
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent>
+              <div class="space-y-1.5">
+                <Label for="install-expiry">Tage ab dem geplanten Zeitpunkt</Label>
+                <Input
+                  id="install-expiry"
+                  v-model.number="install.expiryDays"
+                  type="number"
+                  min="1"
+                  max="90"
+                  class="w-40"
+                />
+                <p class="text-muted-foreground text-xs">
+                  Zwischen 1 und 90 Tagen, Standard 14. Gilt für neu angelegte Aufträge; bestehende
+                  behalten ihre Frist.
+                </p>
+              </div>
+            </CardContent>
+
+            <CardFooter>
+              <Button :disabled="savingInstall" @click="saveInstall">
+                <Loader2 v-if="savingInstall" class="size-4 animate-spin" />
                 Speichern
               </Button>
             </CardFooter>

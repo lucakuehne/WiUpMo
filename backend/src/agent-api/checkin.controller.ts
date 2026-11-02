@@ -1,6 +1,7 @@
 import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Device } from '../database/entities/index.js';
+import { InstallJobsService } from '../install-jobs/install-jobs.service.js';
 import { ReleasesService } from '../releases/releases.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { CheckinService } from './checkin.service.js';
@@ -18,6 +19,7 @@ export class CheckinController {
     private readonly checkins: CheckinService,
     private readonly releases: ReleasesService,
     private readonly settings: SettingsService,
+    private readonly installJobs: InstallJobsService,
   ) {}
 
   @Post('checkin')
@@ -33,6 +35,7 @@ export class CheckinController {
       results: [result],
       agentUpdate: await this.releases.claimJob(device.id),
       checkIntervalMinutes: (await this.settings.getAgent()).checkIntervalMinutes,
+      installRequest: await this.installJobs.claim(device.id, device.agentVersion),
     };
   }
 
@@ -65,6 +68,7 @@ export class CheckinController {
       results,
       agentUpdate: await this.releases.claimJob(device.id),
       checkIntervalMinutes: (await this.settings.getAgent()).checkIntervalMinutes,
+      installRequest: await this.installJobs.claim(device.id, device.agentVersion),
     };
   }
 }

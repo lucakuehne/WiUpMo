@@ -59,4 +59,7 @@ public sealed class AgentPaths
     public string UpdaterExe => Path.Combine(InstallDirectory, UpdaterFileName);
 
     public string MarkerPath => Path.Combine(DataDirectory, "update.json");
+
+    /// <summary>Stand eines Installationsauftrags; siehe <c>Installation/InstallMarker.cs</c>.</summary>
+    public string InstallMarkerPath => Path.Combine(DataDirectory, "install.json");
 }

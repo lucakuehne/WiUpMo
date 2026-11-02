@@ -13,6 +13,8 @@ export const PG_ENUM = {
   adSyncTrigger: 'ad_sync_trigger',
   adSyncStatus: 'ad_sync_status',
   agentUpdateJobState: 'agent_update_job_state',
+  installJobState: 'install_job_state',
+  installJobScope: 'install_job_scope',
 } as const;
 
 export enum DeviceStatus {
@@ -72,4 +74,25 @@ export enum AgentUpdateJobState {
   Installing = 'installing',
   Done = 'done',
   Failed = 'failed',
+}
+
+export enum InstallJobState {
+  /** Angelegt, wartet auf den Zeitpunkt bzw. den naechsten Check-in. */
+  Pending = 'pending',
+  /** Mit einer Check-in-Antwort hinausgegangen. */
+  Delivered = 'delivered',
+  /** Der Agent installiert. */
+  Running = 'running',
+  Done = 'done',
+  Failed = 'failed',
+  /** Innerhalb der Frist nicht abgeholt. */
+  Expired = 'expired',
+  Cancelled = 'cancelled',
+}
+
+export enum InstallJobScope {
+  /** Alles Offene der gewaehlten Update-Typen. */
+  Types = 'types',
+  /** Einzeln ausgewaehlte Updates. */
+  Selected = 'selected',
 }

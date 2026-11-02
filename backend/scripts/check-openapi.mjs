@@ -40,6 +40,9 @@ import {
 } from '../dist/src/releases/releases.controller.js';
 import { ReleasesService } from '../dist/src/releases/releases.service.js';
 import { AgentUpdateController } from '../dist/src/agent-api/agent-update.controller.js';
+import { AgentInstallController } from '../dist/src/agent-api/install.controller.js';
+import { InstallJobsController } from '../dist/src/install-jobs/install-jobs.controller.js';
+import { InstallJobsService } from '../dist/src/install-jobs/install-jobs.service.js';
 import { RetentionController } from '../dist/src/retention/retention.controller.js';
 import { RetentionService } from '../dist/src/retention/retention.service.js';
 import { HealthController } from '../dist/src/health/health.controller.js';
@@ -61,6 +64,8 @@ const moduleRef = await Test.createTestingModule({
     ReleasesController,
     AgentUpdateJobsController,
     AgentUpdateController,
+    AgentInstallController,
+    InstallJobsController,
     RetentionController,
     HealthController,
   ],
@@ -76,6 +81,7 @@ const moduleRef = await Test.createTestingModule({
     { provide: ReportsService, useValue: stub },
     { provide: ReleasesService, useValue: stub },
     { provide: RetentionService, useValue: stub },
+    { provide: InstallJobsService, useValue: stub },
     // Guards werden von Nest ueber den Container erzeugt; ohne Attrappe
     // scheiterte schon das Zusammenbauen des Moduls.
     { provide: SessionGuard, useValue: { canActivate: () => true } },

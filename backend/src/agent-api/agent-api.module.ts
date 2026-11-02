@@ -7,13 +7,15 @@ import { DeviceAuthGuard } from './device-auth.guard.js';
 import { EnrollmentController } from './enrollment.controller.js';
 import { EnrollmentService } from './enrollment.service.js';
 import { AgentUpdateController } from './agent-update.controller.js';
+import { AgentInstallController } from './install.controller.js';
+import { InstallJobsModule } from '../install-jobs/install-jobs.module.js';
 import { ReleasesModule } from '../releases/releases.module.js';
 import { SettingsModule } from '../settings/settings.module.js';
 
 /** Alles, was der Agent anspricht. Das Frontend hat eigene Module. */
 @Module({
-  imports: [TypeOrmModule.forFeature([Device, DeviceSecret]), SettingsModule, ReleasesModule],
-  controllers: [EnrollmentController, CheckinController, AgentUpdateController],
+  imports: [TypeOrmModule.forFeature([Device, DeviceSecret]), SettingsModule, ReleasesModule, InstallJobsModule],
+  controllers: [EnrollmentController, CheckinController, AgentUpdateController, AgentInstallController],
   providers: [EnrollmentService, CheckinService, DeviceAuthGuard],
 })
 export class AgentApiModule {}

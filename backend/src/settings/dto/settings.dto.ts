@@ -15,7 +15,9 @@ import {
 } from 'class-validator';
 import {
   MAX_CHECK_INTERVAL_MINUTES,
+  MAX_INSTALL_EXPIRY_DAYS,
   MIN_CHECK_INTERVAL_MINUTES,
+  MIN_INSTALL_EXPIRY_DAYS,
 } from '../settings.types.js';
 
 const toInt = () =>
@@ -235,6 +237,19 @@ export class RetentionSettingsDto {
   checkinDays?: number;
 }
 
+export class InstallSettingsDto {
+  @toInt()
+  @IsInt()
+  @Min(MIN_INSTALL_EXPIRY_DAYS)
+  @Max(MAX_INSTALL_EXPIRY_DAYS)
+  @IsOptional()
+  expiryDays?: number;
+}
+
+export class InstallSettingsViewDto {
+  expiryDays: number;
+}
+
 /** Ansicht der AD-Einstellungen ohne das Passwort. */
 export class AdSettingsViewDto {
   url: string;
@@ -284,4 +299,5 @@ export class SettingsViewDto {
   auth: AuthSettingsViewDto;
   thresholds: ThresholdSettingsViewDto;
   retention: RetentionSettingsViewDto;
+  install: InstallSettingsViewDto;
 }

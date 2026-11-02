@@ -14,6 +14,8 @@ import {
   DEFAULT_AUTH,
   DEFAULT_RETENTION,
   DEFAULT_THRESHOLDS,
+  DEFAULT_INSTALL,
+  InstallSettings,
   migrateAuthSettings,
   RetentionSettings,
   SETTING_KEYS,
@@ -96,6 +98,10 @@ export class SettingsService implements OnModuleInit {
     return this.read(SETTING_KEYS.retention, DEFAULT_RETENTION);
   }
 
+  async getInstall(): Promise<InstallSettings> {
+    return this.read(SETTING_KEYS.install, DEFAULT_INSTALL);
+  }
+
   /**
    * Bewusst ohne Zwischenspeicher. Die Werte werden pro Abgleich einmal
    * gelesen, nicht pro Anfrage — ein Cache waere hier nur eine weitere Stelle,
@@ -171,6 +177,12 @@ export class SettingsService implements OnModuleInit {
   async updateRetention(patch: Partial<RetentionSettings>): Promise<RetentionSettings> {
     const next = { ...(await this.getRetention()), ...definedOnly(patch) };
     await this.write(SETTING_KEYS.retention, next, 'Aufbewahrungsfristen.');
+    return next;
+  }
+
+  async updateInstall(patch: Partial<InstallSettings>): Promise<InstallSettings> {
+    const next = { ...(await this.getInstall()), ...definedOnly(patch) };
+    await this.write(SETTING_KEYS.install, next, 'Installationsauftraege.');
     return next;
   }
 

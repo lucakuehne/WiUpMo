@@ -420,6 +420,77 @@ export interface RetentionSettings {
   checkinDays: number;
 }
 
+export interface InstallSettings {
+  /** Tage nach dem Zeitpunkt, bis ein nicht abgeholter Installationsauftrag verfällt. */
+  expiryDays: number;
+}
+
+/** Klassifikation von Windows Update; das Backend leitet sie aus den Kategorien ab. */
+export type UpdateClassification =
+  | 'security'
+  | 'critical'
+  | 'definition'
+  | 'rollups'
+  | 'updates'
+  | 'drivers'
+  | 'feature-packs'
+  | 'service-packs'
+  | 'upgrades'
+  | 'tools'
+  | 'other';
+
+export type InstallJobScope = 'types' | 'selected';
+
+export type InstallJobState =
+  | 'pending'
+  | 'delivered'
+  | 'running'
+  | 'done'
+  | 'failed'
+  | 'expired'
+  | 'cancelled';
+
+export interface InstallJobUpdateResult {
+  updateId: string;
+  kbArticle: string | null;
+  title: string | null;
+  offered: boolean;
+  resultCode: number | null;
+  hresult: number | null;
+  rebootRequired: boolean;
+}
+
+export interface InstallJob {
+  id: string;
+  deviceId: string;
+  hostname: string;
+  scope: InstallJobScope;
+  selectedCount: number;
+  classifications: UpdateClassification[];
+  state: InstallJobState;
+  notBefore: string;
+  expiresAt: string;
+  createdBy: string;
+  createdAt: string;
+  deliveredAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+  results: InstallJobUpdateResult[] | null;
+}
+
+export interface InstallPreview {
+  /** Alle Typen in fester Reihenfolge, auch die ohne offenes Update. */
+  classifications: { classification: UpdateClassification; updates: number; devices: number }[];
+}
+
+export interface CreateInstallJobsResult {
+  created: number;
+  skipped: { openJob: number; agentTooOld: number; notEligible: number; nothingOpen: number };
+  expiryDays: number;
+  minimumAgentVersion: string;
+}
+
 export interface AgentSettingsView {
   /** Wird bewusst ausgeliefert — man braucht es bei jeder Agent-Installation. */
   enrollmentToken: string;
@@ -456,6 +527,7 @@ export interface SettingsView {
   auth: AuthSettings;
   thresholds: ThresholdSettings;
   retention: RetentionSettings;
+  install: InstallSettings;
 }
 
 export interface AdStatus {
