@@ -102,6 +102,13 @@ const openUpdates = computed(() =>
   (device.value?.updates ?? []).filter((update) => update.state === 'available'),
 );
 
+/**
+ * Was sich installieren laesst. Eingespielte Updates, die nur auf den
+ * Neustart warten, bietet Windows bis dahin weiter an — ein Auftrag dafuer
+ * braechte nichts, das Backend laesst sie ohnehin aus.
+ */
+const installableUpdates = computed(() => openUpdates.value.filter((update) => !update.awaitingReboot));
+
 /** Aufgeklappte Updates, deren Installationsversuche darunter stehen. */
 const expandedUpdates = ref(new Set<string>());
 
@@ -201,15 +208,17 @@ function toggleUpdate(updateId: string, checked: boolean): void {
   selectedUpdates.value = next;
 }
 
+const selectableOnPage = computed(() => pagedUpdates.value.filter((update) => !update.awaitingReboot));
+
 const pageUpdateSelection = computed<boolean | 'indeterminate'>(() => {
-  const onPage = pagedUpdates.value.filter((update) => selectedUpdates.value.has(update.updateId)).length;
+  const onPage = selectableOnPage.value.filter((update) => selectedUpdates.value.has(update.updateId)).length;
   if (onPage === 0) return false;
-  return onPage === pagedUpdates.value.length ? true : 'indeterminate';
+  return onPage === selectableOnPage.value.length ? true : 'indeterminate';
 });
 
 function togglePageUpdates(checked: boolean): void {
   const next = new Set(selectedUpdates.value);
-  for (const update of pagedUpdates.value) {
+  for (const update of selectableOnPage.value) {
     if (checked) next.add(update.updateId);
     else next.delete(update.updateId);
   }
@@ -286,7 +295,7 @@ async function load(): Promise<void> {
     installJobs.value = installs;
 
     // Was inzwischen installiert oder zurückgezogen ist, fällt aus der Auswahl.
-    const open = new Set(openUpdates.value.map((update) => update.updateId));
+    const open = new Set(installableUpdates.value.map((update) => update.updateId));
     selectedUpdates.value = new Set([...selectedUpdates.value].filter((id) => open.has(id)));
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Das Gerät konnte nicht geladen werden.';
@@ -555,7 +564,12 @@ onMounted(load);
             <Button
               size="sm"
               variant="outline"
-              :disabled="openUpdates.length === 0 || !!openInstallJob || device.status !== 'active'"
+              :disabled="installableUpdates.length === 0 || !!openInstallJob || device.status !== 'active'"
+              :title="
+                openUpdates.length > 0 && installableUpdates.length === 0
+                  ? 'Alle offenen Updates sind eingespielt und warten auf den Neustart.'
+                  : undefined
+              "
               @click="installDialog = true"
             >
               <MonitorDown class="size-4" />
@@ -571,7 +585,7 @@ onMounted(load);
                     <Checkbox
                       aria-label="Alle Updates dieser Seite auswählen"
                       :model-value="pageUpdateSelection"
-                      :disabled="openUpdates.length === 0"
+                      :disabled="selectableOnPage.length === 0"
                       @update:model-value="togglePageUpdates($event === true)"
                     />
                   </TableHead>
@@ -599,6 +613,8 @@ onMounted(load);
                       <Checkbox
                         :aria-label="`${update.kbArticle ? 'KB' + update.kbArticle : update.title} auswählen`"
                         :model-value="selectedUpdates.has(update.updateId)"
+                        :disabled="update.awaitingReboot"
+                        :title="update.awaitingReboot ? 'Eingespielt — wartet auf den Neustart.' : undefined"
                         @update:model-value="toggleUpdate(update.updateId, $event === true)"
                       />
                     </TableCell>
@@ -617,7 +633,16 @@ onMounted(load);
                     </TableCell>
 
                     <TableCell>
-                      <div>{{ update.title }}</div>
+                      <div>
+                        {{ update.title }}
+                        <Badge
+                          v-if="update.awaitingReboot"
+                          variant="outline"
+                          class="bg-warning/15 text-warning-foreground border-warning/40 dark:text-warning ml-1"
+                        >
+                          wartet auf Neustart
+                        </Badge>
+                      </div>
                       <div v-if="update.categories.length" class="text-muted-foreground text-xs">
                         {{ update.categories.join(', ') }}
                       </div>

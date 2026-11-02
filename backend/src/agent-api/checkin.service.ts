@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
+import { isPostRebootPending } from '../common/post-reboot.js';
 import { Device } from '../database/entities/index.js';
 import { UpdateEventType, UpdateState } from '../database/enums.js';
 import { SnapshotOutcome, SnapshotResultDto } from './dto/checkin.dto.js';
@@ -12,28 +13,6 @@ import {
   SnapshotDto,
 } from './dto/snapshot.dto.js';
 import { buildValuesClause } from './sql-values.js';
-
-/**
- * `WU_E_UH_POSTREBOOTSTILLPENDING` — der Abschluss des Updates steht bis zum
- * Neustart aus.
- *
- * Windows meldet den Eintrag mit einem Ergebniscode, der auf Misserfolg
- * lautet, obwohl das Update eingespielt ist. Als Fehlschlag gezaehlt landete
- * jedes Geraet mit ausstehendem Neustart in der Auswertung "wiederholt
- * gescheiterte Installationen" — und zwar genau die, die gerade alles richtig
- * gemacht haben.
- *
- * Der Vergleich laeuft ueber die vorzeichenlose Form: Der Agent reicht den
- * HRESULT als vorzeichenbehaftete 32-Bit-Zahl durch, andere Quellen tun es
- * nicht, und `>>> 0` bringt beide auf denselben Wert.
- */
-const WU_E_UH_POSTREBOOTSTILLPENDING = 0x80242014;
-
-function isPostRebootPending(hresult: number | null | undefined): boolean {
-  return hresult !== null && hresult !== undefined
-    ? (hresult >>> 0) === WU_E_UH_POSTREBOOTSTILLPENDING
-    : false;
-}
 
 /** Metadaten eines Updates, zusammengefuehrt aus Verfuegbar-Liste und Historie. */
 interface CatalogEntry {

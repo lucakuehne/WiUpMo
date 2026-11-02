@@ -52,6 +52,9 @@ const U = {
 /** WU_E_UH_POSTREBOOTSTILLPENDING waere ein Erfolg; das hier ist ein echter Fehler (0x80240017). */
 const HRESULT_FAILED = -2145124329;
 
+/** WU_E_UH_POSTREBOOTSTILLPENDING (0x80242014), vorzeichenbehaftet wie vom Agent. */
+const HRESULT_POST_REBOOT = -2145116140;
+
 let enrollmentToken = '';
 let device = null;
 
@@ -514,6 +517,39 @@ await step('Installationsauftrag: Streuung, uebergangene Geraete', async () => {
   await api.request('POST', '/api/install-jobs', { body: { deviceIds: [secondDevice.deviceId], scope: 'types', classifications: [] }, expect: 400 });
   await api.request('POST', '/api/install-jobs', { body: { deviceIds: [secondDevice.deviceId], scope: 'types', classifications: ['gibt-es-nicht'] }, expect: 400 });
   await api.request('POST', '/api/install-jobs', { body: { deviceIds: [secondDevice.deviceId], scope: 'all' }, expect: 400 });
+});
+
+await step('Installationsauftrag: Eingespieltes wartet auf den Neustart', async () => {
+  // Bis zum Neustart bietet Windows ein eingespieltes Update weiter an und
+  // meldet den Versuch mit 0x80242014. Installieren laesst es sich nicht.
+  const rebootHost = host(`REBOOT-${RUN}`);
+  const rebootDevice = await enroll(agent, enrollmentToken, rebootHost);
+  await checkin(agent, rebootDevice.token, snapshot({
+    hostInfo: rebootHost,
+    collectedAt: minutesAgo(2),
+    available: [U.late, U.defender],
+    entries: [history(U.late, { resultCode: 4, hresult: HRESULT_POST_REBOOT, occurredAt: minutesAgo(3) })],
+    pendingReboot: true,
+  }));
+
+  const detail = await api.get(`/api/devices/${rebootDevice.deviceId}`);
+  const byKb = Object.fromEntries(detail.updates.map((u) => [u.kbArticle, u]));
+  assert.deepEqual([byKb[U.late.kbArticle].state, byKb[U.late.kbArticle].awaitingReboot], ['available', true]);
+  assert.equal(byKb[U.defender.kbArticle].awaitingReboot, false);
+
+  // Die Vorschau zaehlt es nicht, ausdruecklich gewaehlt passt es nicht, und
+  // ein Auftrag ueber alle Typen bekommt nur das Uebrige.
+  const preview = await api.post('/api/install-jobs/preview', { deviceIds: [rebootDevice.deviceId] });
+  const counts = Object.fromEntries(preview.classifications.map((c) => [c.classification, c.updates]));
+  assert.deepEqual([counts.security, counts.definition], [0, 1]);
+
+  const selected = await api.post('/api/install-jobs', { deviceIds: [rebootDevice.deviceId], scope: 'selected', updateIds: [lateCatalogId] });
+  assert.deepEqual([selected.created, selected.skipped.nothingOpen], [0, 1]);
+
+  await api.post('/api/install-jobs', { deviceIds: [rebootDevice.deviceId], scope: 'types', classifications: allTypes });
+  const due = await checkin(agent, rebootDevice.token, snapshot({ hostInfo: rebootHost, collectedAt: minutesAgo(1), available: [U.late, U.defender], pendingReboot: true }));
+  assert.deepEqual(due.installRequest?.updateIds, [U.defender.updateId]);
+  await api.post(`/api/install-jobs/${due.installRequest.jobId}/cancel`);
 });
 
 // --- Auslieferung des Frontends -------------------------------------------------

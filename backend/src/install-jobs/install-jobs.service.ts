@@ -8,6 +8,7 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { isVersionAtLeast } from '../common/agent-version.js';
+import { postRebootPendingSql } from '../common/post-reboot.js';
 import { returnedRows } from '../common/query-result.js';
 import {
   UPDATE_CLASSIFICATIONS,
@@ -47,9 +48,13 @@ const STALLED_AFTER_HOURS = 6;
  * Der Umfang steht als Parameter im SQL statt als eingesetzter Text: Alle
  * Platzhalter kommen so in jeder Abfrage vor. Fehlt einer, kann PostgreSQL
  * seinen Typ nicht bestimmen und bricht die ganze Abfrage ab.
+ *
+ * Was eingespielt ist und nur auf den Neustart wartet, passt nie — auch nicht,
+ * wenn es ausdruecklich ausgewaehlt war.
  */
 function scopeCondition(scope: string, ids: string, classes: string): string {
-  return `CASE ${scope}::text
+  return `NOT ${postRebootPendingSql('s')}
+          AND CASE ${scope}::text
             WHEN '${InstallJobScope.Selected}' THEN s.update_id = ANY(${ids}::uuid[])
             ELSE ${classificationSql('u')} = ANY(${classes}::text[])
           END`;
@@ -163,6 +168,7 @@ export class InstallJobsService {
                 count(DISTINCT u.id)::text AS updates, count(DISTINCT s.device_id)::text AS devices
            FROM device_update_states s JOIN updates u ON u.id = s.update_id
           WHERE s.device_id = ANY($1::uuid[]) AND s.state = 'available'
+            AND NOT ${postRebootPendingSql('s')}
           GROUP BY 1`,
         [[...new Set(deviceIds)]],
       );

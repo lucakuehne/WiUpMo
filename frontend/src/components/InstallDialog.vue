@@ -144,7 +144,7 @@ async function submit(): Promise<void> {
     const skipped = [
       result.skipped.agentTooOld > 0 ? `${result.skipped.agentTooOld} mit Agent älter als ${result.minimumAgentVersion}` : '',
       result.skipped.openJob > 0 ? `${result.skipped.openJob} mit bereits offenem Auftrag` : '',
-      result.skipped.nothingOpen > 0 ? `${result.skipped.nothingOpen} ohne passendes offenes Update` : '',
+      result.skipped.nothingOpen > 0 ? `${result.skipped.nothingOpen} ohne passendes installierbares Update` : '',
       result.skipped.notEligible > 0 ? `${result.skipped.notEligible} archiviert oder ohne Agent` : '',
     ].filter(Boolean);
 

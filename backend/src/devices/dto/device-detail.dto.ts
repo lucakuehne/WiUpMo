@@ -35,6 +35,12 @@ export class DeviceUpdateDto {
   lastReportedAt: string;
 
   /**
+   * Eingespielt, der Abschluss steht bis zum Neustart aus (`0x80242014`).
+   * Windows bietet es bis dahin weiter an; installieren laesst es sich nicht.
+   */
+  awaitingReboot: boolean;
+
+  /**
    * Bisherige Installationsversuche, neueste zuerst — nur bei offenen
    * Updates. Ein offenes Update mit Versuchen ist eines, an dem Windows
    * gescheitert ist und das es weiter anbietet.

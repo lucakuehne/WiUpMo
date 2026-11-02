@@ -187,6 +187,19 @@ await step('Installationsauftrag im Geraetedetail', async () => {
   await capture(page, 'geraet-installationen');
 });
 
+await step('Eingespieltes Update wartet auf den Neustart', async () => {
+  const list = await (await page.request.get(`${base}/api/devices?search=REBOOT-&limit=1`)).json();
+  if (list.items.length === 0) throw new Error('kein REBOOT-Geraet - lief smoke.mjs vorher?');
+  await page.goto(`${base}/devices/${list.items[0].id}`);
+  await page.getByText('wartet auf Neustart').first().waitFor({ timeout: 15_000 });
+
+  const row = page.locator('table tbody tr', { hasText: 'wartet auf Neustart' }).first();
+  if (!(await row.getByRole('checkbox').isDisabled())) {
+    throw new Error('das wartende Update laesst sich auswaehlen');
+  }
+  await capture(page, 'geraet-wartet-auf-neustart');
+});
+
 await step('Updates', async () => {
   await page.goto(`${base}/updates`);
   await page.locator('table').first().waitFor({ timeout: 15_000 });

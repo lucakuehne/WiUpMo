@@ -1,6 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { isPostRebootPending } from '../common/post-reboot.js';
 import { returnedRows } from '../common/query-result.js';
 import { SqlParams, toCsv } from '../common/sql-params.js';
 import { DeviceStatus, PG_ENUM, UpdateEventType, UpdateSource, UpdateState } from '../database/enums.js';
@@ -408,6 +409,8 @@ export class DevicesService {
       hresult: (row.hresult as number | null) ?? null,
       rebootRequired: row.reboot_required as boolean,
       lastReportedAt: toIso(row.last_reported_at) ?? '',
+      awaitingReboot:
+        row.state === UpdateState.Available && isPostRebootPending(row.hresult as number | null),
       attempts: attempts.get(row.id as string) ?? [],
     }));
   }

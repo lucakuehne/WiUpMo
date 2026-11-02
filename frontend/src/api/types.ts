@@ -77,6 +77,8 @@ export interface DeviceUpdate {
   hresult: number | null;
   rebootRequired: boolean;
   lastReportedAt: string;
+  /** Eingespielt, wartet auf den Neustart (`0x80242014`). Wird angeboten, ist aber nicht installierbar. */
+  awaitingReboot: boolean;
   /** Bisherige Installationsversuche, neueste zuerst — nur bei offenen Updates. */
   attempts: InstallAttempt[];
 }
