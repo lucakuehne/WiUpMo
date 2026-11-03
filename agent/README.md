@@ -102,7 +102,8 @@ Ereignissen, und ohne Mindestabstand liefe der Agent mehrfach hintereinander los
 
 1. WUApi-Suche `IsInstalled=0 and IsHidden=0`
 2. `QueryHistory` seit dem letzten gemeldeten Zeitstempel
-3. Update-Quelle, Richtlinien und Neustart-Status erfassen
+3. Update-Quelle, Richtlinien, Neustart-Status und zuletzt angemeldeten Benutzer
+   erfassen (`LogonUI\LastLoggedOnUser` in der Registry, ab 0.7.1)
 4. Snapshot mit `snapshotId` und `collectedAt` (UTC) in die SQLite-Warteschlange
 5. Gesamte Warteschlange per `/checkin/batch` senden
 6. Quittierte Snapshots löschen — auch abgelehnte, die werden durch Wiederholen

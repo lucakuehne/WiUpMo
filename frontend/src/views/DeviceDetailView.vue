@@ -488,6 +488,17 @@ onMounted(load);
                 {{ device.adOu ? formatDnPath(device.adOu) : '—' }}
               </dd>
             </div>
+            <div>
+              <!-- Vom Agent ab 0.7.1; das Verzeichnis kennt die Angabe nicht. -->
+              <dt class="text-muted-foreground text-xs">Zuletzt angemeldet</dt>
+              <dd v-if="device.lastLogonUser" class="truncate" :title="device.lastLogonUser">
+                {{ device.lastLogonDisplayName ?? device.lastLogonUser }}
+                <span v-if="device.lastLogonDisplayName" class="text-muted-foreground text-xs">
+                  {{ device.lastLogonUser }}
+                </span>
+              </dd>
+              <dd v-else>—</dd>
+            </div>
           </dl>
         </CardContent>
       </Card>

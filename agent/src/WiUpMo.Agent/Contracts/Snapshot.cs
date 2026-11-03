@@ -22,6 +22,15 @@ public sealed class HostInfo
     /// unnoetig verkompliziert.
     /// </summary>
     public string? AdObjectGuid { get; init; }
+
+    /// <summary>
+    /// Zuletzt angemeldetes Konto, etwa <c>DOMAENE\benutzer</c>. Ein Backend vor
+    /// 0.7.1 wuerde das Feld ablehnen; es geht deshalb nur mit, wenn es gesetzt
+    /// ist, und das Backend kennt es, bevor ein Agent es schickt.
+    /// </summary>
+    public string? LastLogonUser { get; init; }
+
+    public string? LastLogonDisplayName { get; init; }
 }
 
 /// <summary>

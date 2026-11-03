@@ -493,7 +493,7 @@ onMounted(() => {
         <Search class="text-muted-foreground absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
         <Input
           v-model="search"
-          placeholder="Hostname oder OU"
+          placeholder="Hostname, OU, Benutzer"
           class="w-56 pl-8"
           @input="onSearchInput"
         />
@@ -683,6 +683,9 @@ onMounted(() => {
                 <SortHead field="hostname" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
                   Hostname
                 </SortHead>
+                <SortHead field="lastLogonUser" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
+                  Benutzer
+                </SortHead>
                 <SortHead field="osBuild" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
                   Betriebssystem
                 </SortHead>
@@ -736,14 +739,14 @@ onMounted(() => {
             <TableBody>
               <template v-if="loading">
                 <TableRow v-for="n in 6" :key="n">
-                  <TableCell v-for="column in 10" :key="column">
+                  <TableCell v-for="column in 11" :key="column">
                     <Skeleton class="h-4 w-full" />
                   </TableCell>
                 </TableRow>
               </template>
 
               <TableRow v-else-if="rows.length === 0">
-                <TableCell :colspan="10" class="text-muted-foreground py-8 text-center">
+                <TableCell :colspan="11" class="text-muted-foreground py-8 text-center">
                   Keine Geräte gefunden.
                 </TableCell>
               </TableRow>
@@ -778,6 +781,23 @@ onMounted(() => {
                   >
                     {{ formatDnPath(row.adOu) }}
                   </div>
+                </TableCell>
+
+                <!-- Zuletzt angemeldet: der Name vorn, das Konto darunter. -->
+                <TableCell class="max-w-44">
+                  <template v-if="row.lastLogonUser">
+                    <div class="truncate" :title="row.lastLogonDisplayName ?? row.lastLogonUser">
+                      {{ row.lastLogonDisplayName ?? row.lastLogonUser }}
+                    </div>
+                    <div
+                      v-if="row.lastLogonDisplayName"
+                      class="text-muted-foreground truncate text-xs"
+                      :title="row.lastLogonUser"
+                    >
+                      {{ row.lastLogonUser }}
+                    </div>
+                  </template>
+                  <span v-else class="text-muted-foreground">—</span>
                 </TableCell>
 
                 <TableCell>

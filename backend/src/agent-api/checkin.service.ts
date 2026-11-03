@@ -489,6 +489,18 @@ export class CheckinService {
            THEN $8::jsonb
            ELSE agent_diagnostics
          END,
+         -- Aus demselben Grund nur vom neuesten Snapshot. Fehlt die Angabe —
+         -- aelterer Agent, nie jemand angemeldet —, bleibt die bisherige.
+         last_logon_user = CASE
+           WHEN $9::text IS NOT NULL AND (last_seen_at IS NULL OR last_seen_at <= $2)
+           THEN $9::text
+           ELSE last_logon_user
+         END,
+         last_logon_display_name = CASE
+           WHEN $9::text IS NOT NULL AND (last_seen_at IS NULL OR last_seen_at <= $2)
+           THEN $10::text
+           ELSE last_logon_display_name
+         END,
          updated_at    = now()
        WHERE id = $1`,
       [
@@ -500,6 +512,8 @@ export class CheckinService {
         snapshot.host.osBuild ?? null,
         snapshot.agentVersion,
         snapshot.diagnostics ? JSON.stringify(snapshot.diagnostics) : null,
+        snapshot.host.lastLogonUser ?? null,
+        snapshot.host.lastLogonDisplayName ?? null,
       ],
     );
   }

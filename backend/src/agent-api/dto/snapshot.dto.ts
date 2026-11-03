@@ -59,6 +59,18 @@ export class HostInfoDto {
   @IsUUID()
   @IsOptional()
   adObjectGuid?: string;
+
+  /** Zuletzt angemeldetes Konto, etwa `DOMAENE\benutzer`. Ab Agent 0.7.1. */
+  @IsString()
+  @IsOptional()
+  @MaxLength(256)
+  lastLogonUser?: string;
+
+  /** Anzeigename dazu. Ab Agent 0.7.1. */
+  @IsString()
+  @IsOptional()
+  @MaxLength(256)
+  lastLogonDisplayName?: string;
 }
 
 export class UpdateSourceInfoDto {

@@ -21,6 +21,7 @@ internal static class Limits
     public const int OsName = 255;
     public const int OsVersion = 64;
     public const int OsBuild = 64;
+    public const int LogonUser = 256;
 
     /// <summary>Fehlermeldung einer Installationsrueckmeldung.</summary>
     public const int InstallError = 2048;

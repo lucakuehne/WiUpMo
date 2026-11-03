@@ -42,6 +42,23 @@ export interface AdGroup {
  */
 const IN_CHAIN = '1.2.840.113556.1.4.1941';
 
+/** Was von einem Computerkonto gelesen wird. */
+const COMPUTER_ATTRIBUTES = [
+  'objectGUID',
+  'distinguishedName',
+  'cn',
+  'dNSHostName',
+  'operatingSystem',
+  'operatingSystemVersion',
+];
+
+/**
+ * Namen je Abfrage bei der Suche nach einzelnen Konten. Ein Filter mit
+ * Tausenden Alternativen sprengt bei manchen Domaenencontrollern die
+ * Groessengrenze einer Anfrage.
+ */
+const NAMES_PER_QUERY = 50;
+
 /** Ein Computerkonto, auf das Noetigste eingedampft. */
 export interface AdComputer {
   objectGuid: string;
@@ -79,14 +96,7 @@ export class LdapClient {
           scope: 'sub',
           filter,
           paged: { pageSize: config.pageSize },
-          attributes: [
-            'objectGUID',
-            'distinguishedName',
-            'cn',
-            'dNSHostName',
-            'operatingSystem',
-            'operatingSystemVersion',
-          ],
+          attributes: COMPUTER_ATTRIBUTES,
           // objectGUID ist binaer. Ohne diese Angabe kaeme eine kaputte
           // Zeichenkette statt der 16 Bytes an.
           explicitBufferAttributes: ['objectGUID'],
@@ -104,6 +114,49 @@ export class LdapClient {
         `${byGuid.size} Computerkonten aus dem AD gelesen (${bases.length} Bereich(e)).`,
       );
       return [...byGuid.values()];
+    });
+  }
+
+  /**
+   * Sucht Computerkonten nach Namen in der ganzen Domaene — unterhalb der
+   * Wurzel, ohne Bereiche und ohne Filter.
+   *
+   * Damit unterscheidet der Abgleich ein Agent-Geraet, dessen Konto ausserhalb
+   * der ueberwachten OUs liegt, von einem, das gar nicht zur Domaene gehoert.
+   * Ohne Wurzel gibt es nichts zu suchen.
+   */
+  async findComputersByName(config: AdSettings, hostnames: string[]): Promise<AdComputer[]> {
+    const base = config.baseDn.trim();
+    if (!base || hostnames.length === 0) {
+      return [];
+    }
+
+    return this.withClient(config, async (client) => {
+      const found: AdComputer[] = [];
+
+      for (let i = 0; i < hostnames.length; i += NAMES_PER_QUERY) {
+        const clauses = hostnames
+          .slice(i, i + NAMES_PER_QUERY)
+          .map((name) => `(cn=${escapeFilterValue(name)})`)
+          .join('');
+
+        const { searchEntries } = await client.search(base, {
+          scope: 'sub',
+          filter: `(&(objectClass=computer)(|${clauses}))`,
+          paged: { pageSize: config.pageSize },
+          attributes: COMPUTER_ATTRIBUTES,
+          explicitBufferAttributes: ['objectGUID'],
+        });
+
+        for (const entry of searchEntries) {
+          const computer = this.toComputer(entry);
+          if (computer) {
+            found.push(computer);
+          }
+        }
+      }
+
+      return found;
     });
   }
 

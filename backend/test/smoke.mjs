@@ -203,6 +203,27 @@ await step('Geraetedetail mit Update-Zustaenden', async () => {
   assert.equal(detail.agentDiagnostics?.queuedSnapshots, 0);
 });
 
+await step('Zuletzt angemeldeter Benutzer: neuester Snapshot zaehlt, Suche findet ihn', async () => {
+  const name = `USER-${RUN}`;
+  const withUser = (lastLogonUser, lastLogonDisplayName) => host(name, { lastLogonUser, lastLogonDisplayName });
+  const userDevice = await enroll(agent, enrollmentToken, host(name));
+  await checkin(agent, userDevice.token, snapshot({ hostInfo: withUser('TEST\\lena', `Lena ${RUN}`), collectedAt: minutesAgo(3) }));
+
+  // Nachgereicht und aelter: aendert nichts. Ohne Angabe (Agent vor 0.7.1): bleibt.
+  await checkin(agent, userDevice.token, snapshot({ hostInfo: withUser('TEST\\alt', 'Alt'), collectedAt: minutesAgo(10) }));
+  await checkin(agent, userDevice.token, snapshot({ hostInfo: host(name), collectedAt: minutesAgo(2) }));
+
+  const detail = await api.get(`/api/devices/${userDevice.deviceId}`);
+  assert.deepEqual([detail.lastLogonUser, detail.lastLogonDisplayName], ['TEST\\lena', `Lena ${RUN}`]);
+
+  const found = await api.get(`/api/devices?search=${encodeURIComponent(`Lena ${RUN}`)}`);
+  assert.deepEqual(found.items.map((d) => [d.hostname, d.lastLogonUser]), [[name, 'TEST\\lena']]);
+
+  const csv = await api.request('GET', `/api/devices/export?search=${encodeURIComponent(`Lena ${RUN}`)}`, { raw: true });
+  assert.match(csv.data, /Zuletzt angemeldet/);
+  assert.ok(csv.data.includes('TEST\\lena'), 'Benutzer fehlt im Export');
+});
+
 await step('Zeitreihe', async () => {
   const timeline = await api.get(`/api/devices/${device.deviceId}/timeline`);
   const types = new Set(timeline.items.map((e) => e.eventType));

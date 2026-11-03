@@ -42,6 +42,8 @@ const SORT_COLUMNS: Record<string, { column: string; invert?: boolean }> = {
   // gleichzeitig verteilten Staenden reicht das, und ein Vergleich, der 0.10.0
   // hinter 0.9.0 einordnet, braeuchte eine Zerlegung in der Abfrage.
   agentVersion: { column: 'd.agent_version' },
+  // Nach dem Namen, wie er in der Liste steht; ohne Anzeigename nach dem Konto.
+  lastLogonUser: { column: 'coalesce(d.last_logon_display_name, d.last_logon_user)' },
 };
 
 interface DeviceRow {
@@ -55,6 +57,8 @@ interface DeviceRow {
   agent_version: string | null;
   enrolled_at: Date | null;
   last_seen_at: Date | null;
+  last_logon_user: string | null;
+  last_logon_display_name: string | null;
   update_source: UpdateSource | null;
   pending_reboot: boolean;
   open_updates: string;
@@ -124,6 +128,7 @@ export class DevicesService {
       `${DevicesService.ANNOTATED_DEVICES}
        SELECT d.id, d.hostname, d.ad_ou, d.os_name, d.os_version, d.os_build, d.status,
               d.agent_version, d.enrolled_at, d.last_seen_at,
+              d.last_logon_user, d.last_logon_display_name,
               c.update_source,
               coalesce(c.pending_reboot, false)     AS pending_reboot,
               coalesce(o.open_updates, 0)           AS open_updates,
@@ -189,6 +194,8 @@ export class DevicesService {
         'Agent-Version',
         'Registriert',
         'Letzter Check-in',
+        'Zuletzt angemeldet',
+        'Anzeigename',
       ],
       items.map((item) => [
         item.hostname,
@@ -205,6 +212,8 @@ export class DevicesService {
         item.agentVersion,
         item.enrolledAt,
         item.lastSeenAt,
+        item.lastLogonUser,
+        item.lastLogonDisplayName,
       ]),
     );
   }
@@ -251,7 +260,10 @@ export class DevicesService {
 
     if (query.search) {
       const term = params.add(`%${query.search}%`);
-      conditions.push(`(d.hostname ILIKE ${term} OR d.ad_ou ILIKE ${term})`);
+      conditions.push(
+        `(d.hostname ILIKE ${term} OR d.ad_ou ILIKE ${term} ` +
+          `OR d.last_logon_user ILIKE ${term} OR d.last_logon_display_name ILIKE ${term})`,
+      );
     }
 
     if (query.status) {
@@ -315,6 +327,8 @@ export class DevicesService {
       agentVersion: row.agent_version,
       enrolledAt: row.enrolled_at?.toISOString() ?? null,
       lastSeenAt: row.last_seen_at?.toISOString() ?? null,
+      lastLogonUser: row.last_logon_user,
+      lastLogonDisplayName: row.last_logon_display_name,
       updateSource: row.update_source,
       pendingReboot: row.pending_reboot,
       // count() liefert bigint, der Treiber gibt es als Zeichenkette zurueck.
@@ -330,7 +344,7 @@ export class DevicesService {
     const devices: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT id, hostname, ad_dn, ad_ou, ad_object_guid, os_name, os_version, os_build,
               status, agent_version, enrolled_at, last_seen_at, archived_at, archived_reason,
-              agent_diagnostics
+              last_logon_user, last_logon_display_name, agent_diagnostics
          FROM devices WHERE id = $1`,
       [id],
     );
@@ -360,6 +374,8 @@ export class DevicesService {
       lastSeenAt: toIso(device.last_seen_at),
       archivedAt: toIso(device.archived_at),
       archivedReason: (device.archived_reason as string | null) ?? null,
+      lastLogonUser: (device.last_logon_user as string | null) ?? null,
+      lastLogonDisplayName: (device.last_logon_display_name as string | null) ?? null,
       agentDiagnostics: (device.agent_diagnostics as DeviceDetailDto['agentDiagnostics']) ?? null,
       updates,
       checkins,

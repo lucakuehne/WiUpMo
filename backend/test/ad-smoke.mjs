@@ -100,13 +100,19 @@ async function devicesNamed(hostname) {
  * Loescht ein Computerkonto und legt es unter gleichem Namen neu an — so wie
  * bei einer Neuinstallation mit erneutem Domaenenbeitritt. Das neue Konto hat
  * eine neue objectGUID.
+ *
+ * Mit `from` steht das alte Konto in einer anderen OU: Das Konto zieht um.
+ * Ohne vorhandenes Konto wird es nur angelegt.
  */
-async function recreateComputer(name, ou) {
+async function recreateComputer(name, ou, from = ou) {
   const ldap = new LdapClient({ url: connection.url, tlsOptions: { ca: [connection.caCertificate] } });
   await ldap.bind('Administrator@test.wiupmo', 'Adm1n-Passw0rd!');
   try {
     const dn = `CN=${name},${ou}`;
-    await ldap.del(dn);
+    await ldap.del(`CN=${name},${from}`).catch((error) => {
+      // 32: noSuchObject — beim ersten Anlegen gibt es nichts zu loeschen.
+      if (error?.code !== 32) throw error;
+    });
     await ldap.add(dn, {
       objectClass: 'computer',
       sAMAccountName: `${name}$`,
@@ -309,6 +315,45 @@ await step('Doppelter Datensatz aus einem frueheren Abgleich wird aufgeloest', a
 
   const res = await checkin(agent, agentNb2.token, snapshot({ hostInfo: host('NB-002'), collectedAt: minutesAgo(0.5) }));
   assert.deepEqual(res.results.map((r) => r.outcome), ['accepted']);
+});
+
+// Ein Agent auf einem Rechner, dessen Konto ausserhalb der ueberwachten OUs
+// liegt - so kamen geloeschte Geraete als aktive ohne OU zurueck.
+await step('Agent ausserhalb der Bereiche: archiviert, bleibt draussen, kommt mit dem Konto zurueck', async () => {
+  const COMPUTERS = `CN=Computers,${BASE_DN}`;
+  const ARBEITSPLAETZE = `OU=Arbeitsplaetze,${CLIENTS}`;
+  await recreateComputer('EXT-001', COMPUTERS);
+
+  const ext = await enroll(agent, enrollmentToken, host('EXT-001'));
+  await checkin(agent, ext.token, snapshot({ hostInfo: host('EXT-001'), collectedAt: minutesAgo(3) }));
+  // Ein Rechner ganz ohne AD-Konto, etwa ausserhalb der Domaene.
+  const lone = await enroll(agent, enrollmentToken, host('WORKGROUP-01'));
+  await checkin(agent, lone.token, snapshot({ hostInfo: host('WORKGROUP-01'), collectedAt: minutesAgo(3) }));
+
+  const run = await api.post('/api/ad/sync');
+  assert.equal(run.status, 'success', run.error ?? '');
+  assert.equal(run.devicesArchived, 1, 'Zahl der archivierten Geraete');
+
+  const archived = await deviceByName('EXT-001');
+  assert.equal(archived.status, 'archived');
+  assert.match(archived.archivedReason ?? '', /ausserhalb der abgeglichenen Bereiche/);
+  assert.equal((await deviceByName('WORKGROUP-01')).status, 'active', 'ohne AD-Konto bleibt aktiv');
+
+  // Der Agent wird abgewiesen, und eine neue Registrierung holt es nicht zurueck.
+  await checkin(agent, ext.token, snapshot({ hostInfo: host('EXT-001'), collectedAt: minutesAgo(2) }), 403);
+  const again = await enroll(agent, enrollmentToken, host('EXT-001'));
+  assert.equal(again.deviceId, archived.id);
+  assert.equal((await deviceByName('EXT-001')).status, 'archived');
+
+  // Das Konto zieht in eine ueberwachte OU: dasselbe Geraet, wieder aktiv.
+  await recreateComputer('EXT-001', ARBEITSPLAETZE, COMPUTERS);
+  const back = await api.post('/api/ad/sync');
+  assert.equal(back.status, 'success', back.error ?? '');
+  const active = await deviceByName('EXT-001');
+  assert.equal(active.id, archived.id, 'neuer Datensatz statt des bisherigen');
+  assert.equal(active.status, 'active');
+  assert.equal(active.adOu, ARBEITSPLAETZE);
+  await checkin(agent, again.token, snapshot({ hostInfo: host('EXT-001'), collectedAt: minutesAgo(1) }));
 });
 
 await step('Protokoll der Abgleiche', async () => {

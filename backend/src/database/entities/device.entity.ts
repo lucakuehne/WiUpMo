@@ -63,6 +63,13 @@ export class Device {
   @Column({ type: 'jsonb', name: 'agent_diagnostics', nullable: true })
   agentDiagnostics: Record<string, unknown> | null;
 
+  /** Zuletzt angemeldetes Konto laut Agent, etwa `DOMAENE\benutzer`. */
+  @Column({ type: 'text', name: 'last_logon_user', nullable: true })
+  lastLogonUser: string | null;
+
+  @Column({ type: 'text', name: 'last_logon_display_name', nullable: true })
+  lastLogonDisplayName: string | null;
+
   @Column({
     type: 'enum',
     enum: DeviceStatus,

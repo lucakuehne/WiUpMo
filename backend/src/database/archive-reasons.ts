@@ -16,6 +16,21 @@ export const ARCHIVE_REASON_GONE = 'Im Active Directory nicht mehr vorhanden.';
 export const ARCHIVE_REASON_OUT_OF_SCOPE =
   'Liegt nicht mehr in den abgeglichenen Bereichen des Verzeichnisses.';
 
+/**
+ * Fuer ein Geraet, das nur ueber seinen Agent bekannt ist: Sein Computerkonto
+ * gibt es, aber nicht in dem, was abgeglichen wird. "Nicht mehr" waere hier
+ * falsch — meist war es nie darin, etwa weil der Agent breiter verteilt ist
+ * als die ueberwachten OUs, oder weil das Geraet geloescht wurde und sein Agent
+ * sich neu registriert hat.
+ */
+export const ARCHIVE_REASON_NOT_IN_SCOPE =
+  'Das Computerkonto liegt ausserhalb der abgeglichenen Bereiche des Verzeichnisses ' +
+  'oder wird vom Filter ausgeschlossen.';
+
 export function isAdArchiveReason(reason: string | null): boolean {
-  return reason === ARCHIVE_REASON_GONE || reason === ARCHIVE_REASON_OUT_OF_SCOPE;
+  return (
+    reason === ARCHIVE_REASON_GONE ||
+    reason === ARCHIVE_REASON_OUT_OF_SCOPE ||
+    reason === ARCHIVE_REASON_NOT_IN_SCOPE
+  );
 }

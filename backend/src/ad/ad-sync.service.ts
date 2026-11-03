@@ -3,12 +3,13 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import {
   ARCHIVE_REASON_GONE,
+  ARCHIVE_REASON_NOT_IN_SCOPE,
   ARCHIVE_REASON_OUT_OF_SCOPE,
 } from '../database/archive-reasons.js';
 import { returnedRows } from '../common/query-result.js';
 import { AdSyncStatus, AdSyncTrigger, DeviceStatus } from '../database/enums.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { effectiveSearchBases, isAdConfigured } from '../settings/settings.types.js';
+import { AdSettings, effectiveSearchBases, isAdConfigured } from '../settings/settings.types.js';
 import { AdComputer, LdapClient } from './ldap.client.js';
 
 export interface AdSyncResult {
@@ -22,13 +23,17 @@ export interface AdSyncResult {
 }
 
 /**
- * Zwei Gruende, weil dahinter zwei verschiedene Sachverhalte stehen.
+ * Zwei Gruende fuer Geraete aus dem AD, weil dahinter zwei verschiedene
+ * Sachverhalte stehen.
  *
  * Ein Konto, das im Verzeichnis geloescht wurde, ist ausgemustert. Ein Konto,
  * das nur nicht mehr in den abgeglichenen Bereichen liegt, existiert weiterhin
  * — es wurde verschoben oder eine Organisationseinheit wurde aus den
  * Einstellungen genommen. Wer die Geraeteliste liest, soll das auseinander
  * halten koennen, ohne im AD nachzusehen.
+ *
+ * Ein dritter gilt Geraeten, die nur ueber ihren Agent bekannt sind und deren
+ * Konto ausserhalb des Abgleichs liegt (siehe `archiveOutsideScope`).
  *
  * Die Texte liegen in <c>archive-reasons.ts</c>, weil die Registrierung sie
  * ebenfalls auswerten muss.
@@ -85,7 +90,8 @@ export class AdSyncService {
         );
       }
 
-      const result = await this.apply(computers, effectiveSearchBases(config));
+      const outside = await this.findOutsideScope(config, computers);
+      const result = await this.apply(computers, effectiveSearchBases(config), outside);
 
       await this.finishRun(runId, AdSyncStatus.Success, result, null);
 
@@ -132,6 +138,7 @@ export class AdSyncService {
   private async apply(
     computers: AdComputer[],
     searchBases: string[],
+    outsideHostnames: string[],
   ): Promise<Omit<AdSyncResult, 'id' | 'status' | 'error'>> {
     return this.dataSource.transaction(async (manager) => {
       let created = 0;
@@ -145,12 +152,13 @@ export class AdSyncService {
       }
 
       const archived = await this.archiveMissing(manager, computers, searchBases);
+      const outside = await this.archiveOutsideScope(manager, outsideHostnames);
 
       return {
         devicesFound: computers.length,
         devicesCreated: created,
         devicesReactivated: reactivated,
-        devicesArchived: archived,
+        devicesArchived: archived + outside,
       };
     });
   }
@@ -266,7 +274,8 @@ export class AdSyncService {
    * Ein per Agent registriertes Geraet ohne GUID darf hier nicht hineinfallen:
    * Es steht vielleicht ausserhalb der konfigurierten Suchwurzel oder gehoert
    * gar nicht zur Domaene. Es zu archivieren, weil eine LDAP-Abfrage es nicht
-   * gefunden hat, waere schlicht falsch.
+   * gefunden hat, waere schlicht falsch. Fuer diese Geraete gibt es einen
+   * eigenen Schritt, der im ganzen Verzeichnis nachsieht (`archiveOutsideScope`).
    *
    * Geloescht wird nie. Die Historie eines ausgemusterten Geraets bleibt
    * auswertbar.
@@ -310,6 +319,76 @@ export class AdSyncService {
     );
 
     return returnedRows(result).length;
+  }
+
+  /**
+   * Agent-Geraete ohne Konto im Abgleich, deren Konto im Verzeichnis aber
+   * existiert — ausserhalb der ueberwachten OUs oder vom Filter ausgeschlossen.
+   *
+   * Laeuft vor der Transaktion, weil es eine LDAP-Abfrage ist. Kandidaten sind
+   * aktive Geraete ohne GUID, deren Name nicht unter den gelesenen Konten
+   * steht; die mit Namen darunter fuehrt `upsert` ohnehin zusammen.
+   *
+   * Scheitert die Suche, laeuft der Abgleich ohne diesen Schritt weiter: Er
+   * ist eine Aufraeumarbeit, kein Grund, den Rest liegen zu lassen.
+   */
+  private async findOutsideScope(config: AdSettings, computers: AdComputer[]): Promise<string[]> {
+    const inScope = new Set(computers.map((c) => c.hostname.toLowerCase()));
+    const rows: Array<{ hostname: string }> = await this.dataSource.query(
+      `SELECT DISTINCT hostname FROM devices WHERE status = 'active' AND ad_object_guid IS NULL`,
+    );
+    const candidates = rows.map((row) => row.hostname).filter((name) => !inScope.has(name.toLowerCase()));
+
+    if (candidates.length === 0) {
+      return [];
+    }
+
+    try {
+      const found = await this.ldap.findComputersByName(config, candidates);
+      return found.map((computer) => computer.hostname);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Konten ausserhalb des Abgleichs liessen sich nicht nachschlagen: ${message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Archiviert Agent-Geraete, deren Konto ausserhalb des Abgleichs liegt.
+   *
+   * Ohne diesen Schritt standen sie als aktive Geraete ohne OU in der Liste —
+   * Rechner, die niemand ueberwachen will, auf denen aber ein Agent laeuft.
+   * Das betraf auch geloeschte Geraete: Ihr Agent registriert sich neu, und
+   * ohne Gegenstueck im Abgleich kam dabei ein aktives Geraet heraus.
+   *
+   * Mit dem eigenen Grund holt eine erneute Registrierung das Geraet nicht
+   * zurueck, und der Agent bekommt 403 wie bei jedem archivierten. Wandert das
+   * Konto in eine ueberwachte OU, uebernimmt `upsert` das Geraet ueber den
+   * Namen und aktiviert es wieder.
+   */
+  private async archiveOutsideScope(manager: EntityManager, hostnames: string[]): Promise<number> {
+    if (hostnames.length === 0) {
+      return 0;
+    }
+
+    const result: unknown = await manager.query(
+      `UPDATE devices SET
+         status          = 'archived',
+         archived_at     = now(),
+         archived_reason = $2,
+         updated_at      = now()
+       WHERE status = 'active'
+         AND ad_object_guid IS NULL
+         AND lower(hostname) = ANY($1::text[])
+       RETURNING id`,
+      [hostnames.map((name) => name.toLowerCase()), ARCHIVE_REASON_NOT_IN_SCOPE],
+    );
+
+    const archived = returnedRows(result).length;
+    if (archived > 0) {
+      this.logger.log(`${archived} Agent-Geraet(e) archiviert, deren Konto ausserhalb des Abgleichs liegt.`);
+    }
+    return archived;
   }
 
   private async startRun(trigger: AdSyncTrigger): Promise<string> {

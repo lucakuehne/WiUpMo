@@ -74,6 +74,10 @@ export class DeviceDetailDto {
   archivedAt: string | null;
   archivedReason: string | null;
 
+  /** Zuletzt angemeldetes Konto und sein Anzeigename; nur von Agents ab 0.7.1. */
+  lastLogonUser: string | null;
+  lastLogonDisplayName: string | null;
+
   /**
    * Selbstauskunft des Agents aus dem letzten Check-in. `null` bei einem Geraet
    * ohne Agent oder mit einer Version, die das Feld noch nicht schickt.

@@ -18,6 +18,13 @@ public sealed class HostInspector(ILogger<HostInspector> logger)
     private const string AutoUpdateReboot =
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired";
 
+    /// <summary>
+    /// Wer sich zuletzt am Anmeldebildschirm angemeldet hat, ob an der Konsole
+    /// oder per Remotedesktop. Windows haelt es fuer die Vorbelegung des
+    /// Anmeldebildschirms fest.
+    /// </summary>
+    private const string LogonUi = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI";
+
     /// <summary>Ab diesem Build heisst das System Windows 11.</summary>
     private const int FirstWindows11Build = 22000;
 
@@ -36,6 +43,8 @@ public sealed class HostInspector(ILogger<HostInspector> logger)
 
         int build = int.TryParse(currentBuild, CultureInfo.InvariantCulture, out int parsed) ? parsed : 0;
 
+        (string? logonUser, string? logonDisplayName) = ReadLastLogon(hklm);
+
         return new HostInfo
         {
             Hostname = Limits.Truncate(Environment.MachineName, Limits.Hostname),
@@ -46,7 +55,34 @@ public sealed class HostInspector(ILogger<HostInspector> logger)
             // Bleibt in Phase 1 leer; die Zuordnung zum AD-Computerkonto stellt
             // der AD-Abgleich des Backends her (Phase 3).
             AdObjectGuid = null,
+
+            LastLogonUser = Limits.TruncateOrNull(logonUser, Limits.LogonUser),
+            LastLogonDisplayName = Limits.TruncateOrNull(logonDisplayName, Limits.LogonUser),
         };
+    }
+
+    /// <summary>
+    /// <c>LastLoggedOnUser</c> traegt das Konto mit Domaene, bei lokalen Konten
+    /// mit <c>.\</c>. Fehlt es, steht derselbe Wert oft noch unter
+    /// <c>LastLoggedOnSAMUser</c>. Ohne Anmeldung seit der Installation gibt es
+    /// beides nicht — dann bleibt die Angabe leer.
+    /// </summary>
+    private (string? User, string? DisplayName) ReadLastLogon(RegistryKey hklm)
+    {
+        try
+        {
+            using RegistryKey? key = hklm.OpenSubKey(LogonUi);
+            string? user = key?.GetValue("LastLoggedOnUser") as string
+                ?? key?.GetValue("LastLoggedOnSAMUser") as string;
+            string? displayName = key?.GetValue("LastLoggedOnDisplayName") as string;
+
+            return string.IsNullOrWhiteSpace(user) ? (null, null) : (user, displayName);
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            logger.LogDebug("Der zuletzt angemeldete Benutzer liess sich nicht lesen: {Fehler}", ex.Message);
+            return (null, null);
+        }
     }
 
     /// <summary>

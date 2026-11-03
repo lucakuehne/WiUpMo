@@ -37,6 +37,7 @@ export const DEVICE_SORT_FIELDS = [
   'patchAgeDays',
   'updateSource',
   'agentVersion',
+  'lastLogonUser',
 ] as const;
 
 export type DeviceSortField = (typeof DEVICE_SORT_FIELDS)[number];
@@ -63,7 +64,7 @@ export class DeviceQueryDto {
   @IsOptional()
   sortDir: 'asc' | 'desc' = 'asc';
 
-  /** Freitext auf Hostname und OU. */
+  /** Freitext auf Hostname, OU und zuletzt angemeldeten Benutzer. */
   @IsString()
   @MaxLength(128)
   @IsOptional()
@@ -171,6 +172,11 @@ export class DeviceListItemDto {
   agentVersion: string | null;
   enrolledAt: string | null;
   lastSeenAt: string | null;
+
+  /** Zuletzt angemeldetes Konto und sein Anzeigename; nur von Agents ab 0.7.1. */
+  lastLogonUser: string | null;
+  lastLogonDisplayName: string | null;
+
   updateSource: UpdateSource | null;
   pendingReboot: boolean;
   openUpdates: number;
