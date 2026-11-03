@@ -117,4 +117,22 @@ public sealed class AgentOptions
 
     /// <summary>Aufbewahrung der Protokolldateien in Tagen.</summary>
     public int LogRetentionDays { get; set; } = 14;
+
+    // --- Selbst-Update ---------------------------------------------------------
+
+    /// <summary>
+    /// Frist, in der sich eine neue Fassung nach der Umstellung bestaetigen
+    /// muss, sonst stellt der Updater zurueck. Sie muss den ersten Durchlauf
+    /// abdecken, samt einer langsamen Update-Suche. Gelesen vom Updater.
+    /// </summary>
+    public int UpdateVerificationMinutes { get; set; } = 20;
+
+    // --- Nur fuer den Ende-zu-Ende-Test (agent/e2e) -----------------------------
+
+    /// <summary>
+    /// Fragt Windows Update nicht ab und meldet keine Updates. Auf den
+    /// Windows-Runnern von GitHub ist die Suche langsam und unberechenbar; der
+    /// Test prueft das Selbst-Update, nicht Windows Update. Im Betrieb nie setzen.
+    /// </summary>
+    public bool SimulateWindowsUpdate { get; set; }
 }

@@ -70,6 +70,10 @@ export class Device {
   @Column({ type: 'text', name: 'last_logon_display_name', nullable: true })
   lastLogonDisplayName: string | null;
 
+  /** Letzter Neustart laut Agent. */
+  @Column({ type: 'timestamptz', name: 'last_boot_at', nullable: true })
+  lastBootAt: Date | null;
+
   @Column({
     type: 'enum',
     enum: DeviceStatus,

@@ -28,6 +28,17 @@ import ChartCanvas from '@/components/ChartCanvas.vue';
 import SourceLegend from '@/components/SourceLegend.vue';
 import { baseOptions, palette } from '@/chart';
 import { UPDATE_SOURCE_LABELS } from '@/format';
+import {
+  INTERVAL_LABELS,
+  PER_INTERVAL,
+  bucketCount,
+  defaultInterval,
+  formatTick,
+  formatTitle,
+  intervalsFor,
+  spanText,
+  type TrendInterval,
+} from '@/trend-time';
 
 const router = useRouter();
 
@@ -42,16 +53,25 @@ const loading = ref(true);
 const error = ref<string | null>(null);
 
 /**
- * Der Zeitraum gilt für beide Verlaufsdiagramme; die übrigen Karten zeigen den
- * aktuellen Stand und sind davon unberührt.
+ * Zeitraum und Intervall gelten für alle Verläufe; die übrigen Karten zeigen
+ * den aktuellen Stand und sind davon unberührt.
  *
- * Die Agent-Abdeckung kann weniger Tage zurückliefern als angefragt: Was sich
- * mangels aufbewahrter Check-ins nicht mehr belegen lässt, zeigt sie erst gar
- * nicht. Deshalb steht die tatsächliche Spanne an der Karte.
+ * Ein Verlauf kann weniger zurückliefern als angefragt: Was sich mangels
+ * aufbewahrter Check-ins nicht mehr belegen lässt, zeigt er erst gar nicht.
+ * Deshalb steht die tatsächliche Spanne an der Karte.
  */
 const rangeDays = ref(90);
+const interval = ref<TrendInterval>('day');
+
+/**
+ * Womit die angezeigten Verläufe geladen wurden. Die Beschriftung richtet sich
+ * danach, nicht nach der Auswahl: Zwischen Umschalten und Eintreffen der Daten
+ * stünden sonst Tage mit Stunden beschriftet.
+ */
+const loaded = ref<{ days: number; interval: TrendInterval }>({ days: 90, interval: 'day' });
 
 const rangeOptions = [
+  { value: '1', label: '24 Stunden' },
   { value: '7', label: '7 Tage' },
   { value: '30', label: '30 Tage' },
   { value: '90', label: '90 Tage' },
@@ -133,8 +153,37 @@ const TONE_BORDERS: Record<Tile['tone'], string> = {
   danger: 'border-l-destructive',
 };
 
+/**
+ * Die Beschriftung der Zeitachse. Die Diagramme bekommen den Beginn jedes
+ * Abschnitts unverändert; kurz gefasst wird erst hier, und der Tooltip zeigt
+ * den vollen Abschnitt.
+ */
+const timeTicks = computed(() => ({
+  color: palette.value.muted,
+  maxTicksLimit: 12,
+  callback(this: { getLabelForValue(value: number): string }, value: number | string): string {
+    return formatTick(this.getLabelForValue(Number(value)), loaded.value.interval, loaded.value.days);
+  },
+}));
+
+const timeTooltip = computed(() => ({
+  callbacks: {
+    title: (items: Array<{ label: string }>) =>
+      items.length > 0 ? formatTitle(items[0].label, loaded.value.interval) : '',
+  },
+}));
+
+/** Wie viele Abschnitte ein Verlauf trägt, und ob das weniger sind als angefragt. */
+function shortfall(points: Array<{ date: string }>): { shown: string; requested: string } | null {
+  const shown = new Set(points.map((point) => point.date)).size;
+  const requested = bucketCount(loaded.value.days, loaded.value.interval);
+  return shown > 0 && shown < requested
+    ? { shown: spanText(shown, loaded.value.interval), requested: spanText(requested, loaded.value.interval) }
+    : null;
+}
+
 const trendData = computed(() => ({
-  labels: trend.value.map((point) => point.date.slice(5)),
+  labels: trend.value.map((point) => point.date),
   datasets: [
     {
       label: 'Offene Updates (Flotte)',
@@ -146,7 +195,7 @@ const trendData = computed(() => ({
       yAxisID: 'y',
     },
     {
-      label: 'Installiert pro Tag',
+      label: `Installiert ${PER_INTERVAL[loaded.value.interval]}`,
       data: trend.value.map((point) => point.installed),
       borderColor: palette.value.series[1],
       backgroundColor: palette.value.series[1],
@@ -175,9 +224,10 @@ const trendData = computed(() => ({
 const trendOptions = computed(() => ({
   ...baseOptions.value,
   interaction: { mode: 'index' as const, intersect: false },
+  plugins: { ...baseOptions.value.plugins, tooltip: timeTooltip.value },
   scales: {
     x: {
-      ticks: { color: palette.value.muted, maxTicksLimit: 12 },
+      ticks: timeTicks.value,
       grid: { display: false },
     },
     y: {
@@ -207,7 +257,7 @@ const ringGap = computed(() => ({ borderColor: palette.value.surface, borderWidt
 
 /**
  * Alle Verläufe sind gestapelt: Die Teile ergeben zusammen den Bestand eines
- * Tages. Die Legende steht umgekehrt, damit sie sich von oben nach unten so
+ * Abschnitts. Die Legende steht umgekehrt, damit sie sich von oben nach unten so
  * liest wie der Stapel.
  */
 const stackedOptions = computed(() => ({
@@ -215,11 +265,12 @@ const stackedOptions = computed(() => ({
   interaction: { mode: 'index' as const, intersect: false },
   plugins: {
     legend: { ...baseOptions.value.plugins.legend, reverse: true },
+    tooltip: timeTooltip.value,
   },
   scales: {
     x: {
       stacked: true,
-      ticks: { color: palette.value.muted, maxTicksLimit: 12 },
+      ticks: timeTicks.value,
       grid: { display: false },
     },
     y: {
@@ -256,11 +307,6 @@ function ringOptions(target: (index: number) => RouteLocationRaw | null) {
   };
 }
 
-/** Tage mit Daten — weiter zurück, als Check-ins aufbewahrt werden, reicht ein Verlauf nicht. */
-function daysWithData(points: Array<{ date: string }>): number {
-  return new Set(points.map((point) => point.date)).size;
-}
-
 /**
  * Die drei Zustände der Agent-Abdeckung, im Ring wie im Verlauf.
  *
@@ -287,7 +333,7 @@ const agentTrendData = computed(() => {
   ];
 
   return {
-    labels: agentTrend.value.map((point) => point.date.slice(5)),
+    labels: agentTrend.value.map((point) => point.date),
     datasets: coverage.value.map((state, index) => ({
       label: state.label,
       data: values[index],
@@ -419,7 +465,7 @@ const agentVersionTrendData = computed(() => {
   const older = agentVersionTrend.value.some((point) => !versionColors.value.has(point.version));
 
   return {
-    labels: dates.map((date) => date.slice(5)),
+    labels: dates,
     datasets: [
       ...(older
         ? [
@@ -441,7 +487,7 @@ const agentVersionTrendData = computed(() => {
   };
 });
 
-const agentVersionTrendDays = computed(() => daysWithData(agentVersionTrend.value));
+const agentVersionShortfall = computed(() => shortfall(agentVersionTrend.value));
 
 const agentVersionOptions = computed(() =>
   ringOptions((index) => {
@@ -504,7 +550,7 @@ const sourceTrendData = computed(() => {
   const present = SOURCE_ORDER.filter((source) => sourceTrend.value.some((point) => point.source === source));
 
   return {
-    labels: dates.map((date) => date.slice(5)),
+    labels: dates,
     datasets: present.map((source) => ({
       label: UPDATE_SOURCE_LABELS[source],
       data: dates.map(
@@ -516,18 +562,31 @@ const sourceTrendData = computed(() => {
   };
 });
 
-const sourceTrendDays = computed(() => daysWithData(sourceTrend.value));
+const sourceShortfall = computed(() => shortfall(sourceTrend.value));
+const agentShortfall = computed(() => shortfall(agentTrend.value));
 
-/** Nur die Verläufe — sie allein hängen am Zeitraum. */
+const intervalOptions = computed(() =>
+  intervalsFor(rangeDays.value).map((value) => ({ value, label: INTERVAL_LABELS[value] })),
+);
+
+/** Nur die Verläufe — sie allein hängen an Zeitraum und Intervall. */
 async function loadTrends(): Promise<void> {
+  const request = { days: rangeDays.value, interval: interval.value };
+
   try {
     const [t, a, v, s] = await Promise.all([
-      get<TrendPoint[]>('/api/reports/trend', { days: rangeDays.value }),
-      get<AgentTrendPoint[]>('/api/reports/agent-trend', { days: rangeDays.value }),
-      get<AgentVersionTrendPoint[]>('/api/reports/agent-version-trend', { days: rangeDays.value }),
-      get<UpdateSourceTrendPoint[]>('/api/reports/update-source-trend', { days: rangeDays.value }),
+      get<TrendPoint[]>('/api/reports/trend', request),
+      get<AgentTrendPoint[]>('/api/reports/agent-trend', request),
+      get<AgentVersionTrendPoint[]>('/api/reports/agent-version-trend', request),
+      get<UpdateSourceTrendPoint[]>('/api/reports/update-source-trend', request),
     ]);
 
+    // Eine spätere Auswahl ist schon unterwegs: deren Ergebnis zählt.
+    if (request.days !== rangeDays.value || request.interval !== interval.value) {
+      return;
+    }
+
+    loaded.value = request;
     trend.value = t;
     agentTrend.value = a;
     agentVersionTrend.value = v;
@@ -537,8 +596,15 @@ async function loadTrends(): Promise<void> {
   }
 }
 
+/** Ein neuer Zeitraum bringt sein passendes Intervall mit; ändern lässt es sich danach. */
 function onRangeChange(value: unknown): void {
   rangeDays.value = Number(value) || 90;
+  interval.value = defaultInterval(rangeDays.value);
+  void loadTrends();
+}
+
+function onIntervalChange(value: unknown): void {
+  interval.value = value as TrendInterval;
   void loadTrends();
 }
 
@@ -570,12 +636,25 @@ onMounted(load);
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <h1 class="text-xl font-semibold">Dashboard</h1>
 
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <span class="text-muted-foreground text-sm">Zeitraum</span>
         <Select :model-value="String(rangeDays)" @update:model-value="onRangeChange">
           <SelectTrigger class="w-32"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem v-for="option in rangeOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <span class="text-muted-foreground ml-2 text-sm">Intervall</span>
+        <Select
+          :model-value="interval"
+          :disabled="intervalOptions.length < 2"
+          @update:model-value="onIntervalChange"
+        >
+          <SelectTrigger class="w-36" aria-label="Intervall"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem v-for="option in intervalOptions" :key="option.value" :value="option.value">
               {{ option.label }}
             </SelectItem>
           </SelectContent>
@@ -644,11 +723,12 @@ onMounted(load);
         <CardHeader>
           <CardTitle>Update-Quellen über die Zeit</CardTitle>
           <CardDescription>
-            Die Quelle, die jedes registrierte Gerät an dem Tag zuletzt gemeldet hat. Eine Ablösung
-            zeigt sich als Fläche, die von WSUS nach oben zu Microsoft Update oder Intune wandert.
-            <template v-if="sourceTrendDays > 0 && sourceTrendDays < rangeDays">
-              Gezeigt werden {{ sourceTrendDays }} Tage statt {{ rangeDays }}: Weiter zurück reichen
-              die aufbewahrten Check-ins nicht.
+            Die Quelle, die jedes registrierte Gerät bis zum Ende des Abschnitts zuletzt gemeldet
+            hat. Eine Ablösung zeigt sich als Fläche, die von WSUS nach oben zu Microsoft Update
+            oder Intune wandert.
+            <template v-if="sourceShortfall">
+              Gezeigt werden {{ sourceShortfall.shown }} statt {{ sourceShortfall.requested }}:
+              Weiter zurück reichen die aufbewahrten Check-ins nicht.
             </template>
           </CardDescription>
         </CardHeader>
@@ -677,10 +757,10 @@ onMounted(load);
         <CardHeader>
           <CardTitle>Agent-Abdeckung über die Zeit</CardTitle>
           <CardDescription>
-            Der Bestand an jedem Tag, aufgeteilt nach Zustand — aus den Zeitpunkten am Gerät und
-            der Check-in-Historie gemessen, nicht geschätzt.
-            <template v-if="agentTrend.length > 0 && agentTrend.length < rangeDays">
-              Gezeigt werden {{ agentTrend.length }} Tage statt {{ rangeDays }}: Weiter zurück
+            Der Bestand am Ende jedes Abschnitts, aufgeteilt nach Zustand — aus den Zeitpunkten
+            am Gerät und der Check-in-Historie gemessen, nicht geschätzt.
+            <template v-if="agentShortfall">
+              Gezeigt werden {{ agentShortfall.shown }} statt {{ agentShortfall.requested }}: Weiter zurück
               liesse sich „stumm" nicht mehr belegen, weil die Check-ins der Aufbewahrungsfrist
               unterliegen.
             </template>
@@ -747,15 +827,14 @@ onMounted(load);
         <CardHeader>
           <CardTitle>Agent-Versionen über die Zeit</CardTitle>
           <CardDescription>
-            Welche Version an jedem Tag lief — die zuletzt gemeldete jedes registrierten Geräts. Ein
-            Rollout zeigt sich als grüne Fläche, die wächst. Die aktuelle und die fünf neuesten
-            übrigen Versionen sind einzeln aufgeführt, je neuer, desto kräftiger; alles davor
-            steht unter „Ältere".
-            <template
-              v-if="agentVersionTrendDays > 0 && agentVersionTrendDays < rangeDays"
-            >
-              Gezeigt werden {{ agentVersionTrendDays }} Tage statt {{ rangeDays }}: Weiter zurück
-              reichen die aufbewahrten Check-ins nicht.
+            Welche Version am Ende jedes Abschnitts lief — die zuletzt gemeldete jedes registrierten
+            Geräts. Ein Rollout zeigt sich als grüne Fläche, die wächst. Die aktuelle und die fünf
+            neuesten übrigen Versionen sind einzeln aufgeführt, je neuer, desto kräftiger; alles
+            davor steht unter „Ältere".
+            <template v-if="agentVersionShortfall">
+              Gezeigt werden {{ agentVersionShortfall.shown }} statt
+              {{ agentVersionShortfall.requested }}: Weiter zurück reichen die aufbewahrten Check-ins
+              nicht.
             </template>
           </CardDescription>
         </CardHeader>

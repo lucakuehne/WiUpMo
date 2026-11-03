@@ -51,6 +51,29 @@ public sealed class UpdateMarker
     public DateTimeOffset? VerifyDeadline { get; set; }
     public string? Error { get; set; }
 
+    /// <summary>
+    /// Die EXE, auf die der Dienst umgestellt wird, und die, von der er kommt.
+    /// Beide gesetzt heisst: neuer Weg, Umstellen per <c>binPath</c>. Fehlen sie,
+    /// stammt der Marker von einem Dienst vor 0.8.0, und es wird per Datei
+    /// getauscht. Ein aelterer Updater kennt die Felder nicht und laesst sie beim
+    /// Speichern weg — deshalb nutzt der Dienst den neuen Weg nur, wenn der
+    /// Updater ihn beherrscht.
+    /// </summary>
+    public string? TargetPath { get; init; }
+
+    public string? FromPath { get; init; }
+
+    /// <summary>Anlaeufe des Updaters fuer den aktuellen Schritt; begrenzt, damit er nicht ewig kreist.</summary>
+    public int Attempts { get; set; }
+
+    public DateTimeOffset? LastAttemptAt { get; set; }
+
+    /// <summary>Der letzte Fehlschlag eines Anlaufs, der noch wiederholt wird.</summary>
+    public string? LastAttemptError { get; set; }
+
+    [JsonIgnore]
+    public bool IsVersioned => TargetPath is not null && FromPath is not null;
+
     private static readonly JsonSerializerOptions Options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,

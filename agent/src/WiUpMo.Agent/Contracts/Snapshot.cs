@@ -31,6 +31,9 @@ public sealed class HostInfo
     public string? LastLogonUser { get; init; }
 
     public string? LastLogonDisplayName { get; init; }
+
+    /// <summary>Letzter Neustart, UTC. Wie die beiden Felder davor erst mit dem Backend zu Agent 0.8.0 bekannt.</summary>
+    public DateTimeOffset? LastBootAt { get; init; }
 }
 
 /// <summary>
@@ -146,6 +149,17 @@ public sealed class AgentDiagnostics
     /// ewig auf "zugestellt" steht.
     /// </summary>
     public required bool UpdaterTaskRegistered { get; init; }
+
+    /// <summary>
+    /// Ob der Task eingeschaltet ist, wann er zuletzt lief und mit welchem
+    /// Ergebnis (0 = erfolgreich). Ab 0.8.0; ein aelteres Backend kennt die
+    /// Felder nicht — das Backend zu 0.8.0 wird vor den Agents ausgerollt.
+    /// </summary>
+    public bool? UpdaterTaskEnabled { get; init; }
+
+    public DateTimeOffset? UpdaterLastRunAt { get; init; }
+
+    public int? UpdaterLastResult { get; init; }
 
     /// <summary>Die letzte Warnung oder Fehlermeldung des Agents, gekuerzt.</summary>
     public string? LastError { get; init; }

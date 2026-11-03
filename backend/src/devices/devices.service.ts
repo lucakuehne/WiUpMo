@@ -59,6 +59,7 @@ interface DeviceRow {
   last_seen_at: Date | null;
   last_logon_user: string | null;
   last_logon_display_name: string | null;
+  last_boot_at: Date | null;
   update_source: UpdateSource | null;
   pending_reboot: boolean;
   open_updates: string;
@@ -128,7 +129,7 @@ export class DevicesService {
       `${DevicesService.ANNOTATED_DEVICES}
        SELECT d.id, d.hostname, d.ad_ou, d.os_name, d.os_version, d.os_build, d.status,
               d.agent_version, d.enrolled_at, d.last_seen_at,
-              d.last_logon_user, d.last_logon_display_name,
+              d.last_logon_user, d.last_logon_display_name, d.last_boot_at,
               c.update_source,
               coalesce(c.pending_reboot, false)     AS pending_reboot,
               coalesce(o.open_updates, 0)           AS open_updates,
@@ -196,6 +197,7 @@ export class DevicesService {
         'Letzter Check-in',
         'Zuletzt angemeldet',
         'Anzeigename',
+        'Letzter Neustart',
       ],
       items.map((item) => [
         item.hostname,
@@ -214,6 +216,7 @@ export class DevicesService {
         item.lastSeenAt,
         item.lastLogonUser,
         item.lastLogonDisplayName,
+        item.lastBootAt,
       ]),
     );
   }
@@ -329,6 +332,7 @@ export class DevicesService {
       lastSeenAt: row.last_seen_at?.toISOString() ?? null,
       lastLogonUser: row.last_logon_user,
       lastLogonDisplayName: row.last_logon_display_name,
+      lastBootAt: row.last_boot_at?.toISOString() ?? null,
       updateSource: row.update_source,
       pendingReboot: row.pending_reboot,
       // count() liefert bigint, der Treiber gibt es als Zeichenkette zurueck.
@@ -344,7 +348,7 @@ export class DevicesService {
     const devices: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT id, hostname, ad_dn, ad_ou, ad_object_guid, os_name, os_version, os_build,
               status, agent_version, enrolled_at, last_seen_at, archived_at, archived_reason,
-              last_logon_user, last_logon_display_name, agent_diagnostics
+              last_logon_user, last_logon_display_name, last_boot_at, agent_diagnostics
          FROM devices WHERE id = $1`,
       [id],
     );
@@ -376,6 +380,7 @@ export class DevicesService {
       archivedReason: (device.archived_reason as string | null) ?? null,
       lastLogonUser: (device.last_logon_user as string | null) ?? null,
       lastLogonDisplayName: (device.last_logon_display_name as string | null) ?? null,
+      lastBootAt: toIso(device.last_boot_at),
       agentDiagnostics: (device.agent_diagnostics as DeviceDetailDto['agentDiagnostics']) ?? null,
       updates,
       checkins,

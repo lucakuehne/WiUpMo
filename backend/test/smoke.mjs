@@ -203,18 +203,21 @@ await step('Geraetedetail mit Update-Zustaenden', async () => {
   assert.equal(detail.agentDiagnostics?.queuedSnapshots, 0);
 });
 
-await step('Zuletzt angemeldeter Benutzer: neuester Snapshot zaehlt, Suche findet ihn', async () => {
+await step('Benutzer und letzter Neustart: neuester Snapshot zaehlt, Suche findet den Benutzer', async () => {
   const name = `USER-${RUN}`;
-  const withUser = (lastLogonUser, lastLogonDisplayName) => host(name, { lastLogonUser, lastLogonDisplayName });
+  const boot = new Date(Date.now() - 3 * 86_400_000).toISOString().replace(/\.\d+Z$/, '.000Z');
+  const withUser = (lastLogonUser, lastLogonDisplayName, lastBootAt) =>
+    host(name, { lastLogonUser, lastLogonDisplayName, lastBootAt });
   const userDevice = await enroll(agent, enrollmentToken, host(name));
-  await checkin(agent, userDevice.token, snapshot({ hostInfo: withUser('TEST\\lena', `Lena ${RUN}`), collectedAt: minutesAgo(3) }));
+  await checkin(agent, userDevice.token, snapshot({ hostInfo: withUser('TEST\\lena', `Lena ${RUN}`, boot), collectedAt: minutesAgo(3) }));
 
-  // Nachgereicht und aelter: aendert nichts. Ohne Angabe (Agent vor 0.7.1): bleibt.
-  await checkin(agent, userDevice.token, snapshot({ hostInfo: withUser('TEST\\alt', 'Alt'), collectedAt: minutesAgo(10) }));
+  // Nachgereicht und aelter: aendert nichts. Ohne Angabe (aelterer Agent): bleibt.
+  await checkin(agent, userDevice.token, snapshot({ hostInfo: withUser('TEST\\alt', 'Alt', minutesAgo(600)), collectedAt: minutesAgo(10) }));
   await checkin(agent, userDevice.token, snapshot({ hostInfo: host(name), collectedAt: minutesAgo(2) }));
 
   const detail = await api.get(`/api/devices/${userDevice.deviceId}`);
   assert.deepEqual([detail.lastLogonUser, detail.lastLogonDisplayName], ['TEST\\lena', `Lena ${RUN}`]);
+  assert.equal(detail.lastBootAt, boot);
 
   const found = await api.get(`/api/devices?search=${encodeURIComponent(`Lena ${RUN}`)}`);
   assert.deepEqual(found.items.map((d) => [d.hostname, d.lastLogonUser]), [[name, 'TEST\\lena']]);
@@ -270,6 +273,32 @@ await step('Berichte', async () => {
     sourceTrend.some((p) => p.date === today && p.source === 'wsus' && p.devices >= 1),
     'die Quelle des Testgeraets fehlt im Quellenverlauf',
   );
+});
+
+await step('Verlaeufe stuendlich und woechentlich', async () => {
+  // Stuendlich: 24 Abschnitte, als Zeitpunkte, der letzte ist die laufende Stunde.
+  const hourly = await api.get('/api/reports/trend?days=1&interval=hour');
+  assert.equal(hourly.length, 24);
+  assert.match(hourly.at(-1).date, /^\d{4}-\d{2}-\d{2}T\d{2}:00:00\.000Z$/);
+  assert.equal(new Date(hourly.at(-1).date).getTime(), new Date().setUTCMinutes(0, 0, 0));
+
+  // Die Versionen der laufenden Stunde enthalten das Testgeraet.
+  const versions = await api.get('/api/reports/agent-version-trend?days=1&interval=hour');
+  assert.ok(versions.some((p) => p.date === hourly.at(-1).date && p.version === AGENT_VERSION));
+
+  // Woechentlich: Abschnitte beginnen am Montag. Es kommen nur Wochen, in
+  // denen es schon Geraete gab — im frischen Test-Stack meist nur die laufende.
+  const weekly = await api.get('/api/reports/agent-trend?days=30&interval=week');
+  assert.ok(weekly.length >= 1 && weekly.length <= 5, `${weekly.length} Wochen`);
+  assert.ok(weekly.every((p) => new Date(`${p.date}T00:00:00Z`).getUTCDay() === 1), 'Woche beginnt nicht am Montag');
+  assert.ok(weekly.at(-1).activeAgents >= 1);
+
+  const sourcesWeekly = await api.get('/api/reports/update-source-trend?days=30&interval=week');
+  assert.ok(sourcesWeekly.some((p) => p.source === 'wsus'));
+
+  // Stuendlich ueber 14 Tage lehnt das Backend ab.
+  await api.request('GET', '/api/reports/trend?days=30&interval=hour', { expect: 400 });
+  await api.request('GET', '/api/reports/trend?days=7&interval=monat', { expect: 400 });
 });
 
 // --- Einstellungen --------------------------------------------------------------

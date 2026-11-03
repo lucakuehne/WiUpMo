@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { UpdateSource } from '../../database/enums.js';
 
 const toInt = () =>
@@ -130,6 +130,11 @@ export class FailureGroupDto {
 }
 
 export class TrendPointDto {
+  /**
+   * Beginn des Abschnitts in UTC: stuendlich ein Zeitpunkt (ISO 8601), taeglich
+   * und woechentlich ein Datum (`JJJJ-MM-TT`, bei Wochen der Montag). Gilt
+   * fuer alle Verlaeufe.
+   */
   date: string;
   openUpdates: number;
   appeared: number;
@@ -183,11 +188,25 @@ export class UpdateSourceTrendPointDto {
   devices: number;
 }
 
+/** Laenge eines Abschnitts in den Verlaeufen. */
+export const TREND_INTERVALS = ['hour', 'day', 'week'] as const;
+export type TrendInterval = (typeof TREND_INTERVALS)[number];
+
+/**
+ * Stuendlich hoechstens so weit zurueck: 14 Tage sind 336 Abschnitte, und jeder
+ * kostet bei den Check-in-Verlaeufen einen Indexzugriff je Geraet.
+ */
+export const MAX_HOURLY_DAYS = 14;
+
 export class TrendQueryDto {
   @toInt()
   @IsInt()
-  @Min(7)
+  @Min(1)
   @Max(365)
   @IsOptional()
   days: number = 90;
+
+  @IsIn(TREND_INTERVALS)
+  @IsOptional()
+  interval: TrendInterval = 'day';
 }

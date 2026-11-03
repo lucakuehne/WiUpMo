@@ -58,7 +58,22 @@ public sealed class HostInspector(ILogger<HostInspector> logger)
 
             LastLogonUser = Limits.TruncateOrNull(logonUser, Limits.LogonUser),
             LastLogonDisplayName = Limits.TruncateOrNull(logonDisplayName, Limits.LogonUser),
+            LastBootAt = ReadLastBoot(),
         };
+    }
+
+    /// <summary>
+    /// Aus der Laufzeit seit dem Systemstart (<c>GetTickCount64</c>). Sie zaehlt
+    /// Schlaf- und Ruhezustand mit und ergibt deshalb denselben Zeitpunkt wie
+    /// <c>Win32_OperatingSystem.LastBootUpTime</c> — ohne WMI. Ein Hochfahren
+    /// mit Schnellstart setzt sie nicht zurueck; fuer Windows Update ist das
+    /// auch kein Neustart. Auf die Sekunde gekuerzt, damit der Wert zwischen
+    /// zwei Durchlaeufen nicht um Millisekunden springt.
+    /// </summary>
+    private static DateTimeOffset ReadLastBoot()
+    {
+        DateTimeOffset boot = DateTimeOffset.UtcNow - TimeSpan.FromMilliseconds(Environment.TickCount64);
+        return new DateTimeOffset(boot.Ticks - (boot.Ticks % TimeSpan.TicksPerSecond), TimeSpan.Zero);
     }
 
     /// <summary>

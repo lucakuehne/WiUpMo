@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>WiUpMo.Agent</RootNamespace>
     <AssemblyName>wiupmo-agent</AssemblyName>
-    <Version>0.7.2</Version>
+    <Version>0.8.0</Version>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
     <!--
@@ -28,8 +28,22 @@
     <SelfContained>true</SelfContained>
     <PublishTrimmed>false</PublishTrimmed>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <!--
+      Etwa halb so gross: kuerzere Downloads beim Selbst-Update, weniger
+      Abbrueche ueber VPN. Entpackt wird beim Start in den Speicher.
+    -->
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <InvariantGlobalization>true</InvariantGlobalization>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <!--
+    Nur fuer den Ende-zu-Ende-Test: eine Fassung, die startet, aber im ersten
+    Durchlauf scheitert. Beim Bauen gesetzt, nicht ueber die Konfiguration —
+    eine ausgelieferte EXE kann sie also nie sein.
+  -->
+  <PropertyGroup Condition="'$(WiUpMoE2EBroken)' == 'true'">
+    <DefineConstants>$(DefineConstants);E2E_BROKEN</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

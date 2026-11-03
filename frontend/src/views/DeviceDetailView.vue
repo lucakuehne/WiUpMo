@@ -174,6 +174,23 @@ const agentIssues = computed<string[]>(() => {
     );
   }
 
+  if (d.updaterTaskRegistered && d.updaterTaskEnabled === false) {
+    issues.push(
+      'Der geplante Task „WiUpMo Agent Updater" ist deaktiviert. Ohne ihn kann ein ' +
+        'Selbst-Update nicht zurückgenommen werden, falls die neue Fassung scheitert.',
+    );
+  }
+
+  // 0x41301: läuft gerade, 0x41303: lief noch nie, 0x41325: wartet — kein Fehler.
+  const result = d.updaterLastResult;
+  if (result != null && result !== 0 && ![0x41301, 0x41303, 0x41325].includes(result)) {
+    const wann = d.updaterLastRunAt ? ` (${formatRelative(d.updaterLastRunAt)})` : '';
+    issues.push(
+      `Der Updater-Task endete zuletzt mit 0x${(result >>> 0).toString(16).toUpperCase().padStart(8, '0')}${wann}. ` +
+        'Einzelheiten stehen im Agent-Protokoll unter „Updater:".',
+    );
+  }
+
   if (!d.updaterTaskRegistered) {
     issues.push(
       'Der geplante Task „WiUpMo Agent Updater" fehlt. Ohne ihn kann sich der Agent nicht ' +
@@ -480,6 +497,15 @@ onMounted(load);
               <dd :title="formatDateTime(device.lastSeenAt)">
                 {{ formatRelative(device.lastSeenAt) }}
               </dd>
+            </div>
+            <div>
+              <!-- Vom Agent ab 0.8.0. Ein Hochfahren mit Schnellstart zählt
+                   nicht — für Windows Update ist es auch kein Neustart. -->
+              <dt class="text-muted-foreground text-xs">Letzter Neustart</dt>
+              <dd v-if="device.lastBootAt" :title="formatDateTime(device.lastBootAt)">
+                {{ formatRelative(device.lastBootAt) }}
+              </dd>
+              <dd v-else>—</dd>
             </div>
             <div>
               <dt class="text-muted-foreground text-xs">Organisationseinheit</dt>

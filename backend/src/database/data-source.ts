@@ -5,6 +5,7 @@ import { AgentDiagnostics1789200000000 } from '../../migrations/1789200000000-Ag
 import { AgentReleaseSize1788480000000 } from '../../migrations/1788480000000-AgentReleaseSize.js';
 import { InitialSchema1788307200000 } from '../../migrations/1788307200000-InitialSchema.js';
 import { InstallJobs1793577600000 } from '../../migrations/1793577600000-InstallJobs.js';
+import { LastBootAt1793750400000 } from '../../migrations/1793750400000-LastBootAt.js';
 import { LastLogonUser1793664000000 } from '../../migrations/1793664000000-LastLogonUser.js';
 import { PostRebootPending1789600000000 } from '../../migrations/1789600000000-PostRebootPending.js';
 import { ALL_ENTITIES } from './entities/index.js';
@@ -57,6 +58,7 @@ export const dataSourceOptions: DataSourceOptions = {
     PostRebootPending1789600000000,
     InstallJobs1793577600000,
     LastLogonUser1793664000000,
+    LastBootAt1793750400000,
   ],
   migrationsTableName: 'schema_migrations',
 

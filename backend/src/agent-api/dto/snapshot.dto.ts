@@ -71,6 +71,11 @@ export class HostInfoDto {
   @IsOptional()
   @MaxLength(256)
   lastLogonDisplayName?: string;
+
+  /** Letzter Neustart, UTC. Ab Agent 0.8.0. */
+  @IsISO8601()
+  @IsOptional()
+  lastBootAt?: string;
 }
 
 export class UpdateSourceInfoDto {
@@ -242,6 +247,21 @@ export class AgentDiagnosticsDto {
 
   @IsBoolean()
   updaterTaskRegistered: boolean;
+
+  /** Ob der Updater-Task eingeschaltet ist. Ab Agent 0.8.0. */
+  @IsBoolean()
+  @IsOptional()
+  updaterTaskEnabled?: boolean;
+
+  /** Letzter Lauf des Updater-Tasks, UTC. Ab Agent 0.8.0. */
+  @IsISO8601()
+  @IsOptional()
+  updaterLastRunAt?: string;
+
+  /** Ergebnis des letzten Laufs, wie die Aufgabenplanung es meldet (0 = erfolgreich). Ab Agent 0.8.0. */
+  @IsInt()
+  @IsOptional()
+  updaterLastResult?: number;
 
   @IsString()
   @MaxLength(500)

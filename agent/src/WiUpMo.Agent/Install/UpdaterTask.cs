@@ -1,8 +1,12 @@
 using System.Diagnostics;
 using System.Security;
 using System.Text;
+using WiUpMo.Agent.Windows;
 
 namespace WiUpMo.Agent.Install;
+
+/// <summary>Was der Dienst ueber den Updater-Task weiss.</summary>
+public sealed record UpdaterTaskStatus(bool Registered, bool Enabled, DateTimeOffset? LastRunAt, int? LastResult);
 
 /// <summary>
 /// Der geplante Task, der alle 5 Minuten den Updater ausfuehrt.
@@ -133,6 +137,60 @@ public static class UpdaterTask
           </Actions>
         </Task>
         """;
+
+    /// <summary>
+    /// Zustand des Tasks ueber die COM-Schnittstelle der Aufgabenplanung — ohne
+    /// <c>schtasks</c>-Ausgabe, die je nach Systemsprache anders aussieht.
+    /// <c>null</c>, wenn sich das nicht feststellen liess.
+    /// </summary>
+    public static UpdaterTaskStatus? ReadStatus()
+    {
+        object? service = null;
+
+        try
+        {
+            service = Com.Create("Schedule.Service");
+            Com.Call(service, "Connect");
+            object folder = Com.Require(Com.Call(service, "GetFolder", "\\"), "GetFolder");
+
+            object? task;
+            try
+            {
+                task = Com.Call(folder, "GetTask", ServiceInstaller.UpdaterTaskName);
+            }
+            catch (WindowsUpdateException ex) when (ex.InnerException?.HResult == FileNotFound)
+            {
+                return new UpdaterTaskStatus(Registered: false, Enabled: false, LastRunAt: null, LastResult: null);
+            }
+
+            if (task is null)
+            {
+                return null;
+            }
+
+            // Ein Task, der nie lief, meldet den 30.12.1899 — den Nullpunkt von DATE.
+            DateTime? lastRun = Com.TryGetDateTime(task, "LastRunTime");
+
+            return new UpdaterTaskStatus(
+                Registered: true,
+                Enabled: Com.TryGetBool(task, "Enabled"),
+                LastRunAt: lastRun is { Year: > 2000 } local
+                    ? new DateTimeOffset(DateTime.SpecifyKind(local, DateTimeKind.Local)).ToUniversalTime()
+                    : null,
+                LastResult: Com.TryGetInt(task, "LastTaskResult"));
+        }
+        catch (WindowsUpdateException)
+        {
+            return null;
+        }
+        finally
+        {
+            Com.Release(service);
+        }
+    }
+
+    /// <summary><c>HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)</c>: Den Task gibt es nicht.</summary>
+    private const int FileNotFound = unchecked((int)0x80070002);
 
     private static (int ExitCode, string Output) Run(params string[] arguments)
     {

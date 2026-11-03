@@ -39,6 +39,8 @@ export interface DeviceListItem {
   /** Zuletzt angemeldetes Konto, etwa DOMAENE\benutzer — nur von Agents ab 0.7.1. */
   lastLogonUser: string | null;
   lastLogonDisplayName: string | null;
+  /** Letzter Neustart — nur von Agents ab 0.8.0. */
+  lastBootAt: string | null;
   updateSource: UpdateSource | null;
   pendingReboot: boolean;
   openUpdates: number;
@@ -116,6 +118,10 @@ export interface AgentDiagnostics {
   selfUpdateTarget: string | null;
   selfUpdateStartedAt: string | null;
   updaterTaskRegistered: boolean;
+  /** Ab Agent 0.8.0. */
+  updaterTaskEnabled?: boolean | null;
+  updaterLastRunAt?: string | null;
+  updaterLastResult?: number | null;
   lastError: string | null;
   lastErrorAt: string | null;
 
@@ -140,6 +146,7 @@ export interface DeviceDetail {
   archivedReason: string | null;
   lastLogonUser: string | null;
   lastLogonDisplayName: string | null;
+  lastBootAt: string | null;
   agentDiagnostics: AgentDiagnostics | null;
   updates: DeviceUpdate[];
   checkins: DeviceCheckin[];

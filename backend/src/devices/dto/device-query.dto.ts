@@ -177,6 +177,9 @@ export class DeviceListItemDto {
   lastLogonUser: string | null;
   lastLogonDisplayName: string | null;
 
+  /** Letzter Neustart; nur von Agents ab 0.8.0. */
+  lastBootAt: string | null;
+
   updateSource: UpdateSource | null;
   pendingReboot: boolean;
   openUpdates: number;

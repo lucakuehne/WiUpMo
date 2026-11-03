@@ -1,26 +1,32 @@
 namespace WiUpMo.Agent.Update;
 
 /// <summary>
-/// Die Dateien, zwischen denen das Selbst-Update hin- und herschiebt.
+/// Die Dateien und Verzeichnisse des Selbst-Updates.
 ///
-/// Der Updater liegt als eigene Kopie neben dem Dienst und ist selbst **nie**
-/// Update-Ziel. Der Grund ist handfest: Windows sperrt die Datei eines
-/// laufenden Prozesses. Wuerde der Updater dieselbe EXE benutzen, muesste er
-/// sich beim Tausch selbst ersetzen — das geht nicht.
+/// Ab 0.8.0 liegt jede Version in einem eigenen Verzeichnis unter
+/// <c>versions\</c>, und der Dienst zeigt per <c>binPath</c> auf eine davon. Ein
+/// Update tauscht damit keine Dateien mehr, sondern stellt den Dienst um; die
+/// vorige Version bleibt unangetastet daneben liegen, und der Ruecktausch ist
+/// nur der Pfad zurueck.
 ///
-/// Daraus folgt zugleich, dass der Updater nie eine neuere Fassung bekommt.
-/// Seine Logik muss also von Anfang an stimmen und darf nichts brauchen, was
-/// sich spaeter aendert; deshalb ist sie auf Dateioperationen und
-/// <c>sc.exe</c>-Aufrufe beschraenkt und faellt bei jedem Zweifel auf den
-/// vorherigen Stand zurueck.
+/// Davor lag die EXE direkt im Programmverzeichnis und wurde ersetzt. Geraete
+/// mit diesem Stand gibt es weiterhin, und der Updater beherrscht deshalb
+/// beides: Die Pfade fuer den alten Weg stehen unten.
+///
+/// Der Updater ist eine Kopie neben den Versionen. Er kann nicht die laufende
+/// Dienst-EXE sein, weil Windows die Datei eines laufenden Prozesses sperrt.
+/// Ab 0.8.0 zieht eine bestaetigte neue Version die Kopie nach — bis dahin blieb
+/// sie auf dem Stand der Installation.
 /// </summary>
 public sealed class AgentPaths
 {
     public AgentPaths(string dataDirectory)
     {
-        InstallDirectory = Path.GetDirectoryName(Environment.ProcessPath)
+        string processPath = Environment.ProcessPath
             ?? throw new InvalidOperationException("Das eigene Programmverzeichnis ist nicht ermittelbar.");
 
+        ProcessPath = processPath;
+        RootDirectory = ResolveRoot(Path.GetDirectoryName(processPath)!);
         DataDirectory = dataDirectory;
     }
 
@@ -42,24 +48,58 @@ public sealed class AgentPaths
 
     public const string UpdaterFileName = "wiupmo-updater.exe";
 
-    public string InstallDirectory { get; }
+    private const string VersionsFolder = "versions";
+
+    /// <summary>Die laufende EXE.</summary>
+    public string ProcessPath { get; }
+
+    /// <summary>Das Programmverzeichnis ueber allen Versionen, etwa <c>C:\Program Files\WiUpMo</c>.</summary>
+    public string RootDirectory { get; }
 
     public string DataDirectory { get; }
 
-    /// <summary>Das Dienst-Binary — das einzige, was getauscht wird.</summary>
-    public string ServiceExe => Path.Combine(InstallDirectory, ServiceFileName);
+    public string VersionsDirectory => Path.Combine(RootDirectory, VersionsFolder);
 
-    /// <summary>Die heruntergeladene, gepruefte neue Fassung.</summary>
-    public string StagedExe => Path.Combine(InstallDirectory, "wiupmo-agent.new.exe");
+    public string VersionDirectory(string version) => Path.Combine(VersionsDirectory, version);
 
-    /// <summary>Der vorherige Stand, fuer den Rueckweg.</summary>
-    public string BackupExe => Path.Combine(InstallDirectory, "wiupmo-agent.bak.exe");
+    public string VersionExe(string version) => Path.Combine(VersionDirectory(version), ServiceFileName);
 
-    /// <summary>Die Kopie, die der Updater-Task ausfuehrt.</summary>
-    public string UpdaterExe => Path.Combine(InstallDirectory, UpdaterFileName);
+    /// <summary>Die Kopie, die der Updater-Task und der Dienst nach dem Bereitlegen ausfuehren.</summary>
+    public string UpdaterExe => Path.Combine(RootDirectory, UpdaterFileName);
+
+    /// <summary>Gemeinsame Einstellungen aller Versionen.</summary>
+    public string ConfigurationFile => Path.Combine(RootDirectory, "appsettings.json");
 
     public string MarkerPath => Path.Combine(DataDirectory, "update.json");
 
     /// <summary>Stand eines Installationsauftrags; siehe <c>Installation/InstallMarker.cs</c>.</summary>
     public string InstallMarkerPath => Path.Combine(DataDirectory, "install.json");
+
+    public string LogDirectory => Path.Combine(DataDirectory, "logs");
+
+    // --- Alter Weg (vor 0.8.0): EXE im Programmverzeichnis, Tausch per Datei ---
+
+    /// <summary>Die Dienst-EXE am alten Ort.</summary>
+    public string LegacyServiceExe => Path.Combine(RootDirectory, ServiceFileName);
+
+    /// <summary>Die bereitgelegte neue Fassung auf dem alten Weg.</summary>
+    public string StagedExe => Path.Combine(RootDirectory, "wiupmo-agent.new.exe");
+
+    /// <summary>Der vorherige Stand auf dem alten Weg, fuer den Ruecktausch.</summary>
+    public string BackupExe => Path.Combine(RootDirectory, "wiupmo-agent.bak.exe");
+
+    /// <summary>
+    /// Liegt die EXE in <c>versions\&lt;Version&gt;\</c>, ist das Programmverzeichnis
+    /// zwei Ebenen hoeher; sonst ist es ihr eigenes Verzeichnis.
+    /// </summary>
+    public static string ResolveRoot(string exeDirectory)
+    {
+        string trimmed = Path.TrimEndingDirectorySeparator(exeDirectory);
+        string? parent = Path.GetDirectoryName(trimmed);
+
+        return parent is not null
+               && string.Equals(Path.GetFileName(parent), VersionsFolder, StringComparison.OrdinalIgnoreCase)
+            ? Path.GetDirectoryName(parent)!
+            : trimmed;
+    }
 }

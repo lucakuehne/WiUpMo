@@ -10,6 +10,40 @@ public static class AgentVersion
 {
     public static string Current { get; } = Read();
 
+    /// <summary>
+    /// Vergleicht zwei Versionen nach ihren Zahlen, nicht als Text: 0.10.0 ist
+    /// neuer als 0.9.0. Ein Anhang wie <c>-beta</c> zaehlt nicht. Was sich nicht
+    /// lesen laesst, gilt als aelter als alles andere.
+    /// </summary>
+    public static int Compare(string? left, string? right)
+    {
+        int[] a = Parts(left);
+        int[] b = Parts(right);
+
+        for (int i = 0; i < Math.Max(a.Length, b.Length); i++)
+        {
+            int x = i < a.Length ? a[i] : 0;
+            int y = i < b.Length ? b[i] : 0;
+            if (x != y)
+            {
+                return x.CompareTo(y);
+            }
+        }
+
+        return 0;
+
+        static int[] Parts(string? version)
+        {
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                return [];
+            }
+
+            string core = version.Split('-', '+')[0];
+            return [.. core.Split('.').Select(part => int.TryParse(part, out int n) ? n : 0)];
+        }
+    }
+
     private static string Read()
     {
         Assembly assembly = typeof(AgentVersion).Assembly;

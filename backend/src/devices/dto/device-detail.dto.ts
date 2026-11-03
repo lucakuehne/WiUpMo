@@ -78,6 +78,9 @@ export class DeviceDetailDto {
   lastLogonUser: string | null;
   lastLogonDisplayName: string | null;
 
+  /** Letzter Neustart; nur von Agents ab 0.8.0. */
+  lastBootAt: string | null;
+
   /**
    * Selbstauskunft des Agents aus dem letzten Check-in. `null` bei einem Geraet
    * ohne Agent oder mit einer Version, die das Feld noch nicht schickt.

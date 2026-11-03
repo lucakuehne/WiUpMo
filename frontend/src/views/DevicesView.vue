@@ -850,7 +850,9 @@ onMounted(() => {
                   </div>
                 </TableCell>
 
-                <TableCell>
+                <TableCell
+                  :title="row.lastBootAt ? `Letzter Neustart: ${formatDateTime(row.lastBootAt)}` : undefined"
+                >
                   <AlertTriangle v-if="row.pendingReboot" class="text-warning size-4" />
                   <span v-else class="text-muted-foreground">—</span>
                 </TableCell>

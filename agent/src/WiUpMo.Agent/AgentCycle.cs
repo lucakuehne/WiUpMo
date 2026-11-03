@@ -31,12 +31,6 @@ public sealed class AgentCycle(
 {
     public async Task RunAsync(CancellationToken ct)
     {
-        // Ganz am Anfang und ohne Netz: Laeuft dieser Prozess in der Zielversion
-        // eines laufenden Selbst-Updates, ist der Tausch gelungen. Die Frist des
-        // Updaters ist knapp bemessen — sie darf nicht an einer langsamen
-        // Update-Suche oder einem unerreichbaren Backend verstreichen.
-        selfUpdate.ConfirmSelf();
-
         /**
          * Sammeln und Senden sind unabhaengig voneinander.
          *
@@ -66,6 +60,24 @@ public sealed class AgentCycle(
                 logger.LogWarning("Update-Zustand nicht lesbar. {Meldung}", ex.Message);
             }
         }
+
+#if E2E_BROKEN
+        // Nur in der absichtlich defekten Fassung des Ende-zu-Ende-Tests
+        // (-p:WiUpMoE2EBroken=true): Sie startet, scheitert aber im ersten
+        // Durchlauf und darf sich deshalb nie bestaetigen.
+        if (!ct.IsCancellationRequested)
+        {
+            throw new InvalidOperationException("Defekte Testfassung: Der Durchlauf scheitert absichtlich.");
+        }
+#endif
+
+        // Nach dem Erfassen und vor dem Senden: Laeuft dieser Prozess in der
+        // Zielversion eines Selbst-Updates, hat er jetzt einen Durchlauf
+        // geschafft. Eine Fassung, die zwar startet, aber hier scheitert, kommt
+        // nicht so weit — ihre Ausnahme geht am Aufruf vorbei, und der Updater
+        // nimmt sie nach Ablauf der Frist zurueck. Das Senden gehoert nicht dazu:
+        // Ein unerreichbares Backend ist kein Fehler der neuen Fassung.
+        selfUpdate.ConfirmSelf();
 
         await FlushAsync(ct).ConfigureAwait(false);
     }

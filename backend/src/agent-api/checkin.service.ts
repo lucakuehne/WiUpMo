@@ -501,6 +501,11 @@ export class CheckinService {
            THEN $10::text
            ELSE last_logon_display_name
          END,
+         last_boot_at = CASE
+           WHEN $11::timestamptz IS NOT NULL AND (last_seen_at IS NULL OR last_seen_at <= $2)
+           THEN $11::timestamptz
+           ELSE last_boot_at
+         END,
          updated_at    = now()
        WHERE id = $1`,
       [
@@ -514,6 +519,7 @@ export class CheckinService {
         snapshot.diagnostics ? JSON.stringify(snapshot.diagnostics) : null,
         snapshot.host.lastLogonUser ?? null,
         snapshot.host.lastLogonDisplayName ?? null,
+        snapshot.host.lastBootAt ?? null,
       ],
     );
   }

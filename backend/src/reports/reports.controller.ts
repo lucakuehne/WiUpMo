@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SessionGuard } from '../auth/session.guard.js';
 import {
@@ -14,6 +14,8 @@ import {
   SummaryDto,
   TimeToPatchDto,
   TrendPointDto,
+  MAX_HOURLY_DAYS,
+  TrendInterval,
   TrendQueryDto,
   UpdateSourcesReportDto,
 } from './dto/reports.dto.js';
@@ -76,7 +78,7 @@ export class ReportsController {
   @Get('trend')
   @ApiOperation({ summary: 'Verlauf der offenen Updates ueber die Zeit.' })
   trend(@Query() query: TrendQueryDto): Promise<TrendPointDto[]> {
-    return this.reports.trend(query.days);
+    return this.reports.trend(query.days, checkedInterval(query));
   }
 
   @Get('agent-versions')
@@ -88,18 +90,26 @@ export class ReportsController {
   @Get('agent-trend')
   @ApiOperation({ summary: 'Verlauf der Agent-Abdeckung ueber die Zeit.' })
   agentTrend(@Query() query: TrendQueryDto): Promise<AgentTrendPointDto[]> {
-    return this.reports.agentTrend(query.days);
+    return this.reports.agentTrend(query.days, checkedInterval(query));
   }
 
   @Get('agent-version-trend')
   @ApiOperation({ summary: 'Verlauf der Agent-Versionen ueber die Zeit.' })
   agentVersionTrend(@Query() query: TrendQueryDto): Promise<AgentVersionTrendPointDto[]> {
-    return this.reports.agentVersionTrend(query.days);
+    return this.reports.agentVersionTrend(query.days, checkedInterval(query));
   }
 
   @Get('update-source-trend')
   @ApiOperation({ summary: 'Verlauf der Update-Quellen ueber die Zeit.' })
   updateSourceTrend(@Query() query: TrendQueryDto): Promise<UpdateSourceTrendPointDto[]> {
-    return this.reports.updateSourceTrend(query.days);
+    return this.reports.updateSourceTrend(query.days, checkedInterval(query));
   }
+}
+
+/** Stuendlich nur fuer kurze Zeitraeume, siehe MAX_HOURLY_DAYS. */
+function checkedInterval(query: TrendQueryDto): TrendInterval {
+  if (query.interval === 'hour' && query.days > MAX_HOURLY_DAYS) {
+    throw new BadRequestException(`Stuendlich geht hoechstens ${MAX_HOURLY_DAYS} Tage zurueck.`);
+  }
+  return query.interval;
 }

@@ -50,7 +50,10 @@ public static class ServiceInstaller
         // heisst `wiupmo-agent-0.5.0.exe`, Selbst-Update und Updater arbeiten
         // aber mit festen Namen. Uebernaehme man den Namen der Quelle, liefe der
         // Dienst zwar, koennte sich aber nie selbst aktualisieren.
-        string target = Path.Combine(InstallDirectory, AgentPaths.ServiceFileName);
+        //
+        // Jede Version in ihrem eigenen Verzeichnis: Ein Update stellt den
+        // Dienst dann nur um, statt Dateien zu tauschen (siehe AgentPaths).
+        string target = Path.Combine(InstallDirectory, "versions", AgentVersion.Current, AgentPaths.ServiceFileName);
 
         bool exists = ServiceExists();
         if (exists)
@@ -62,16 +65,24 @@ public static class ServiceInstaller
             WaitForStopped(TimeSpan.FromSeconds(30));
         }
 
-        Directory.CreateDirectory(InstallDirectory);
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
         if (!string.Equals(source, target, StringComparison.OrdinalIgnoreCase))
         {
             File.Copy(source, target, overwrite: true);
         }
 
-        WriteConfiguration(target, options);
+        WriteConfiguration(options);
         PrepareDataDirectory(options.DataDirectory);
         EnsureEventSource();
         InstallUpdater(target);
+
+        if (exists)
+        {
+            // Auch eine Installation vom alten Ort zieht so in das
+            // Versionsverzeichnis um.
+            RunSc("config", ServiceName, "binPath=", $"\"{target}\" --service");
+            RemoveLegacyFiles(source);
+        }
 
         if (!exists)
         {
@@ -177,6 +188,31 @@ public static class ServiceInstaller
     }
 
     /// <summary>
+    /// Die EXE am alten Ort und die Reste des alten Dateitauschs. Die Quelle
+    /// bleibt, falls --install von dort aufgerufen wurde.
+    /// </summary>
+    private static void RemoveLegacyFiles(string source)
+    {
+        foreach (string name in new[] { AgentPaths.ServiceFileName, "wiupmo-agent.new.exe", "wiupmo-agent.bak.exe" })
+        {
+            string path = Path.Combine(InstallDirectory, name);
+            if (!File.Exists(path) || string.Equals(path, source, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine($"  {path} liess sich nicht entfernen: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
     /// Raeumt das Programmverzeichnis.
     ///
     /// Die gerade laufende Datei bleibt zwangslaeufig liegen — Windows haelt sie
@@ -195,7 +231,7 @@ public static class ServiceInstaller
 
         bool rest = false;
 
-        foreach (string datei in Directory.GetFiles(InstallDirectory))
+        foreach (string datei in Directory.GetFiles(InstallDirectory, "*", SearchOption.AllDirectories))
         {
             if (string.Equals(datei, laufende, StringComparison.OrdinalIgnoreCase))
             {
@@ -266,13 +302,14 @@ public static class ServiceInstaller
     }
 
     /// <summary>
-    /// Schreibt die Betriebsparameter neben die EXE. ProgramFiles ist fuer
-    /// normale Benutzer nur lesbar — das Enrollment-Token liegt damit nicht
-    /// offen, und zum Aendern braucht es ohnehin erhoehte Rechte.
+    /// Schreibt die Betriebsparameter ins Programmverzeichnis, ueber die
+    /// Versionen: Dort lesen alle sie, und ein Update laesst sie unberuehrt.
+    /// ProgramFiles ist fuer normale Benutzer nur lesbar — das Enrollment-Token
+    /// liegt damit nicht offen, und zum Aendern braucht es ohnehin erhoehte Rechte.
     /// </summary>
-    private static void WriteConfiguration(string exePath, AgentOptions options)
+    private static void WriteConfiguration(AgentOptions options)
     {
-        string path = Path.Combine(Path.GetDirectoryName(exePath)!, "appsettings.json");
+        string path = Path.Combine(InstallDirectory, "appsettings.json");
 
         JsonObject root = File.Exists(path)
             ? JsonNode.Parse(File.ReadAllText(path)) as JsonObject ?? []
@@ -341,7 +378,7 @@ public static class ServiceInstaller
     /// </summary>
     private static void InstallUpdater(string serviceExe)
     {
-        string updater = Path.Combine(Path.GetDirectoryName(serviceExe)!, AgentPaths.UpdaterFileName);
+        string updater = Path.Combine(InstallDirectory, AgentPaths.UpdaterFileName);
         File.Copy(serviceExe, updater, overwrite: true);
 
         string? error = UpdaterTask.Register(updater, Path.GetTempPath());

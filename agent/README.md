@@ -29,24 +29,24 @@ Das richtet ein:
 
 | | |
 |---|---|
-| Programm | `%ProgramFiles%\WiUpMo\wiupmo-agent.exe` samt `appsettings.json` |
+| Programm | `%ProgramFiles%\WiUpMo\versions\<Version>\wiupmo-agent.exe`; daneben im Programmverzeichnis `appsettings.json` und die Updater-Kopie `wiupmo-updater.exe` |
 | Dienst | `WiUpMoAgent`, Start **Automatisch (Verzögert)**, Konto `LocalSystem` |
 | Wiederherstellung | Neustart nach 1 min / 2 min / danach alle 10 min, Zähler-Reset nach einem Tag |
 | Daten | `%ProgramData%\WiUpMo` mit den von `%ProgramData%` geerbten Rechten |
 | Ereignisquelle | `WiUpMo Agent` im Anwendungsprotokoll |
 
-`--install` auf einem bereits eingerichteten Rechner hält den Dienst an,
-ersetzt das Programm und startet ihn wieder — damit ist es zugleich der
-Aktualisierungsweg, bis Phase 6 das Selbst-Update bringt.
+`--install` auf einem bereits eingerichteten Rechner hält den Dienst an, legt
+die Version unter `versions\` ab, stellt den Dienst darauf um und startet ihn
+wieder. Eine Installation vom alten Ort (vor 0.8.0) zieht dabei um.
 
 ### Deinstallation
 
 ```powershell
-# Als Administrator
-& "$env:ProgramFiles\WiUpMo\wiupmo-agent.exe" --uninstall
+# Als Administrator, mit der Updater-Kopie — sie ist dieselbe EXE
+& "$env:ProgramFiles\WiUpMo\wiupmo-updater.exe" --uninstall
 
 # Restlos, samt Identität und Protokollen
-& "$env:ProgramFiles\WiUpMo\wiupmo-agent.exe" --uninstall --purge
+& "$env:ProgramFiles\WiUpMo\wiupmo-updater.exe" --uninstall --purge
 ```
 
 `--uninstall` entfernt den geplanten Task, den Dienst, die Ereignisquelle und das
@@ -103,7 +103,8 @@ Ereignissen, und ohne Mindestabstand liefe der Agent mehrfach hintereinander los
 1. WUApi-Suche `IsInstalled=0 and IsHidden=0`
 2. `QueryHistory` seit dem letzten gemeldeten Zeitstempel
 3. Update-Quelle, Richtlinien, Neustart-Status und zuletzt angemeldeten Benutzer
-   erfassen (`LogonUI\LastLoggedOnUser` in der Registry, ab 0.7.1)
+   erfassen (`LogonUI\LastLoggedOnUser` in der Registry, ab 0.7.1), dazu den
+   letzten Neustart (Laufzeit seit dem Systemstart, ab 0.8.0)
 4. Snapshot mit `snapshotId` und `collectedAt` (UTC) in die SQLite-Warteschlange
 5. Gesamte Warteschlange per `/checkin/batch` senden
 6. Quittierte Snapshots löschen — auch abgelehnte, die werden durch Wiederholen
@@ -134,6 +135,8 @@ Drei Quellen, die einander in dieser Reihenfolge überschreiben:
 | `Agent:SearchOnline` | `--search-online` | true | `false` liest nur den lokalen Zwischenspeicher. |
 | `Agent:ComTimeoutSeconds` | — | 300 | Obergrenze pro WUApi-Aufruf. |
 | `Agent:InstallTimeoutMinutes` | — | 180 | Obergrenze für einen Installationsauftrag, Download und Installation zusammen. |
+| `Agent:UpdateVerificationMinutes` | — | 20 | Frist, in der sich eine neue Fassung bestätigen muss, sonst stellt der Updater zurück. |
+| `Agent:SimulateWindowsUpdate` | — | false | **Nur für den Ende-zu-Ende-Test:** fragt Windows Update nicht ab. Im Betrieb nie setzen. |
 | `Agent:InitialHistoryDays` | — | 90 | Rückblick beim allerersten Check-in. |
 | `Agent:LogRetentionDays` | — | 14 | Aufbewahrung der Protokolldateien. |
 
@@ -146,7 +149,9 @@ Unter `%ProgramData%\WiUpMo`:
 | `identity.dat` | Geräte-ID und Secret, mit DPAPI im Maschinenkontext verschlüsselt |
 | `queue.db` | Offline-Warteschlange und Fortschrittsmarker der Historie |
 | `install.json` | Stand eines Installationsauftrags, bis das Backend das Ergebnis hat |
-| `logs\agent-*.log` | Tagesrotierendes Protokoll |
+| `update.json` | Stand eines Selbst-Updates, geteilt zwischen Dienst und Updater |
+| `logs\agent-*.log` | Tagesrotierendes Protokoll des Dienstes |
+| `logs\updater-*.log` | Protokoll des Updaters, nur wenn er etwas zu tun hatte |
 
 Geht `identity.dat` verloren, registriert sich der Agent neu. Das Backend erkennt
 das Gerät am Hostnamen wieder, die Historie bleibt erhalten.
@@ -208,17 +213,34 @@ Eigenschaften wie `Item`, und das Publish zieht den C#-Laufzeitbinder nicht mit.
 
 ## Selbst-Update
 
-`--install` legt neben dem Dienst eine **Kopie** `wiupmo-updater.exe` an und
-meldet einen geplanten Task `WiUpMo Agent Updater` an, der sie alle 5 Minuten
-als SYSTEM ausführt.
+Ab 0.8.0 liegt jede Version in einem eigenen Verzeichnis, und ein Update stellt
+den Dienst nur noch um:
 
-Die Kopie ist der Kern des Verfahrens, nicht Redundanz: Windows sperrt die Datei
-eines laufenden Prozesses. Ein Updater in derselben EXE könnte sich beim Tausch
-nicht selbst ersetzen. Die Kopie wird deshalb **nie** aktualisiert — sie bleibt
-auf dem Stand der Installation und ist damit auch nie Ziel eines Selbst-Updates.
-Ihre Logik muss von Anfang an stimmen; sie beschränkt sich auf
-Dateioperationen und `sc.exe` und fällt bei jedem Zweifel auf den vorherigen
-Stand zurück. Netzwerkzugriff hat sie keinen.
+```
+C:\Program Files\WiUpMo\
+  appsettings.json          gemeinsame Einstellungen aller Versionen
+  wiupmo-updater.exe        Kopie, die umstellt und notfalls zurückstellt
+  versions\0.8.0\wiupmo-agent.exe
+  versions\0.8.1\wiupmo-agent.exe   ← binPath des Dienstes
+```
+
+Umgestellt wird per `sc config binPath`. Es werden keine Dateien mehr
+getauscht: Eine gesperrte Datei, ein halber Tausch oder ein Virenscanner, der
+die neue EXE gerade liest, können nichts mehr kaputt machen. Die vorige Version
+bleibt unangetastet daneben liegen; der Rücktausch ist nur der Pfad zurück.
+Nach einer bestätigten Umstellung bleiben die laufende und die vorige Version,
+alles Ältere wird entfernt.
+
+Der Updater ist eine **Kopie** (`wiupmo-updater.exe`), weil er den Dienst
+anhalten muss und dabei nicht selbst der Dienst sein kann. Er läuft auf zwei
+Wegen als SYSTEM:
+
+- **sofort**: Der Dienst startet ihn, sobald die neue Fassung bereitliegt;
+- **alle 5 Minuten** über den geplanten Task `WiUpMo Agent Updater` — als
+  Rückfall und als Wächter, der eine nicht bestätigte Fassung zurücknimmt.
+
+Ein globaler Mutex sorgt dafür, dass nie zwei Updater gleichzeitig arbeiten.
+Netzwerkzugriff hat der Updater keinen.
 
 ### Ablauf
 
@@ -227,11 +249,46 @@ miteinander.
 
 | Zustand | Wer handelt | Was passiert |
 |---|---|---|
-| — | Dienst | Auftrag in der Check-in-Antwort: Binary laden, SHA-256 prüfen, als `wiupmo-agent.new.exe` ablegen, Marker `pendingSwap`, `installing` melden |
-| `pendingSwap` | Updater | Dienst anhalten, alte EXE nach `.bak`, neue an ihre Stelle, Marker `verifying` mit Frist, Dienst starten |
-| `verifying` | Dienst | Läuft er in der Zielversion, setzt er den Marker auf `verified` |
-| `verifying`, Frist abgelaufen | Updater | Rücktausch aus `.bak`, Marker `rolledBack` mit Begründung |
-| `verified` / `rolledBack` | Dienst | Ergebnis ans Backend melden, Marker und `.bak` entfernen |
+| — | Dienst | Auftrag in der Check-in-Antwort: Binary nach `versions\<Version>\` laden, SHA-256 prüfen, Marker `pendingSwap` mit Ziel- und Herkunftspfad, `installing` melden, Updater starten |
+| `pendingSwap` | Updater | Dienst anhalten, Marker `verifying` mit Frist (20 min), `binPath` auf die neue EXE, Dienst starten. Startet sie nicht: sofort zurück |
+| `verifying` | Dienst | Nach dem **ersten vollständigen Durchlauf** in der Zielversion: Marker `verified` |
+| `verifying`, Frist abgelaufen | Updater | `binPath` zurück, Dienst starten, Marker `rolledBack` mit Begründung |
+| `verified` / `rolledBack` | Dienst | Ergebnis ans Backend melden, Marker entfernen, aufräumen, Updater-Kopie nachziehen |
+
+### Regeln, die aus Fehlern im Feld kommen
+
+- **Der Dienst wird nie angehalten zurückgelassen.** Ein Fehler zwischen
+  Anhalten und Starten ließ ein Gerät früher verstummen, bis jemand von Hand
+  eingriff. Jeder Ausgang des Updaters startet den Dienst wieder.
+- **Kurze Sperren werden ausgesessen.** Dateioperationen werden bis zu 30
+  Sekunden lang wiederholt; ein Schritt höchstens sechsmal, dann wird mit dem
+  letzten Fehler als Grund aufgegeben.
+- **Der Updater schreibt ein eigenes Protokoll** (`logs\updater-*.log`). Die
+  Aufgabenplanung zeichnet die Konsole nicht auf; ein gescheiterter Tausch
+  hinterließ früher keine Spur. Warnungen und Fehler daraus gehen mit der
+  Selbstauskunft ans Backend und stehen im Agent-Protokoll als „Updater: …“.
+- **Bestätigt wird nach dem ersten Durchlauf, nicht beim Start.** Eine
+  Fassung, die startet, aber im Durchlauf scheitert, nimmt der Updater zurück.
+  Solange eine Bestätigung aussteht, entfällt die Startverzögerung.
+- **Die Updater-Kopie wird nachgezogen.** Bis 0.8.0 blieb sie auf dem Stand der
+  Installation, und ihre Fehler waren nicht zu beheben. Jetzt ersetzt eine
+  bestätigte neuere Version sie — nur aufwärts, und nur unter dem Mutex.
+- **Die Selbstauskunft enthält den Task**: eingeschaltet, letzter Lauf,
+  Ergebnis. Fehlt er oder scheitert er, steht das im Gerätedetail.
+
+### Übergang von älteren Versionen
+
+Geräte vor 0.8.0 haben die EXE im Programmverzeichnis und einen Updater, der
+nur Dateien tauschen kann. Der Dienst nutzt den neuen Weg deshalb nur, wenn
+die Updater-Kopie ihn beherrscht (ab 0.8.0). Ein älterer Updater fände die
+bereitgelegte Datei nicht am alten Ort und würde den Auftrag verwerfen.
+
+Das Update **auf** 0.8.0 läuft also noch als Dateitausch durch den alten
+Updater. Danach zieht 0.8.0 die Updater-Kopie nach, und ab dem nächsten Update
+gilt der neue Weg — dabei zieht der Dienst in `versions\` um. Der Updater ab
+0.8.0 beherrscht den alten Dateitausch weiterhin, mit denselben Regeln wie
+oben, etwa nach einem Rücktausch auf eine ältere Version. `--install` legt
+neue Installationen gleich unter `versions\` an und stellt bestehende um.
 
 ### Warum `verified` ein eigener Zustand ist
 
@@ -241,10 +298,6 @@ Ablauf der Frist eine einwandfrei laufende neue Version zurückdreht — bei ein
 Laptop im Homeoffice der Normalfall, nicht die Ausnahme. Der Dienst setzt
 `verified` deshalb ohne jeden Netzwerkzugriff, und der Updater lässt ab diesem
 Zustand die Finger davon.
-
-Die Frist beträgt 10 Minuten. Sie muss länger sein als Startverzögerung plus
-erster Check-in, sonst nimmt der Updater einen Tausch zurück, der nur noch
-keine Gelegenheit zur Bestätigung hatte.
 
 ### Der Task auf Notebooks
 
@@ -275,6 +328,34 @@ den alten Regeln: wach und am Netzteil, bis der Task gelaufen ist.
 wird abgebrochen, nicht getauscht. Eine Datei unbekannter Herkunft als Dienst
 unter `LocalSystem` zu starten wäre der schlimmste denkbare Ausgang dieses
 Vorgangs.
+
+## Ende-zu-Ende-Test
+
+Das Selbst-Update lässt sich nur auf echtem Windows prüfen: als Dienst, mit
+geplantem Task, mit Dateisperren und Virenscanner. Der Workflow
+`.github/workflows/agent-e2e.yml` tut das auf einem Windows-Runner von GitHub,
+bei jeder Änderung unter `agent/` und von Hand.
+
+Er baut drei Fassungen aus dem aktuellen Stand — A, B und eine absichtlich
+defekte C (`-p:WiUpMoE2EBroken=true`, nur beim Bauen setzbar) — und eine alte
+aus dem Feld (0.6.0, Commit `2c66f06`). `e2e/run-e2e.ps1` spielt dann gegen
+ein Test-Backend (`e2e/fake-backend.mjs`) durch:
+
+| Schritt | Geprüft |
+|---|---|
+| Alte Fassung installieren | Dienst am alten Ort, Check-in |
+| Update auf A | Dateitausch durch den alten Updater, Updater-Kopie nachgezogen, Task läuft auch am Akku |
+| Update auf B | Umstellen per `binPath` nach `versions\`, vorige Fassung bleibt, Updater-Protokoll |
+| Update auf C (defekt) | bestätigt sich nicht, wird nach der Frist zurückgenommen, `failed` mit Begründung |
+| Deinstallation, Neuinstallation von A | gleich unter `versions\`, nichts am alten Ort, neue Registrierung |
+
+Die Protokolle von Agent und Updater, `sc qc`, die Task-Definition und der
+Zustand des Test-Backends hängen am Lauf als Artefakt `agent-e2e`.
+
+Für den Test setzt das Skript drei Einstellungen in die `appsettings.json`:
+keine Startverzögerung, `SimulateWindowsUpdate` und eine Bestätigungsfrist von
+2 Minuten. Echte Update-Installationen prüft der Test nicht — dafür braucht es
+ein Gerät mit offenen Updates.
 
 ## Installationsaufträge
 

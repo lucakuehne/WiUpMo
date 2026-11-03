@@ -26,9 +26,16 @@ public sealed class Worker(
         // Vor der Startverzoegerung: Steht ein Selbst-Update an, soll der Task
         // es mit den richtigen Bedingungen schon beim naechsten Lauf tauschen.
         selfUpdate.EnsureUpdaterTask();
+        selfUpdate.RefreshUpdater();
 
-        if (!await DelayAsync(TimeSpan.FromSeconds(options.StartupDelaySeconds), stoppingToken)
-                .ConfigureAwait(false))
+        // Gerade umgestellt: Die Frist des Updaters laeuft, und die Bestaetigung
+        // kommt erst nach dem ersten Durchlauf. Die Startverzoegerung wuerde sie
+        // nur verkuerzen.
+        TimeSpan delay = selfUpdate.AwaitsConfirmation
+            ? TimeSpan.Zero
+            : TimeSpan.FromSeconds(options.StartupDelaySeconds);
+
+        if (!await DelayAsync(delay, stoppingToken).ConfigureAwait(false))
         {
             return;
         }

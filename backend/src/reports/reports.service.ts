@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { UpdateSource } from '../database/enums.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { TrendInterval } from './dto/reports.dto.js';
 import {
   AgentTrendPointDto,
   AgentVersionTrendPointDto,
@@ -371,7 +372,7 @@ export class ReportsService {
   /**
    * Verlauf der offenen Updates.
    *
-   * Es gibt keine Tagesmomentaufnahme in der Datenbank — der Plan sieht sie als
+   * Es gibt keine Momentaufnahmen in der Datenbank — der Plan sieht sie als
    * Option fuer spaeter vor. Der Verlauf wird deshalb aus dem heutigen Stand
    * rueckwaerts aus der Zeitreihe rekonstruiert: Was seither aufgetaucht ist,
    * wird abgezogen; was installiert oder verschwunden ist, hinzugerechnet.
@@ -381,7 +382,7 @@ export class ReportsService {
    * Aufbewahrungsfrist, wird der aeltere Teil der Kurve zunehmend flach —
    * dann fehlen die Ereignisse, nicht die Updates.
    */
-  async trend(days: number): Promise<TrendPointDto[]> {
+  async trend(days: number, interval: TrendInterval): Promise<TrendPointDto[]> {
     const current: Array<{ open: string }> = await this.dataSource.query(
       `SELECT count(*)::text AS open
          FROM device_update_states s
@@ -405,7 +406,8 @@ export class ReportsService {
      * zweites `appeared` ohne zwischenzeitliche Aufloesung nicht doppelt.
      */
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
-      `WITH ereignisse AS (
+      `WITH ${bucketsCte('$1', '$2', '$3')},
+       ereignisse AS (
          SELECT e.event_type,
                 e.occurred_at,
                 lag(e.event_type) OVER (
@@ -414,54 +416,37 @@ export class ReportsService {
            FROM device_update_events e
            JOIN devices d ON d.id = e.device_id AND d.status = 'active'
        )
-       SELECT date_trunc('day', occurred_at)::date AS day,
-              count(*) FILTER (
-                WHERE event_type = 'appeared' AND vorher IS DISTINCT FROM 'appeared'
+       SELECT a.beginn,
+              count(e.event_type) FILTER (
+                WHERE e.event_type = 'appeared' AND e.vorher IS DISTINCT FROM 'appeared'
               ) AS appeared,
               -- Fuer den Balken zaehlt jede gemeldete Installation, auch die aus
-              -- der Historie: Sie hat an diesem Tag stattgefunden.
-              count(*) FILTER (WHERE event_type = 'installed') AS installed,
-              count(*) FILTER (
-                WHERE event_type IN ('installed', 'disappeared', 'hidden')
-                  AND vorher = 'appeared'
+              -- der Historie: Sie hat in diesem Abschnitt stattgefunden.
+              count(e.event_type) FILTER (WHERE e.event_type = 'installed') AS installed,
+              count(e.event_type) FILTER (
+                WHERE e.event_type IN ('installed', 'disappeared', 'hidden')
+                  AND e.vorher = 'appeared'
               ) AS resolved
-         FROM ereignisse
-        WHERE occurred_at >= now() - make_interval(days => $1)
-        GROUP BY 1
-        ORDER BY 1`,
-      [days],
-    );
-
-    const byDay = new Map(
-      rows.map((row) => [
-        (row.day as Date).toISOString().slice(0, 10),
-        {
-          appeared: num(row.appeared),
-          installed: num(row.installed),
-          resolved: num(row.resolved),
-        },
-      ]),
+         FROM abschnitte a
+         LEFT JOIN ereignisse e ON e.occurred_at >= a.beginn AND e.occurred_at < a.ende
+        GROUP BY a.beginn
+        ORDER BY a.beginn`,
+      bucketParams(days, interval),
     );
 
     // Vom heutigen Stand rueckwaerts, danach wieder in zeitliche Reihenfolge.
     const points: TrendPointDto[] = [];
     let open = Number(current[0]?.open ?? 0);
 
-    for (let offset = 0; offset < days; offset++) {
-      const date = new Date();
-      date.setUTCHours(0, 0, 0, 0);
-      date.setUTCDate(date.getUTCDate() - offset);
-      const key = date.toISOString().slice(0, 10);
-      const events = byDay.get(key) ?? { appeared: 0, installed: 0, resolved: 0 };
-
+    for (const row of [...rows].reverse()) {
+      const appeared = num(row.appeared);
       points.push({
-        date: key,
+        date: bucketKey(row.beginn, interval),
         openUpdates: Math.max(0, open),
-        appeared: events.appeared,
-        installed: events.installed,
+        appeared,
+        installed: num(row.installed),
       });
-
-      open = open - events.appeared + events.resolved;
+      open = open - appeared + num(row.resolved);
     }
 
     return points.reverse();
@@ -498,8 +483,9 @@ export class ReportsService {
    *
    * Anders als beim Update-Verlauf braucht es hier keine Rueckrechnung — die
    * Zeitpunkte stehen an den Geraeten selbst (`created_at`, `enrolled_at`,
-   * `archived_at`), und ob ein Geraet an einem Tag gemeldet hat, sagt die
-   * Check-in-Historie. Der Verlauf ist damit gemessen und nicht geschaetzt.
+   * `archived_at`), und ob ein Geraet gemeldet hat, sagt die Check-in-Historie.
+   * Der Verlauf ist damit gemessen und nicht geschaetzt. Gezaehlt wird der
+   * Stand am Ende jedes Abschnitts, beim laufenden der von jetzt.
    *
    * Eine Einschraenkung bleibt: Die Check-ins unterliegen der Aufbewahrungsfrist.
    * Reicht die Anfrage weiter zurueck, gilt ein Geraet fuer den aelteren Teil
@@ -507,7 +493,7 @@ export class ReportsService {
    * unschaedlich — ein fehlender Nachweis heisst dort, dass die letzte Meldung
    * aelter war als die Frist, und damit war das Geraet tatsaechlich stumm.
    */
-  async agentTrend(days: number): Promise<AgentTrendPointDto[]> {
+  async agentTrend(days: number, interval: TrendInterval): Promise<AgentTrendPointDto[]> {
     const { staleAgentDays } = await this.settings.getThresholds();
     const { checkinDays } = await this.settings.getRetention();
 
@@ -522,57 +508,42 @@ export class ReportsService {
      * zu viele stumme Geraete.
      */
     const belegbar = Math.max(7, checkinDays - staleAgentDays);
-    days = Math.min(days, belegbar);
 
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
-      `WITH tage AS (
-         SELECT generate_series(
-                  current_date - make_interval(days => $1::int - 1),
-                  current_date,
-                  interval '1 day'
-                )::date AS tag
-       ),
-       bestand AS (
-         SELECT id,
-                created_at::date  AS angelegt,
-                enrolled_at::date AS registriert,
-                archived_at::date AS archiviert
-           FROM devices
-       )
-       SELECT t.tag,
+      `WITH ${bucketsCte('$1', '$2', '$3')}
+       SELECT a.beginn,
               count(*) FILTER (
-                WHERE b.registriert IS NULL OR b.registriert > t.tag
+                WHERE d.enrolled_at IS NULL OR d.enrolled_at >= a.stichtag
               ) AS ohne_agent,
               count(*) FILTER (
-                WHERE b.registriert IS NOT NULL AND b.registriert <= t.tag
-                  AND letzte.tag IS NOT NULL
-                  AND letzte.tag >= t.tag - $2::int
+                WHERE d.enrolled_at < a.stichtag
+                  AND letzte.zeit >= a.stichtag - make_interval(days => $4::int)
               ) AS aktiv,
               count(*) FILTER (
-                WHERE b.registriert IS NOT NULL AND b.registriert <= t.tag
-                  AND (letzte.tag IS NULL OR letzte.tag < t.tag - $2::int)
+                WHERE d.enrolled_at < a.stichtag
+                  AND (letzte.zeit IS NULL OR letzte.zeit < a.stichtag - make_interval(days => $4::int))
               ) AS stumm
-         FROM tage t
-         JOIN bestand b
-           ON b.angelegt <= t.tag
-          AND (b.archiviert IS NULL OR b.archiviert > t.tag)
-         -- Der Vergleich laeuft gegen die Spalte selbst, nicht gegen
-         -- 'collected_at::date': Nur so bleibt idx_device_checkins_device_collected
-         -- benutzbar, und das max() wird zu einem rueckwaerts laufenden
-         -- Indexzugriff statt zu einem Durchlauf der ganzen Historie.
+         FROM abschnitte a
+         JOIN devices d
+           ON d.created_at < a.stichtag
+          AND (d.archived_at IS NULL OR d.archived_at >= a.stichtag)
+         -- Der Vergleich laeuft gegen die Spalte selbst: Nur so bleibt
+         -- idx_device_checkins_device_collected benutzbar, und das max() wird zu
+         -- einem rueckwaerts laufenden Indexzugriff statt zu einem Durchlauf der
+         -- ganzen Historie.
          LEFT JOIN LATERAL (
-           SELECT max(c.collected_at)::date AS tag
+           SELECT max(c.collected_at) AS zeit
              FROM device_checkins c
-            WHERE c.device_id = b.id
-              AND c.collected_at < (t.tag + 1)::timestamptz
+            WHERE c.device_id = d.id
+              AND c.collected_at < a.stichtag
          ) letzte ON true
-        GROUP BY t.tag
-        ORDER BY t.tag`,
-      [days, staleAgentDays],
+        GROUP BY a.beginn
+        ORDER BY a.beginn`,
+      [...bucketParams(Math.min(days, belegbar), interval), staleAgentDays],
     );
 
     return rows.map((row) => ({
-      date: (row.tag as Date).toISOString().slice(0, 10),
+      date: bucketKey(row.beginn, interval),
       withoutAgent: num(row.ohne_agent),
       activeAgents: num(row.aktiv),
       silentAgents: num(row.stumm),
@@ -580,22 +551,22 @@ export class ReportsService {
   }
 
   /**
-   * Verlauf der Agent-Versionen: an jedem Tag, welche Version auf wie vielen
-   * Geraeten lief.
+   * Verlauf der Agent-Versionen: in jedem Abschnitt, welche Version auf wie
+   * vielen Geraeten lief.
    *
-   * Massgeblich ist der letzte Check-in bis zum Ende des Tages — er traegt die
-   * Version, die der Agent selbst gemeldet hat. Die Spalte am Geraet taugt
+   * Massgeblich ist der letzte Check-in bis zum Ende des Abschnitts — er traegt
+   * die Version, die der Agent selbst gemeldet hat. Die Spalte am Geraet taugt
    * dafuer nicht, sie kennt nur den heutigen Stand. Gezaehlt werden Geraete,
-   * die an dem Tag registriert und nicht archiviert waren und bis dahin
-   * mindestens einmal gemeldet haben; ein stummes Geraet zaehlt mit seiner
-   * zuletzt gemeldeten Version, denn die laeuft dort vermutlich noch.
+   * die da registriert und nicht archiviert waren und bis dahin mindestens
+   * einmal gemeldet haben; ein stummes Geraet zaehlt mit seiner zuletzt
+   * gemeldeten Version, denn die laeuft dort vermutlich noch.
    *
    * Zurueck reicht der Verlauf hoechstens so weit wie die aufbewahrten
    * Check-ins. Davor fehlte der Nachweis, und die Kurve zeigte still zu wenige
    * Geraete.
    */
-  async agentVersionTrend(days: number): Promise<AgentVersionTrendPointDto[]> {
-    return (await this.latestCheckinPerDay(days, 'agent_version')).map((row) => ({
+  async agentVersionTrend(days: number, interval: TrendInterval): Promise<AgentVersionTrendPointDto[]> {
+    return (await this.latestCheckinPerBucket(days, interval, 'agent_version')).map((row) => ({
       date: row.date,
       version: row.value,
       devices: row.devices,
@@ -603,15 +574,15 @@ export class ReportsService {
   }
 
   /**
-   * Verlauf der Update-Quellen: an jedem Tag, wie viele Geraete aus welcher
-   * Quelle bezogen.
+   * Verlauf der Update-Quellen: in jedem Abschnitt, wie viele Geraete aus
+   * welcher Quelle bezogen.
    *
    * Dasselbe Verfahren wie bei den Versionen — die Quelle des letzten
-   * Check-ins bis zum Ende des Tages. Eine WSUS-Abloesung zeigt sich hier als
-   * Flaeche, die von WSUS zu Microsoft Update oder Intune wandert.
+   * Check-ins bis zum Ende des Abschnitts. Eine WSUS-Abloesung zeigt sich hier
+   * als Flaeche, die von WSUS zu Microsoft Update oder Intune wandert.
    */
-  async updateSourceTrend(days: number): Promise<UpdateSourceTrendPointDto[]> {
-    return (await this.latestCheckinPerDay(days, 'update_source')).map((row) => ({
+  async updateSourceTrend(days: number, interval: TrendInterval): Promise<UpdateSourceTrendPointDto[]> {
+    return (await this.latestCheckinPerBucket(days, interval, 'update_source')).map((row) => ({
       date: row.date,
       source: row.value as UpdateSource,
       devices: row.devices,
@@ -619,62 +590,95 @@ export class ReportsService {
   }
 
   /**
-   * Zaehlt je Tag die Geraete nach einem Merkmal ihres letzten Check-ins bis
-   * zum Ende des Tages.
+   * Zaehlt je Abschnitt die Geraete nach einem Merkmal ihres letzten Check-ins
+   * bis zu dessen Ende.
    *
-   * Mitgezaehlt wird, wer an dem Tag registriert und nicht archiviert war und
-   * bis dahin mindestens einmal gemeldet hat; ein stummes Geraet zaehlt mit
-   * seinem zuletzt gemeldeten Wert, denn der gilt dort vermutlich noch. Die
-   * Spalte am Geraet taugt dafuer nicht, sie kennt nur den heutigen Stand.
+   * Mitgezaehlt wird, wer da registriert und nicht archiviert war und bis dahin
+   * mindestens einmal gemeldet hat; ein stummes Geraet zaehlt mit seinem
+   * zuletzt gemeldeten Wert, denn der gilt dort vermutlich noch.
    *
    * Zurueck reicht der Verlauf hoechstens so weit wie die aufbewahrten
    * Check-ins. Davor fehlte der Nachweis, und die Kurve zeigte still zu wenige
    * Geraete.
    */
-  private async latestCheckinPerDay(
+  private async latestCheckinPerBucket(
     days: number,
+    interval: TrendInterval,
     // Feste Auswahl: Der Name geht in die Abfrage, nicht als Parameter.
     column: 'agent_version' | 'update_source',
   ): Promise<Array<{ date: string; value: string; devices: number }>> {
     const { checkinDays } = await this.settings.getRetention();
-    days = Math.min(days, checkinDays);
 
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
-      `WITH tage AS (
-         SELECT generate_series(
-                  current_date - make_interval(days => $1::int - 1),
-                  current_date,
-                  interval '1 day'
-                )::date AS tag
-       )
-       SELECT t.tag, letzte.wert, count(*) AS geraete
-         FROM tage t
+      `WITH ${bucketsCte('$1', '$2', '$3')}
+       SELECT a.beginn, letzte.wert, count(*) AS geraete
+         FROM abschnitte a
          JOIN devices d
-           ON d.enrolled_at IS NOT NULL
-          AND d.enrolled_at::date <= t.tag
-          AND (d.archived_at IS NULL OR d.archived_at::date > t.tag)
+           ON d.enrolled_at < a.stichtag
+          AND (d.archived_at IS NULL OR d.archived_at >= a.stichtag)
          -- Wie beim Verlauf der Abdeckung gegen die Spalte selbst verglichen,
          -- damit idx_device_checkins_device_collected greift.
          JOIN LATERAL (
            SELECT c.${column}::text AS wert
              FROM device_checkins c
             WHERE c.device_id = d.id
-              AND c.collected_at < (t.tag + 1)::timestamptz
+              AND c.collected_at < a.stichtag
               AND c.${column} IS NOT NULL
             ORDER BY c.collected_at DESC
             LIMIT 1
          ) letzte ON true
-        GROUP BY t.tag, letzte.wert
-        ORDER BY t.tag, letzte.wert`,
-      [days],
+        GROUP BY a.beginn, letzte.wert
+        ORDER BY a.beginn, letzte.wert`,
+      bucketParams(Math.min(days, checkinDays), interval),
     );
 
     return rows.map((row) => ({
-      date: (row.tag as Date).toISOString().slice(0, 10),
+      date: bucketKey(row.beginn, interval),
       value: row.wert as string,
       devices: num(row.geraete),
     }));
   }
+}
+
+/** Laenge eines Abschnitts, als Intervall fuer PostgreSQL. */
+const STEPS: Record<TrendInterval, string> = {
+  hour: '1 hour',
+  day: '1 day',
+  week: '1 week',
+};
+
+/**
+ * Die Abschnitte eines Verlaufs, als Tabellenausdruck `abschnitte` mit
+ * `beginn`, `ende` und `stichtag` — dem Zeitpunkt, fuer den der Stand gezaehlt
+ * wird: das Ende des Abschnitts, beim laufenden jetzt.
+ *
+ * In UTC geschnitten, unabhaengig von der Zeitzone der Sitzung: Ein Tag ist
+ * damit immer gleich lang, auch bei der Zeitumstellung. Die Anzeige rechnet
+ * stuendliche Abschnitte in Ortszeit um; Tage und Wochen tragen ihr Datum.
+ */
+function bucketsCte(unit: string, step: string, count: string): string {
+  return `abschnitte AS (
+         SELECT b AS beginn,
+                b + ${step}::interval AS ende,
+                least(b + ${step}::interval, now()) AS stichtag
+           FROM generate_series(
+                  date_trunc(${unit}, now(), 'UTC') - (${count}::int - 1) * ${step}::interval,
+                  date_trunc(${unit}, now(), 'UTC'),
+                  ${step}::interval
+                ) b
+       )`;
+}
+
+/** Einheit, Schrittweite und Zahl der Abschnitte fuer `bucketsCte`. */
+function bucketParams(days: number, interval: TrendInterval): [string, string, number] {
+  const count = interval === 'hour' ? days * 24 : interval === 'week' ? Math.ceil(days / 7) : days;
+  return [interval, STEPS[interval], Math.max(1, count)];
+}
+
+/** Stuendlich der Zeitpunkt, sonst das Datum des Beginns — beides in UTC. */
+function bucketKey(value: unknown, interval: TrendInterval): string {
+  const iso = (value as Date).toISOString();
+  return interval === 'hour' ? iso : iso.slice(0, 10);
 }
 
 function num(value: unknown): number {

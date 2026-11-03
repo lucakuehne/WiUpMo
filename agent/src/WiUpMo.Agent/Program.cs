@@ -70,7 +70,9 @@ internal static class Program
         // und beendet sich in aller Regel sofort wieder.
         if (HasFlag(args, "--updater"))
         {
-            return Updater.Run(new AgentPaths(options.DataDirectory));
+            return Updater.Run(
+                new AgentPaths(options.DataDirectory),
+                TimeSpan.FromMinutes(Math.Clamp(options.UpdateVerificationMinutes, 1, 120)));
         }
 
         // Wie die Einrichtung ohne Host und ohne Backend: Die Probe beruehrt nur
@@ -347,9 +349,21 @@ internal static class Program
         // AppContext.BaseDirectory statt des Arbeitsverzeichnisses: als Dienst
         // gestartet ist das Arbeitsverzeichnis system32, dort liegt keine
         // appsettings.json.
-        IConfiguration configuration = new ConfigurationBuilder()
-            .SetBasePath(AppContext.BaseDirectory)
-            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+        //
+        // Laeuft die EXE in versions\<Version>\, gilt zuerst die gemeinsame Datei
+        // im Programmverzeichnis darueber — dort schreibt --install hin, und sie
+        // ueberlebt jedes Update. Eine Datei neben der EXE ergaenzt sie.
+        string own = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+        string shared = Path.Combine(AgentPaths.ResolveRoot(AppContext.BaseDirectory), "appsettings.json");
+
+        var builder = new ConfigurationBuilder();
+        if (!string.Equals(Path.GetFullPath(shared), Path.GetFullPath(own), StringComparison.OrdinalIgnoreCase))
+        {
+            builder.AddJsonFile(shared, optional: true, reloadOnChange: false);
+        }
+
+        IConfiguration configuration = builder
+            .AddJsonFile(own, optional: true, reloadOnChange: false)
             .AddEnvironmentVariables("WIUPMO_")
             .AddCommandLine([.. args.Where(a => !Flags.Contains(a, StringComparer.OrdinalIgnoreCase))], SwitchMappings)
             .Build();

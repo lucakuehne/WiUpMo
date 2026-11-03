@@ -34,12 +34,16 @@ public sealed partial class WindowsUpdateReader(AgentOptions options)
     private static partial Regex KbInTitle();
 
     public Task<IReadOnlyList<AvailableUpdate>> GetAvailableUpdatesAsync(CancellationToken ct) =>
-        RunWithTimeoutAsync(SearchAvailable, "Die Update-Suche", ct);
+        options.SimulateWindowsUpdate
+            ? Task.FromResult<IReadOnlyList<AvailableUpdate>>([])
+            : RunWithTimeoutAsync(SearchAvailable, "Die Update-Suche", ct);
 
     public Task<IReadOnlyList<HistoryEntry>> GetHistoryAsync(
         DateTimeOffset since,
         CancellationToken ct) =>
-        RunWithTimeoutAsync(() => ReadHistory(since), "Die Abfrage der Historie", ct);
+        options.SimulateWindowsUpdate
+            ? Task.FromResult<IReadOnlyList<HistoryEntry>>([])
+            : RunWithTimeoutAsync(() => ReadHistory(since), "Die Abfrage der Historie", ct);
 
     /// <summary>
     /// Kapselt einen COM-Aufruf mit Zeitlimit.

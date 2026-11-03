@@ -1,0 +1,89 @@
+# Ende-zu-Ende-Test des Agents auf einem echten Windows: installieren, als
+# Dienst laufen lassen, selbst aktualisieren, eine defekte Fassung
+# zuruecknehmen, deinstallieren. Siehe agent/e2e/run-e2e.ps1.
+#
+# Das Selbst-Update ist der kritischste Teil des Agents, und der Test-Stack
+# laeuft unter Linux — er kann ihn nicht pruefen. Hier laeuft er gegen ein
+# kleines Test-Backend (agent/e2e/fake-backend.mjs); den Vertrag mit dem echten
+# Backend prueft weiter der Smoke-Test.
+#
+# Der Uebergangstest beginnt mit einer alten Fassung aus dem Feld: Ihr Updater
+# kennt nur den Dateitausch, und genau dieser Weg fuehrt die Geraete auf den
+# neuen.
+
+name: Agent-E2E
+
+on:
+  push:
+    branches: [main]
+    paths: &e2e-paths
+      - 'agent/**'
+      - 'NuGet.config'
+      - '.github/workflows/agent-e2e.yml'
+  pull_request:
+    paths: *e2e-paths
+  workflow_dispatch:
+    inputs:
+      old-commit:
+        description: 'Commit der alten Fassung fuer den Uebergangstest'
+        default: '2c66f06'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      # 0.6.0 — die aelteste Updater-Kopie, die im Feld vorkommt.
+      OLD_COMMIT: ${{ inputs.old-commit || '2c66f06' }}
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Die alte Fassung wird aus ihrem Commit gebaut.
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+
+      # Drei Fassungen aus dem aktuellen Stand, mit Versionen, die ueber jeder
+      # ausgelieferten liegen und sich in der Reihenfolge unterscheiden; die
+      # dritte scheitert absichtlich im ersten Durchlauf.
+      - name: Fassungen bauen
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $project = 'agent/src/WiUpMo.Agent/WiUpMo.Agent.csproj'
+          $common = @('-c', 'Release', '-r', 'win-x64')
+          dotnet publish $project @common -p:Version=0.8.9001 -o e2e-build/a
+          dotnet publish $project @common -p:Version=0.8.9002 -o e2e-build/b
+          dotnet publish $project @common -p:Version=0.8.9003 -p:WiUpMoE2EBroken=true -o e2e-build/c
+          git worktree add e2e-build/old-src $env:OLD_COMMIT
+          dotnet publish e2e-build/old-src/agent/src/WiUpMo.Agent/WiUpMo.Agent.csproj @common -o e2e-build/old
+
+      - name: Ende-zu-Ende-Test
+        shell: pwsh
+        run: >-
+          ./agent/e2e/run-e2e.ps1
+          -Old e2e-build/old/wiupmo-agent.exe
+          -A e2e-build/a/wiupmo-agent.exe
+          -B e2e-build/b/wiupmo-agent.exe
+          -C e2e-build/c/wiupmo-agent.exe
+          -Artifacts e2e-artifacts
+
+      - name: Protokolle sichern
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: agent-e2e
+          path: e2e-artifacts
+          if-no-files-found: ignore
