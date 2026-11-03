@@ -50,6 +50,16 @@ export class AdSyncService {
    */
   private running = false;
 
+  /**
+   * Ein geplanter Lauf, der kam, waehrend ein anderer lief. Er wird nach dessen
+   * Ende nachgeholt, statt verworfen zu werden.
+   *
+   * Verworfen hiess: Wer den Bereich zweimal kurz hintereinander aendert, sah
+   * die zweite Aenderung erst beim naechsten Intervall wirken — Stunden spaeter.
+   * Der Test-Stack fiel darueber, sobald ein Lauf etwas laenger brauchte.
+   */
+  private rerunRequested = false;
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly ldap: LdapClient,
@@ -58,6 +68,20 @@ export class AdSyncService {
 
   get isRunning(): boolean {
     return this.running;
+  }
+
+  /**
+   * Fuer den Planer: Laeuft schon ein Abgleich, wird einer vorgemerkt. Er liest
+   * die Einstellungen erst, wenn er laeuft — also die dann gueltigen.
+   */
+  async syncScheduled(): Promise<void> {
+    if (this.running) {
+      this.rerunRequested = true;
+      this.logger.log('Es laeuft bereits ein Abgleich; ein weiterer ist vorgemerkt.');
+      return;
+    }
+
+    await this.sync(AdSyncTrigger.Scheduled);
   }
 
   async sync(trigger: AdSyncTrigger): Promise<AdSyncResult> {
@@ -124,6 +148,15 @@ export class AdSyncService {
       };
     } finally {
       this.running = false;
+
+      if (this.rerunRequested) {
+        this.rerunRequested = false;
+        void this.syncScheduled().catch((error: unknown) => {
+          this.logger.warn(
+            `Vorgemerkter AD-Abgleich uebersprungen: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
+      }
     }
   }
 

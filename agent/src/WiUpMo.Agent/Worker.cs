@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WiUpMo.Agent.Storage;
+using WiUpMo.Agent.Update;
 
 namespace WiUpMo.Agent;
 
@@ -10,6 +11,7 @@ public sealed class Worker(
     CheckinTrigger trigger,
     CheckinSchedule schedule,
     SnapshotQueue queue,
+    SelfUpdateService selfUpdate,
     ILogger<Worker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -20,6 +22,10 @@ public sealed class Worker(
             AgentVersion.Current, options.BackendUrl, schedule.Interval.TotalMinutes, queue.Count());
 
         trigger.Start();
+
+        // Vor der Startverzoegerung: Steht ein Selbst-Update an, soll der Task
+        // es mit den richtigen Bedingungen schon beim naechsten Lauf tauschen.
+        selfUpdate.EnsureUpdaterTask();
 
         if (!await DelayAsync(TimeSpan.FromSeconds(options.StartupDelaySeconds), stoppingToken)
                 .ConfigureAwait(false))

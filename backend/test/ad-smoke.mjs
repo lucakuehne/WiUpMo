@@ -61,8 +61,10 @@ const syncRunCount = async () => (await api.get('/api/ad/sync-runs?limit=1')).to
 async function waitForRun(before) {
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {
-    const runs = await api.get('/api/ad/sync-runs?limit=1');
-    if (runs.total > before && runs.items[0]?.finishedAt) return runs.items[0];
+    // Erst wenn kein Lauf mehr offen ist: Ein vorgemerkter Lauf folgt direkt
+    // auf den laufenden, und nur der letzte traegt den gespeicherten Stand.
+    const runs = await api.get('/api/ad/sync-runs?limit=5');
+    if (runs.total > before && runs.items.every((run) => run.finishedAt)) return runs.items[0];
     await sleep(1000);
   }
   throw new Error('Nach dem Speichern lief kein Abgleich, oder er endete nicht.');

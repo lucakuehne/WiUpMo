@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using WiUpMo.Agent.Backend;
 using WiUpMo.Agent.Contracts;
+using WiUpMo.Agent.Install;
 using WiUpMo.Agent.Storage;
 
 namespace WiUpMo.Agent.Update;
@@ -32,6 +33,48 @@ public sealed class SelfUpdateService(
     /// einem Laptop ausserhalb des Firmennetzes und bei einem gerade neu
     /// ausgerollten Backend gleichermassen.
     /// </summary>
+    /// <summary>
+    /// Richtet den Updater-Task ein, wenn er fehlt oder noch die
+    /// Voreinstellungen hat, mit denen er im Akkubetrieb nicht startet.
+    ///
+    /// Beim Dienststart, weil der Dienst als SYSTEM laeuft und den Task anlegen
+    /// darf — so werden auch Geraete korrigiert, die vor 0.7.2 installiert
+    /// wurden, ohne dass jemand <c>--install</c> erneut ausfuehrt.
+    /// </summary>
+    public void EnsureUpdaterTask()
+    {
+        // Ohne Updater-Kopie neben dem Dienst gibt es nichts einzurichten — etwa
+        // bei einem Aufruf von Hand aus einem anderen Verzeichnis.
+        if (!File.Exists(paths.UpdaterExe))
+        {
+            return;
+        }
+
+        try
+        {
+            if (UpdaterTask.IsCurrent() != false)
+            {
+                return;
+            }
+
+            string? error = UpdaterTask.Register(paths.UpdaterExe, paths.DataDirectory);
+            if (error is null)
+            {
+                logger.LogInformation(
+                    "Updater-Task neu eingerichtet: laeuft auch im Akkubetrieb und holt verpasste Laeufe nach.");
+            }
+            else
+            {
+                logger.LogWarning("Der Updater-Task liess sich nicht neu einrichten: {Fehler}", error);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                      or System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            logger.LogWarning("Der Updater-Task liess sich nicht pruefen: {Fehler}", ex.Message);
+        }
+    }
+
     public void ConfirmSelf()
     {
         UpdateMarker? marker = UpdateMarker.TryLoad(paths.MarkerPath);
@@ -119,6 +162,21 @@ public sealed class SelfUpdateService(
     private static readonly TimeSpan StuckAfter = TimeSpan.FromHours(2);
 
     /// <summary>
+    /// So viele Durchlaeufe muss dieser Prozess einen ueberfaelligen Marker
+    /// gesehen haben, bevor er ihn aufgibt.
+    ///
+    /// Das Alter allein genuegt nicht: Klappt jemand das Notebook kurz nach dem
+    /// Bereitlegen zu, laeuft auch der Task nicht. Beim Aufwachen meldete sich
+    /// der Dienst sofort, sah einen Marker von gestern und gab auf, bevor der
+    /// Task ueberhaupt eine Gelegenheit hatte. Die Durchlaeufe zaehlen nur, was
+    /// der Dienst wach erlebt hat; der Task laeuft in der Zeit mehrmals.
+    /// </summary>
+    private const int StuckObservations = 6;
+
+    private string? _overdueJob;
+    private int _overdueSeen;
+
+    /// <summary>
     /// Raeumt einen liegengebliebenen Marker weg.
     ///
     /// Ohne das blockiert er jeden weiteren Auftrag dauerhaft und lautlos:
@@ -134,6 +192,17 @@ public sealed class SelfUpdateService(
         if (DateTimeOffset.UtcNow - marker.StartedAt < StuckAfter)
         {
             // Noch in der Frist: Der Updater ist zustaendig, hier ist nichts zu tun.
+            return;
+        }
+
+        if (_overdueJob != marker.JobId)
+        {
+            _overdueJob = marker.JobId;
+            _overdueSeen = 0;
+        }
+
+        if (++_overdueSeen < StuckObservations)
+        {
             return;
         }
 

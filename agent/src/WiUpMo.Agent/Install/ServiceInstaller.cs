@@ -334,11 +334,24 @@ public static class ServiceInstaller
     /// Der Task laeuft als SYSTEM, weil er den Dienst anhalten und Dateien in
     /// ProgramFiles verschieben muss. Alle 5 Minuten: Er beendet sich sofort,
     /// wenn kein Marker vorliegt, kostet also praktisch nichts.
+    ///
+    /// Angelegt aus einer XML-Definition (siehe <see cref="UpdaterTask"/>), damit
+    /// er auch im Akkubetrieb laeuft. Scheitert das, bleibt der kurze Weg als
+    /// Rueckfall; der Dienst richtet den Task dann beim Start nach.
     /// </summary>
     private static void InstallUpdater(string serviceExe)
     {
         string updater = Path.Combine(Path.GetDirectoryName(serviceExe)!, AgentPaths.UpdaterFileName);
         File.Copy(serviceExe, updater, overwrite: true);
+
+        string? error = UpdaterTask.Register(updater, Path.GetTempPath());
+        if (error is null)
+        {
+            Console.WriteLine($"Geplanter Task '{UpdaterTaskName}' angelegt.");
+            return;
+        }
+
+        Console.Error.WriteLine($"Der Updater-Task liess sich nicht aus der Definition anlegen: {error}");
 
         int result = Run(
             "schtasks.exe",

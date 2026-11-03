@@ -346,17 +346,16 @@ const currentVersion = computed(
 );
 
 /**
- * Drei Versionen tragen eine eigene Farbe, alles Ältere teilt sich Grau —
- * derselbe Ton im Kreis wie im Verlauf. Die aktuelle Version ist grün, wie
- * ihr Abzeichen; die neueste übrige blau, die nächste amber. Ohne markierte
- * Version übernimmt die neueste das Grün.
+ * Die aktuelle Version ist grün, wie ihr Abzeichen; ohne markierte Version
+ * übernimmt die neueste das Grün. Die fünf neuesten übrigen tragen Blau in
+ * Helligkeitsstufen — Versionen haben eine Reihenfolge, und die zeigt sich so
+ * in der Farbe: je neuer, desto kräftiger. Alles davor teilt sich Grau, im
+ * Kreis wie im Verlauf.
  *
- * Bewusst nur drei: Mehr Farben lassen sich im Stapel nicht mehr sicher
- * auseinanderhalten (Blau und Violett etwa fallen bei einer Rot-Grün-Schwäche
- * zusammen), und für einen Rollout zählen ohnehin die aktuelle, die vorige
- * und der Rest. Die Folge Grau, Amber, Blau, Grün von unten nach oben ist
- * gegen Farbfehlsichtigkeit geprüft, hell wie dunkel; Grau taucht erst ab vier
- * Versionen auf und liegt dann unter Amber.
+ * Früher waren es drei eigene Farben. Mehr verschiedene Farben lassen sich im
+ * Stapel nicht sicher auseinanderhalten; Stufen eines Farbtons schon, solange
+ * ihre Helligkeit weit genug auseinanderliegt. Rampe und Übergänge zu Grau
+ * und Grün sind gegen Farbfehlsichtigkeit geprüft, hell wie dunkel.
  */
 const versionColors = computed(() => {
   const versions = new Set<string>();
@@ -370,18 +369,19 @@ const versionColors = computed(() => {
   const newestFirst = [...versions].sort((a, b) => compareVersions(b, a));
   const lead =
     currentVersion.value && versions.has(currentVersion.value) ? currentVersion.value : newestFirst[0];
-  const others = newestFirst.filter((version) => version !== lead).slice(0, 2);
+  const ramp = palette.value.versionRamp;
+  const others = newestFirst.filter((version) => version !== lead).slice(0, ramp.length);
 
   const colors = new Map<string, string>();
   if (lead) colors.set(lead, palette.value.series[1]);
-  others.forEach((version, index) => colors.set(version, palette.value.series[index === 0 ? 0 : 2]));
+  // Die neueste übrige bekommt die kräftigste Stufe, auch wenn es weniger
+  // Versionen als Stufen gibt.
+  others.forEach((version, index) => colors.set(version, ramp[ramp.length - 1 - index]));
   return colors;
 });
 
-const OLDER_COLOR_INDEX = 4;
-
 function versionColor(version: string | null): string {
-  return (version && versionColors.value.get(version)) || palette.value.series[OLDER_COLOR_INDEX];
+  return (version && versionColors.value.get(version)) || palette.value.olderVersions;
 }
 
 /**
@@ -426,7 +426,7 @@ const agentVersionTrendData = computed(() => {
             {
               label: 'Ältere',
               data: dates.map((date) => count(date, (version) => !versionColors.value.has(version))),
-              backgroundColor: palette.value.series[OLDER_COLOR_INDEX],
+              backgroundColor: palette.value.olderVersions,
               ...segmentGap.value,
             },
           ]
@@ -748,8 +748,9 @@ onMounted(load);
           <CardTitle>Agent-Versionen über die Zeit</CardTitle>
           <CardDescription>
             Welche Version an jedem Tag lief — die zuletzt gemeldete jedes registrierten Geräts. Ein
-            Rollout zeigt sich als grüne Fläche, die wächst. Die drei neuesten Versionen sind
-            einzeln aufgeführt, alles davor unter „Ältere".
+            Rollout zeigt sich als grüne Fläche, die wächst. Die aktuelle und die fünf neuesten
+            übrigen Versionen sind einzeln aufgeführt, je neuer, desto kräftiger; alles davor
+            steht unter „Ältere".
             <template
               v-if="agentVersionTrendDays > 0 && agentVersionTrendDays < rangeDays"
             >

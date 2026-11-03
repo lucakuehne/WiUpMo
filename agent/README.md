@@ -246,6 +246,30 @@ Die Frist beträgt 10 Minuten. Sie muss länger sein als Startverzögerung plus
 erster Check-in, sonst nimmt der Updater einen Tausch zurück, der nur noch
 keine Gelegenheit zur Bestätigung hatte.
 
+### Der Task auf Notebooks
+
+Bis 0.7.1 legte `--install` den Task mit `schtasks /SC MINUTE` an. Damit
+übernimmt er die Voreinstellungen der Aufgabenplanung: Er startet nicht im
+Akkubetrieb, und ein Lauf, der in den Ruhezustand fällt, wird nicht
+nachgeholt. Auf Notebooks blieben Selbst-Updates deshalb in `pendingSwap`
+stehen, bis der Dienst sie nach zwei Stunden aufgab („Vermutlich läuft der
+Updater-Task nicht“). Am Netzteil tauschte derselbe Updater in Minuten.
+
+Ab 0.7.2:
+
+- Der Task entsteht aus einer XML-Definition (`Install/UpdaterTask.cs`): läuft
+  auch am Akku, holt verpasste Läufe nach (`StartWhenAvailable`), höchstens
+  30 Minuten je Lauf, keine zweite Instanz.
+- Der Dienst prüft den Task bei jedem Start und ersetzt ihn, wenn er fehlt
+  oder noch die alten Bedingungen hat. Installationen von vor 0.7.2 werden so
+  ohne erneutes `--install` korrigiert.
+- Ein überfälliger Marker (älter als zwei Stunden) wird erst aufgegeben, wenn
+  der laufende Dienst ihn in sechs Durchläufen gesehen hat. Nach dem
+  Aufwachen bekommt der Task so zuerst seine Gelegenheit.
+
+Geräte mit älterem Agent brauchen dafür **einen** erfolgreichen Tausch nach
+den alten Regeln: wach und am Netzteil, bis der Task gelaufen ist.
+
 ### Bei einer nicht passenden Prüfsumme
 
 wird abgebrochen, nicht getauscht. Eine Datei unbekannter Herkunft als Dienst

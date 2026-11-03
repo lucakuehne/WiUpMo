@@ -1,6 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
-import { AdSyncTrigger } from '../database/enums.js';
 import { SettingsService } from '../settings/settings.service.js';
 import {
   AdSettings,
@@ -148,7 +147,7 @@ export class AdSchedulerService implements OnModuleInit, OnModuleDestroy {
    */
   private async run(): Promise<void> {
     try {
-      await this.sync.sync(AdSyncTrigger.Scheduled);
+      await this.sync.syncScheduled();
     } catch (error) {
       this.logger.warn(
         `Geplanter AD-Abgleich uebersprungen: ${error instanceof Error ? error.message : String(error)}`,
