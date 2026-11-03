@@ -40,9 +40,55 @@ New-Item -ItemType Directory -Force $Artifacts | Out-Null
 
 # --- Hilfen -------------------------------------------------------------------
 
+$script:CurrentStep = 'Vorbereitung'
+
+<#
+  Eine Annotation am Lauf. Anders als Protokoll und Artefakt sind sie ohne
+  Anmeldung ueber die API lesbar - so laesst sich ein gescheiterter Lauf auch
+  von aussen nachvollziehen. Mehrzeilig ueber %0A, wie GitHub es verlangt.
+#>
+function Write-Annotation([string]$Level, [string]$Title, [string[]]$Lines) {
+  if (-not $env:GITHUB_ACTIONS) { return }
+  $text = ($Lines -join "`n") -replace '%', '%25' -replace "`r", '' -replace "`n", '%0A'
+  Write-Host "::$Level title=$($Title -replace '[:,]', ' ')::$text"
+}
+
 function Write-Step([string]$Text) {
+  $script:CurrentStep = $Text
   Write-Host ''
   Write-Host "== $Text" -ForegroundColor Cyan
+  Write-Annotation 'notice' 'Schritt' @($Text)
+}
+
+<# Was beim Fehler zur Erklaerung gebraucht wird, knapp genug fuer eine Annotation. #>
+function Write-FailureAnnotations([string]$Message) {
+  Write-Annotation 'error' "Gescheitert bei: $script:CurrentStep" @($Message)
+
+  $lines = @("Dienst: $(Get-ServiceState)", "binPath: $(Get-BinPath)")
+  try {
+    $state = Get-State
+    $lines += "Letzter Check-in: $($state.lastCheckin.agentVersion) um $($state.lastCheckin.at)"
+    $lines += "Auftrag: $($state.job.targetVersion) $($state.job.state)"
+    $lines += $state.reports | ForEach-Object { "Meldung: $($_.state) $($_.agentVersion) $($_.error)" }
+  }
+  catch { $lines += "Test-Backend nicht erreichbar: $($_.Exception.Message)" }
+  $marker = Join-Path $Data 'update.json'
+  if (Test-Path $marker) { $lines += "update.json: $((Get-Content $marker -Raw) -replace '\s+', ' ')" }
+  Write-Annotation 'error' 'Zustand' $lines
+
+  $logs = Join-Path $Data 'logs'
+  if (Test-Path $logs) {
+    $updater = Get-ChildItem $logs -Filter 'updater-*.log' | Sort-Object Name | Get-Content -Tail 25
+    if ($updater) { Write-Annotation 'error' 'Updater-Protokoll (Ende)' $updater }
+    $agent = Get-ChildItem $logs -Filter 'agent-*.log' | Sort-Object Name | Get-Content |
+      Where-Object { $_ -match '\[(WRN|ERR|FTL)\]' } | Select-Object -Last 25
+    if ($agent) { Write-Annotation 'error' 'Agent-Protokoll (Warnungen und Fehler)' $agent }
+  }
+
+  $backendLog = Join-Path $Artifacts 'fake-backend.log'
+  if (Test-Path $backendLog) {
+    Write-Annotation 'error' 'Test-Backend (Ende)' (Get-Content $backendLog -Tail 25)
+  }
 }
 
 function Assert-That([bool]$Condition, [string]$Message) {
@@ -247,6 +293,7 @@ try {
 catch {
   Write-Host ''
   Write-Host "Ende-zu-Ende-Test gescheitert: $($_.Exception.Message)" -ForegroundColor Red
+  Write-FailureAnnotations $_.Exception.Message
   Save-Evidence 'beim-fehler'
   throw
 }
