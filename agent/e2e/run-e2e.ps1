@@ -118,10 +118,24 @@ function Get-ExeVersion([string]$Path) {
 
 function Get-BinPath { (Get-CimInstance Win32_Service -Filter "Name='$ServiceName'").PathName }
 
+<#
+  Ueber CIM, nicht ueber Get-Service: Dessen Objekte halten einen Handle auf den
+  Dienst, und ein Dienst mit offenem Handle bleibt nach "sc delete" als "zum
+  Loeschen markiert" stehen - die anschliessende Neuinstallation scheiterte.
+  'Running', 'Stopped' usw., oder $null, wenn es ihn nicht gibt.
+#>
 function Get-ServiceState {
-  $service = Get-Service $ServiceName -ErrorAction SilentlyContinue
-  if ($service) { return [string]$service.Status }
+  $service = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'"
+  if ($service) { return [string]$service.State }
   return $null
+}
+
+<# Neu starten ueber sc.exe, aus demselben Grund. Wartet, bis er wieder laeuft. #>
+function Restart-Agent {
+  & sc.exe stop $ServiceName | Out-Null
+  Wait-Until 'Dienst angehalten' 90 { (Get-ServiceState) -eq 'Stopped' } | Out-Null
+  & sc.exe start $ServiceName | Out-Null
+  Wait-Until 'Dienst laeuft' 90 { (Get-ServiceState) -eq 'Running' } | Out-Null
 }
 
 function Get-Report([string]$JobId, [string]$State) {
@@ -132,12 +146,12 @@ function Get-Report([string]$JobId, [string]$State) {
 function Set-TestSettings {
   $file = Join-Path $Root 'appsettings.json'
   $json = Get-Content $file -Raw | ConvertFrom-Json
-  $json.Agent | Add-Member -Force NotePropertyName StartupDelaySeconds -NotePropertyValue 0
-  $json.Agent | Add-Member -Force NotePropertyName SimulateWindowsUpdate -NotePropertyValue $true
-  $json.Agent | Add-Member -Force NotePropertyName UpdateVerificationMinutes -NotePropertyValue $VerificationMinutes
+  $json.Agent | Add-Member -Force -NotePropertyName StartupDelaySeconds -NotePropertyValue 0
+  $json.Agent | Add-Member -Force -NotePropertyName SimulateWindowsUpdate -NotePropertyValue $true
+  $json.Agent | Add-Member -Force -NotePropertyName UpdateVerificationMinutes -NotePropertyValue $VerificationMinutes
   # Fuer die alte Fassung, die den Schalter oben nicht kennt: lokal suchen, kurz warten.
-  $json.Agent | Add-Member -Force NotePropertyName SearchOnline -NotePropertyValue $false
-  $json.Agent | Add-Member -Force NotePropertyName ComTimeoutSeconds -NotePropertyValue 60
+  $json.Agent | Add-Member -Force -NotePropertyName SearchOnline -NotePropertyValue $false
+  $json.Agent | Add-Member -Force -NotePropertyName ComTimeoutSeconds -NotePropertyValue 60
   $json | ConvertTo-Json -Depth 5 | Set-Content $file -Encoding utf8
 }
 
@@ -145,7 +159,7 @@ function Set-TestSettings {
 function Submit-Update([string]$Version, [string]$File) {
   $body = @{ version = $Version; file = (Resolve-Path $File).Path } | ConvertTo-Json
   $job = Invoke-RestMethod "$Backend/control/offer" -Method Post -Body $body -ContentType 'application/json'
-  Restart-Service $ServiceName -Force
+  Restart-Agent
   return $job
 }
 
@@ -205,7 +219,7 @@ try {
   Uninstall-Agent
   & $Old --install --backend-url $Backend --enrollment-token $Token | Out-Host
   Set-TestSettings
-  Restart-Service $ServiceName -Force
+  Restart-Agent
   Wait-Until "Check-in von $versionOld" 300 { (Get-State).lastCheckin.agentVersion -eq $versionOld } | Out-Null
   Assert-That ((Get-BinPath) -like "*\WiUpMo\wiupmo-agent.exe*") 'Dienst am alten Ort'
 
@@ -263,7 +277,7 @@ try {
 
   Write-Step 'Deinstallation'
   Uninstall-Agent
-  Assert-That ($null -eq (Get-ServiceState)) 'Dienst entfernt'
+  Wait-Until 'Dienst entfernt' 120 { $null -eq (Get-ServiceState) } | Out-Null
   & schtasks.exe /Query /TN $TaskName *> $null
   Assert-That ($LASTEXITCODE -ne 0) 'Task entfernt'
   Assert-That (-not (Test-Path $Data)) 'Datenverzeichnis entfernt'
@@ -272,7 +286,7 @@ try {
   $enrolledBefore = (Get-State).enrollments
   & $A --install --backend-url $Backend --enrollment-token $Token | Out-Host
   Set-TestSettings
-  Restart-Service $ServiceName -Force
+  Restart-Agent
   Assert-That ((Get-BinPath) -like "*\versions\$versionA\wiupmo-agent.exe*") 'Dienst zeigt auf versions\A'
   Assert-That ((Get-ExeVersion (Join-Path $Root 'wiupmo-updater.exe')) -eq $versionA) 'Updater-Kopie ist A'
   Assert-That (-not (Test-Path (Join-Path $Root 'wiupmo-agent.exe'))) 'Nichts am alten Ort'
@@ -284,7 +298,7 @@ try {
 
   Write-Step 'Deinstallation'
   Uninstall-Agent
-  Assert-That ($null -eq (Get-ServiceState)) 'Dienst entfernt'
+  Wait-Until 'Dienst entfernt' 120 { $null -eq (Get-ServiceState) } | Out-Null
   Assert-That (-not (Test-Path $Data)) 'Datenverzeichnis entfernt'
 
   Write-Host ''
