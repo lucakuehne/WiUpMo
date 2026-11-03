@@ -20,5 +20,8 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "env.d.ts"]
+  "include": ["src/**/*.ts", "src/**/*.vue", "env.d.ts"],
+  "vueCompilerOptions": {
+    "checkUnknownComponents": true
+  }
 }

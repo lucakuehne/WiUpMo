@@ -36,7 +36,7 @@ export class EnrollmentTokenDto {
 }
 
 export class AgentSettingsDto {
-  /** In Minuten, ganzzahlig — von einer Viertelstunde bis zu einer Woche. */
+  /** In Minuten, ganzzahlig — von zwei Minuten bis zu sechs Stunden. */
   @toInt()
   @IsInt()
   @Min(MIN_CHECK_INTERVAL_MINUTES)

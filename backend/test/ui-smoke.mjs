@@ -200,6 +200,22 @@ await step('Eingespieltes Update wartet auf den Neustart', async () => {
   await capture(page, 'geraet-wartet-auf-neustart');
 });
 
+await step('Agent-Zustand zeigt nur Stoerungen aus dem juengsten Durchlauf', async () => {
+  const list = await (await page.request.get(`${base}/api/devices?search=AGENTLOG-&limit=1`)).json();
+  if (list.items.length === 0) throw new Error('kein AGENTLOG-Geraet - lief smoke.mjs vorher?');
+  await page.goto(`${base}/devices/${list.items[0].id}`);
+
+  // Als Ueberschrift auffindbar heisst auch: Die Kartenteile sind eingebunden.
+  const card = page.locator('[data-slot=card]', { has: page.getByRole('heading', { name: 'Agent-Zustand' }) });
+  await card.waitFor({ timeout: 15_000 });
+  const text = await card.innerText();
+  if (!text.includes('Neue Warnung aus dem Smoke-Test')) throw new Error('die neue Warnung fehlt');
+  for (const stale of ['Alte Warnung', 'Uebermittlung fehlgeschlagen']) {
+    if (text.includes(stale)) throw new Error(`"${stale}" steht im Agent-Zustand`);
+  }
+  await capture(page, 'geraet-agent-zustand');
+});
+
 await step('Updates', async () => {
   await page.goto(`${base}/updates`);
   await page.locator('table').first().waitFor({ timeout: 15_000 });

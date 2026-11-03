@@ -143,7 +143,7 @@ const bindPassword = ref('');
 
 const url = reactive<LdapUrlParts>({ host: '', port: LDAPS_PORT, secure: true });
 
-const agent = reactive<AgentSettingsView>({ enrollmentToken: '', checkIntervalMinutes: 15 });
+const agent = reactive<AgentSettingsView>({ enrollmentToken: '', checkIntervalMinutes: 5 });
 const authSettings = reactive<AuthSettings>({
   localEnabled: true,
   ldapEnabled: false,
@@ -1077,18 +1077,23 @@ onMounted(load);
                     id="interval"
                     v-model.number="agent.checkIntervalMinutes"
                     type="number"
-                    min="5"
+                    min="2"
                     max="360"
-                    step="5"
+                    step="1"
                     class="w-40"
                   />
                   <span class="text-muted-foreground text-sm">{{ intervalHint }}</span>
                 </div>
                 <p class="text-muted-foreground text-xs">
-                  Zwischen 5 Minuten und 6 Stunden. Der Wert geht mit jeder Check-in-Antwort an die
+                  Zwischen 2 Minuten und 6 Stunden. Der Wert geht mit jeder Check-in-Antwort an die
                   Geräte und ersetzt dort die örtliche Einstellung — wirksam wird er entsprechend
                   erst beim nächsten Durchlauf, im ungünstigsten Fall also nach dem bisherigen
-                  Abstand.
+                  Abstand. Agents vor Version 0.8.1 melden sich höchstens alle 5 Minuten.
+                </p>
+                <p class="text-muted-foreground text-xs">
+                  Jeder Durchlauf sucht bei WSUS bzw. Microsoft Update nach Updates. Bei wenigen
+                  Minuten Abstand summiert sich das über alle Geräte: 2 Minuten sind 30 Suchen pro
+                  Stunde und Gerät.
                 </p>
               </div>
             </CardContent>

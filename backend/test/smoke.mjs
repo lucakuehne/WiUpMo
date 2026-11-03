@@ -303,13 +303,22 @@ await step('Verlaeufe stuendlich und woechentlich', async () => {
 
 // --- Einstellungen --------------------------------------------------------------
 
-await step('Melde-Intervall: Vorgabe 15 Minuten, geht mit dem Check-in an den Agent', async () => {
+await step('Melde-Intervall: Vorgabe 5 Minuten, geht mit dem Check-in an den Agent', async () => {
   // Die Instanz im Test-Stack ist frisch, es gilt also die Vorgabe.
   const before = (await api.get('/api/settings')).agent.checkIntervalMinutes;
-  assert.equal(before, 15, 'Vorgabe des Melde-Intervalls');
+  assert.equal(before, 5, 'Vorgabe des Melde-Intervalls');
+  const current = () => snapshot({ hostInfo, collectedAt: minutesAgo(5), available: [U.defender, U.late], pendingReboot: true });
+
   await api.put('/api/settings/agent', { checkIntervalMinutes: 45 });
-  const res = await checkin(agent, device.token, snapshot({ hostInfo, collectedAt: minutesAgo(5), available: [U.defender, U.late], pendingReboot: true }));
-  assert.equal(res.checkIntervalMinutes, 45);
+  assert.equal((await checkin(agent, device.token, current())).checkIntervalMinutes, 45);
+
+  // Zwei Minuten bekommen nur Agents ab 0.8.1; aeltere bleiben bei fuenf. Der
+  // aeltere Snapshot aendert am Geraet nichts — er ist nicht der juengste.
+  await api.put('/api/settings/agent', { checkIntervalMinutes: 2 });
+  assert.equal((await checkin(agent, device.token, current())).checkIntervalMinutes, 2);
+  const legacy = { ...snapshot({ hostInfo, collectedAt: minutesAgo(6), available: [U.defender, U.late], pendingReboot: true }), agentVersion: '0.8.0' };
+  assert.equal((await checkin(agent, device.token, legacy)).checkIntervalMinutes, 5);
+
   await api.put('/api/settings/agent', { checkIntervalMinutes: before });
   await api.request('PUT', '/api/settings/agent', { body: { checkIntervalMinutes: 1 }, expect: 400 });
 });
@@ -600,6 +609,29 @@ await step('Installationsauftrag: Eingespieltes wartet auf den Neustart', async 
   const due = await checkin(agent, rebootDevice.token, snapshot({ hostInfo: rebootHost, collectedAt: minutesAgo(1), available: [U.late, U.defender], pendingReboot: true }));
   assert.deepEqual(due.installRequest?.updateIds, [U.defender.updateId]);
   await api.post(`/api/install-jobs/${due.installRequest.jobId}/cancel`);
+});
+
+await step('Agent-Zustand: Protokoll ueber zwei Check-ins (fuer ui-smoke)', async () => {
+  // In den Agent-Zustand gehoert nur die neue Warnung: Die alte stammt von vor
+  // dem vorletzten Check-in, die gescheiterte Uebermittlung hat der Check-in
+  // selbst erledigt. Die alte steht in Ortszeit mit Versatz, wie Serilog sie
+  // schreibt — als Text verglichen laege sie spaeter als der Check-in.
+  const inPlusTwo = (iso) => new Date(new Date(iso).getTime() + 2 * 3_600_000).toISOString().replace('Z', '+02:00');
+  const logHost = host(`AGENTLOG-${RUN}`);
+  const logDevice = await enroll(agent, enrollmentToken, logHost);
+  await checkin(agent, logDevice.token, snapshot({ hostInfo: logHost, collectedAt: minutesAgo(20) }));
+
+  const latest = snapshot({ hostInfo: logHost, collectedAt: minutesAgo(5) });
+  latest.diagnostics.recentLogs = [
+    { at: inPlusTwo(minutesAgo(30)), level: 'warning', message: 'Alte Warnung aus dem Smoke-Test' },
+    { at: minutesAgo(15), level: 'warning', message: 'Uebermittlung fehlgeschlagen, 1 Snapshots bleiben in der Warteschlange: Testfehler' },
+    { at: minutesAgo(12), level: 'warning', message: 'Neue Warnung aus dem Smoke-Test' },
+  ];
+  await checkin(agent, logDevice.token, latest);
+
+  const detail = await api.get(`/api/devices/${logDevice.deviceId}`);
+  assert.equal(detail.checkins.length, 2);
+  assert.equal(detail.agentDiagnostics.recentLogs.length, 3);
 });
 
 // --- Auslieferung des Frontends -------------------------------------------------

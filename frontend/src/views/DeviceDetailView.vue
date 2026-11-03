@@ -14,6 +14,7 @@ import { useRouter } from 'vue-router';
 import { toast } from 'vue-sonner';
 import { del, get, post } from '@/api/client';
 import type {
+  AgentLogEntry,
   AgentUpdateJobView,
   CreateUpdateJobsResult,
   DeviceDetail,
@@ -26,7 +27,7 @@ import type {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -141,16 +142,57 @@ const pagedTimeline = computed(() =>
 
 const latestCheckin = computed(() => device.value?.checkins[0] ?? null);
 
-/**
- * Was am Agent nicht rund läuft, in Sätzen statt als Feldliste.
- *
- * Die Selbstauskunft trägt fünf Werte; vier davon sind im Normalfall
- * unauffällig und sagen dann nichts. Interessant ist nur die Abweichung —
- * deshalb wird hier ausgewertet statt angezeigt.
- */
 /** Neueste zuerst — der Agent liefert sie in zeitlicher Reihenfolge. */
 const agentLogs = computed(() => [...(device.value?.agentDiagnostics?.recentLogs ?? [])].reverse());
 
+/**
+ * So beginnt die Warnung des Agents, wenn er das Backend nicht erreicht
+ * (AgentCycle.FlushAsync). Als Störung taugt sie nie: Der Check-in, der sie
+ * mitbringt, ist selbst angekommen — die Verbindung steht also wieder.
+ */
+const TRANSMISSION_FAILURE = 'Uebermittlung fehlgeschlagen';
+
+/**
+ * Warnungen und Fehler aus dem jüngsten Durchlauf, älteste zuerst.
+ *
+ * Der Agent schickt seine letzten Einträge so lange mit, bis neuere sie
+ * verdrängen — auch wenn die Ursache längst behoben ist. Aktuell ist nur, was
+ * nach dem vorletzten Check-in geschah; der Agent liest seinen Zustand
+ * unmittelbar vor dem Erfassen, die Grenze liegt also genau dort. Agents vor
+ * 0.6.0 kennen nur den jüngsten Eintrag.
+ */
+const currentAgentProblems = computed<AgentLogEntry[]>(() => {
+  const d = device.value?.agentDiagnostics;
+  if (!d) {
+    return [];
+  }
+
+  const entries: AgentLogEntry[] =
+    d.recentLogs ??
+    (d.lastError && d.lastErrorAt ? [{ at: d.lastErrorAt, level: 'warning', message: d.lastError }] : []);
+  // Als Zeitpunkt verglichen, nicht als Text: Der Agent schreibt Ortszeit mit
+  // Versatz, das Backend UTC.
+  const previous = device.value?.checkins[1]?.collectedAt;
+  const since = previous ? new Date(previous).getTime() : Number.NEGATIVE_INFINITY;
+
+  return entries.filter(
+    (entry) =>
+      new Date(entry.at).getTime() > since && !entry.message.startsWith(TRANSMISSION_FAILURE),
+  );
+});
+
+/**
+ * Was am Agent nicht rund läuft, in Sätzen statt als Feldliste.
+ *
+ * Die Selbstauskunft trägt mehrere Werte; die meisten sind im Normalfall
+ * unauffällig und sagen dann nichts. Interessant ist nur die Abweichung —
+ * deshalb wird hier ausgewertet statt angezeigt.
+ *
+ * Was nur die Verbindung betrifft — eine volle Warteschlange, eine
+ * gescheiterte Übermittlung —, gehört nicht hierher: Mit dem Check-in, aus dem
+ * der Zustand stammt, ist die Warteschlange angekommen. Der Verlauf steht im
+ * Agent-Protokoll.
+ */
 const agentIssues = computed<string[]>(() => {
   const d = device.value?.agentDiagnostics;
   if (!d) {
@@ -158,13 +200,6 @@ const agentIssues = computed<string[]>(() => {
   }
 
   const issues: string[] = [];
-
-  if (d.queuedSnapshots > 1) {
-    issues.push(
-      `${d.queuedSnapshots} Meldungen warten in der Warteschlange — das Gerät erreicht das ` +
-        'Backend nicht zuverlässig.',
-    );
-  }
 
   if (d.selfUpdateState) {
     const seit = d.selfUpdateStartedAt ? ` (seit ${formatRelative(d.selfUpdateStartedAt)})` : '';
@@ -198,9 +233,12 @@ const agentIssues = computed<string[]>(() => {
     );
   }
 
-  if (d.lastError) {
-    const wann = d.lastErrorAt ? `${formatRelative(d.lastErrorAt)}: ` : '';
-    issues.push(`${wann}${d.lastError}`);
+  const problems = currentAgentProblems.value;
+  const newest = problems.at(-1);
+  if (newest) {
+    const weitere =
+      problems.length > 1 ? ` (dazu ${problems.length - 1} weitere im Agent-Protokoll)` : '';
+    issues.push(`${formatRelative(newest.at)}: ${newest.message}${weitere}`);
   }
 
   return issues;
@@ -530,8 +568,8 @@ onMounted(load);
       </Card>
 
       <!--
-        Nur wenn es etwas zu sagen gibt: Läuft alles rund — nichts in der
-        Warteschlange, kein Selbst-Update unterwegs, Task da, kein Fehler —,
+        Nur wenn es etwas zu sagen gibt: Läuft alles rund — kein Selbst-Update
+        unterwegs, Task da, kein neuer Fehler —,
         wäre der Kasten eine Zeile Bestätigung ohne Erkenntnis.
       -->
       <Card v-if="agentIssues.length > 0" class="mb-4">

@@ -1,9 +1,14 @@
 import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { isVersionAtLeast } from '../common/agent-version.js';
 import { Device } from '../database/entities/index.js';
 import { InstallJobsService } from '../install-jobs/install-jobs.service.js';
 import { ReleasesService } from '../releases/releases.service.js';
 import { SettingsService } from '../settings/settings.service.js';
+import {
+  LEGACY_MIN_CHECK_INTERVAL_MINUTES,
+  SHORT_INTERVAL_AGENT_VERSION,
+} from '../settings/settings.types.js';
 import { CheckinService } from './checkin.service.js';
 import { CurrentDevice } from './current-device.decorator.js';
 import { DeviceAuthGuard } from './device-auth.guard.js';
@@ -34,7 +39,7 @@ export class CheckinController {
     return {
       results: [result],
       agentUpdate: await this.releases.claimJob(device.id),
-      checkIntervalMinutes: (await this.settings.getAgent()).checkIntervalMinutes,
+      checkIntervalMinutes: await this.checkInterval(snapshot.agentVersion),
       installRequest: await this.installJobs.claim(device.id, device.agentVersion),
     };
   }
@@ -67,8 +72,21 @@ export class CheckinController {
     return {
       results,
       agentUpdate: await this.releases.claimJob(device.id),
-      checkIntervalMinutes: (await this.settings.getAgent()).checkIntervalMinutes,
+      checkIntervalMinutes: await this.checkInterval(ordered.at(-1)?.agentVersion),
       installRequest: await this.installJobs.claim(device.id, device.agentVersion),
     };
+  }
+
+  /**
+   * Das Melde-Intervall fuer die Antwort, nach der Version des Agents, der
+   * fragt — massgeblich ist der juengste Snapshot, denn den hat die laufende
+   * Fassung erzeugt. Agents vor 0.8.1 bekommen hoechstens ihre Untergrenze.
+   */
+  private async checkInterval(agentVersion: string | undefined): Promise<number> {
+    const minutes = (await this.settings.getAgent()).checkIntervalMinutes;
+
+    return isVersionAtLeast(agentVersion, SHORT_INTERVAL_AGENT_VERSION)
+      ? minutes
+      : Math.max(minutes, LEGACY_MIN_CHECK_INTERVAL_MINUTES);
   }
 }

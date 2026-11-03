@@ -31,8 +31,11 @@ public sealed class CheckinSchedule(
     /// unsinniger Wert — aus einer aelteren Version, einem Fehler, was auch
     /// immer — den Agent sonst dauerhaft verstummen liesse. Eine Zahl, die von
     /// aussen kommt, wird nicht ungeprueft zum Taktgeber.
+    ///
+    /// Vor 0.8.1 lag die Untergrenze bei fuenf Minuten; das Backend gibt
+    /// aelteren Agents deshalb nichts darunter vor.
     /// </summary>
-    private const int MinMinutes = 5;
+    private const int MinMinutes = 2;
     private const int MaxMinutes = 360;
 
     public TimeSpan Interval => TimeSpan.FromMinutes(Stored() ?? options.CheckIntervalMinutes);

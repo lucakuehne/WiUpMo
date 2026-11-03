@@ -119,26 +119,35 @@ export const MIN_ENROLLMENT_TOKEN_LENGTH = 16;
 /**
  * Grenzen des Melde-Intervalls, in Minuten.
  *
- * Nach unten fuenf Minuten: Jeder Durchlauf enthaelt eine vollstaendige
- * Update-Suche, die auf einem traegen Rechner Minuten dauert und Platte und
- * Netz belastet — enger waere der Agent dauernd beschaeftigt. Nach oben sechs
- * Stunden; laenger, und die Auswertungen beschreiben einen Zustand, den es so
- * nicht mehr gibt.
+ * Nach unten zwei Minuten: Jeder Durchlauf enthaelt eine vollstaendige
+ * Update-Suche bei WSUS bzw. Microsoft Update. Der Agent wartet zwar das Ende
+ * eines Durchlaufs ab, bevor er den naechsten ansetzt — enger getaktet waere er
+ * aber dauernd beschaeftigt, und die Update-Quelle bekaeme die Anfragen der
+ * ganzen Flotte im Minutentakt. Nach oben sechs Stunden; laenger, und die
+ * Auswertungen beschreiben einen Zustand, den es so nicht mehr gibt.
  */
-export const MIN_CHECK_INTERVAL_MINUTES = 5;
+export const MIN_CHECK_INTERVAL_MINUTES = 2;
 export const MAX_CHECK_INTERVAL_MINUTES = 360;
 
 /**
- * 15 Minuten wie die eigene Vorgabe des Agents: So steht ein Geraet, das einen
- * Neustart hinter sich oder ein Update installiert hat, innerhalb einer
- * Viertelstunde richtig in der Oberflaeche.
+ * Agents vor 0.8.1 nehmen nichts unter fuenf Minuten an. Sie blieben bei fuenf
+ * und schrieben bei jedem Check-in eine Warnung, die dann als Stoerung am
+ * Geraet stuende — sie bekommen deshalb hoechstens ihre eigene Untergrenze.
+ */
+export const SHORT_INTERVAL_AGENT_VERSION = '0.8.1';
+export const LEGACY_MIN_CHECK_INTERVAL_MINUTES = 5;
+
+/**
+ * 5 Minuten wie die eigene Vorgabe des Agents: So steht ein Geraet, das einen
+ * Neustart hinter sich oder ein Update installiert hat, nach wenigen Minuten
+ * richtig in der Oberflaeche.
  *
  * Gilt nur, solange in der Datenbank nichts gespeichert ist. Eine bestehende
  * Installation behaelt ihren Wert, bis er unter Einstellungen geaendert wird.
  */
 export const DEFAULT_AGENT: AgentSettings = {
   enrollmentToken: '',
-  checkIntervalMinutes: 15,
+  checkIntervalMinutes: 5,
 };
 
 export interface AdSettings {
