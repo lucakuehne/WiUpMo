@@ -130,10 +130,17 @@ function Get-ServiceState {
   return $null
 }
 
-<# Neu starten ueber sc.exe, aus demselben Grund. Wartet, bis er wieder laeuft. #>
+<#
+  Neu starten ueber sc.exe, aus demselben Grund. Wartet, bis er wieder laeuft.
+
+  Solange der Dienst noch startet, lehnt er das Anhalten ab (sc.exe: 1061), und
+  ein einzelnes "stop" ginge verloren. Es wird deshalb wiederholt, bis er steht.
+#>
 function Restart-Agent {
-  & sc.exe stop $ServiceName | Out-Null
-  Wait-Until 'Dienst angehalten' 90 { (Get-ServiceState) -eq 'Stopped' } | Out-Null
+  Wait-Until 'Dienst angehalten' 120 {
+    if ((Get-ServiceState) -eq 'Running') { & sc.exe stop $ServiceName | Out-Null }
+    (Get-ServiceState) -eq 'Stopped'
+  } | Out-Null
   & sc.exe start $ServiceName | Out-Null
   Wait-Until 'Dienst laeuft' 90 { (Get-ServiceState) -eq 'Running' } | Out-Null
 }
