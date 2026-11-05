@@ -216,10 +216,35 @@ await step('Agent-Zustand zeigt nur Stoerungen aus dem juengsten Durchlauf', asy
   await capture(page, 'geraet-agent-zustand');
 });
 
-await step('Updates', async () => {
+await step('Updates: offene, alle nach Typ, Detailseite und zurueck', async () => {
   await page.goto(`${base}/updates`);
-  await page.locator('table').first().waitFor({ timeout: 15_000 });
+  await page.locator('table tbody tr').first().waitFor({ timeout: 15_000 });
   await capture(page, 'updates');
+
+  await page.getByRole('tab', { name: 'Alle Updates' }).click();
+  await page.waitForURL(/\/updates\/all/);
+  await page.getByRole('button', { name: /^Definitionsupdates/ }).click();
+  await page.waitForURL(/classification=definition/);
+  await page.locator('table tbody tr', { hasText: 'Definitionsupdate' }).first().waitFor({ timeout: 15_000 });
+  await capture(page, 'updates-alle');
+
+  await page.locator('table tbody tr').first().click();
+  await page.waitForURL(/\/updates\/[0-9a-f-]{36}$/);
+  await page.getByRole('heading', { level: 2, name: 'Geräte' }).waitFor({ timeout: 15_000 });
+  await capture(page, 'update-detail');
+
+  // Zurueck in dieselbe Auswahl, nicht in die ungefilterte Liste.
+  await page.getByRole('button', { name: 'Updates', exact: true }).click();
+  await page.waitForURL(/\/updates\/all\?.*classification=definition/);
+});
+
+await step('Installationen mit ihren Geraeten', async () => {
+  await page.goto(`${base}/updates/installations`);
+  const first = page.locator('table tbody tr').first();
+  await first.waitFor({ timeout: 15_000 });
+  await first.click();
+  await page.locator('table table a[href^="/devices/"]').first().waitFor({ timeout: 10_000 });
+  await capture(page, 'installationen');
 });
 
 await step('Berichte', async () => {

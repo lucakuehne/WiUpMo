@@ -251,6 +251,53 @@ await step('Update-Katalog und Betroffene', async () => {
   assert.ok(affected.items.some((d) => d.hostname === HOST && d.state === 'available'));
 });
 
+await step('Update-Katalog: Typ, Einstufung, Zustand, Detail, Export', async () => {
+  // Die fuenf Updates dieses Laufs: kritisch und .NET installiert, das
+  // Qualitaetsupdate gescheitert, Definition und spaetes Sicherheitsupdate offen.
+  const search = encodeURIComponent(`Smoke ${RUN}`);
+  const titles = (page) => page.items.map((u) => u.title).sort();
+
+  const all = await api.get(`/api/updates?search=${search}&limit=50`);
+  assert.equal(all.total, 5);
+  const byTitle = Object.fromEntries(all.items.map((u) => [u.title, u]));
+  assert.deepEqual(
+    [U.critical, U.defender, U.quality].map((u) => byTitle[u.title].classification),
+    ['security', 'definition', 'updates'],
+  );
+
+  // Je Typ, alle Typen in fester Reihenfolge — der Typfilter selbst zaehlt nicht mit.
+  const types = await api.get(`/api/updates/classifications?search=${search}&classification=drivers`);
+  assert.equal(types[0].classification, 'security');
+  const counts = Object.fromEntries(types.map((t) => [t.classification, t.updates]));
+  assert.deepEqual([counts.security, counts.definition, counts.updates, counts.drivers], [3, 1, 1, 0]);
+
+  const security = await api.get(`/api/updates?search=${search}&classification=security&sortBy=classification`);
+  assert.equal(security.total, 3);
+
+  assert.deepEqual(titles(await api.get(`/api/updates?search=${search}&state=open`)), [U.defender.title, U.late.title].sort());
+  assert.deepEqual(titles(await api.get(`/api/updates?search=${search}&state=failed`)), [U.quality.title]);
+  const closed = await api.get(`/api/updates?search=${search}&state=closed`);
+  assert.deepEqual(titles(closed), [U.critical.title, U.quality.title, U.dotnet.title].sort());
+  const openTypes = await api.get(`/api/updates/classifications?search=${search}&state=open`);
+  assert.deepEqual(openTypes.filter((t) => t.updates > 0).map((t) => [t.classification, t.updates]), [['security', 1], ['definition', 1]]);
+
+  assert.deepEqual(titles(await api.get(`/api/updates?search=${search}&severity=critical`)), [U.critical.title]);
+  assert.deepEqual(titles(await api.get(`/api/updates?search=${search}&severity=none`)), [U.quality.title, U.defender.title].sort());
+
+  const detail = await api.get(`/api/updates/${byTitle[U.late.title].id}`);
+  assert.deepEqual([detail.kbArticle, detail.classification, detail.affectedDevices], [U.late.kbArticle, 'security', 1]);
+  await api.request('GET', '/api/updates/00000000-0000-4000-8000-000000000000', { expect: 404 });
+
+  const csv = await api.request('GET', `/api/updates/export?search=${search}&state=open`, { raw: true });
+  assert.match(csv.headers.get('content-type') ?? '', /text\/csv/);
+  assert.ok(csv.data.includes(U.late.title) && csv.data.includes('Sicherheitsupdates'));
+  assert.ok(!csv.data.includes(U.critical.title), 'der Export haelt sich nicht an den Filter');
+
+  await api.request('GET', '/api/updates?state=irgendwas', { expect: 400 });
+  await api.request('GET', '/api/updates?classification=irgendwas', { expect: 400 });
+  await api.request('GET', '/api/updates?onlyOpen=true', { expect: 400 });
+});
+
 await step('Berichte', async () => {
   const summary = await api.get('/api/reports/summary');
   assert.ok(summary.devicesEnrolled >= 1);
@@ -466,9 +513,10 @@ await step('Installationsauftrag: angelegt, ausgeliefert, zurueckgemeldet', asyn
 
   const created = await api.post('/api/install-jobs', { deviceIds: [installDevice.deviceId], scope: 'selected', updateIds: [lateCatalogId] });
   assert.equal(created.created, 1);
+  assert.match(created.installationId ?? '', UUID);
   assert.equal(created.expiryDays, 14, 'Vorgabe der Frist');
   const again = await api.post('/api/install-jobs', { deviceIds: [installDevice.deviceId], scope: 'types', classifications: allTypes });
-  assert.deepEqual([again.created, again.skipped.openJob], [0, 1]);
+  assert.deepEqual([again.created, again.skipped.openJob, again.installationId], [0, 1, null]);
 
   // Ausgeliefert, und bis zum Start bei jedem Check-in erneut.
   const first = await checkin(agent, installDevice.token, snapshot({ hostInfo: installHost, collectedAt: minutesAgo(2), available: [U.late, U.defender] }));
@@ -576,6 +624,53 @@ await step('Installationsauftrag: Streuung, uebergangene Geraete', async () => {
   await api.request('POST', '/api/install-jobs', { body: { deviceIds: [secondDevice.deviceId], scope: 'types', classifications: [] }, expect: 400 });
   await api.request('POST', '/api/install-jobs', { body: { deviceIds: [secondDevice.deviceId], scope: 'types', classifications: ['gibt-es-nicht'] }, expect: 400 });
   await api.request('POST', '/api/install-jobs', { body: { deviceIds: [secondDevice.deviceId], scope: 'all' }, expect: 400 });
+});
+
+await step('Installationen: zusammengefasst, mit Fortschritt und Abbruch', async () => {
+  // Die erste dieses Laufs: ein Geraet, erledigt, mit Neustart.
+  const done = (await installJobs(installDevice.deviceId)).find((job) => job.state === 'done' && job.results?.length === 1);
+  const listed = await api.get('/api/installations?limit=100');
+  const first = listed.items.find((i) => i.id === done.installationId);
+  assert.ok(first, 'die erste Installation fehlt in der Liste');
+  assert.deepEqual(
+    [first.scope, first.selectedCount, first.devices, first.requestedDevices, first.states.done],
+    ['selected', 1, 1, 1, 1],
+  );
+  assert.deepEqual([first.installedUpdates, first.failedUpdates, first.rebootDevices], [1, 0, 1]);
+  assert.deepEqual(first.skipped, { openJob: 0, agentTooOld: 0, notEligible: 0, nothingOpen: 0 });
+  assert.ok(first.lastCompletedAt);
+
+  // Zwei Geraete und eines, das es nicht gibt; neueste zuerst.
+  const notBefore = new Date(Date.now() + 3_600_000).toISOString();
+  const created = await api.post('/api/install-jobs', {
+    deviceIds: [installDevice.deviceId, secondDevice.deviceId, '00000000-0000-4000-8000-000000000000'],
+    scope: 'types',
+    classifications: ['security', 'definition'],
+    notBefore,
+    spreadMinutes: 30,
+  });
+  assert.equal(created.created, 2);
+
+  const newest = (await api.get('/api/installations?limit=5')).items[0];
+  assert.equal(newest.id, created.installationId);
+  assert.deepEqual(
+    [newest.devices, newest.requestedDevices, newest.states.pending, newest.spreadMinutes, newest.createdBy],
+    [2, 3, 2, 30, ADMIN.username],
+  );
+  assert.deepEqual(newest.classifications, ['security', 'definition']);
+  assert.deepEqual(newest.skipped, { openJob: 0, agentTooOld: 0, notEligible: 1, nothingOpen: 0 });
+  assert.equal(new Date(newest.notBefore).toISOString(), notBefore);
+
+  const jobs = await api.get(`/api/installations/${created.installationId}/jobs`);
+  assert.deepEqual(jobs.map((j) => j.hostname).sort(), [installHost.hostname, secondHost.hostname].sort());
+  assert.ok(jobs.every((j) => j.installationId === created.installationId && j.state === 'pending'));
+
+  assert.deepEqual(await api.post(`/api/installations/${created.installationId}/cancel`), { cancelled: 2 });
+  assert.deepEqual(await api.post(`/api/installations/${created.installationId}/cancel`), { cancelled: 0 });
+  assert.equal((await api.get('/api/installations?limit=5')).items[0].states.cancelled, 2);
+
+  await api.request('GET', '/api/installations/00000000-0000-4000-8000-000000000000/jobs', { expect: 404 });
+  await api.request('GET', '/api/installations?limit=500', { expect: 400 });
 });
 
 await step('Installationsauftrag: Eingespieltes wartet auf den Neustart', async () => {

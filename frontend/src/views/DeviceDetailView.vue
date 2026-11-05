@@ -20,7 +20,6 @@ import type {
   DeviceDetail,
   DeviceUpdate,
   InstallJob,
-  InstallJobUpdateResult,
   Timeline,
   TimelineEntry,
 } from '@/api/types';
@@ -49,6 +48,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import HresultCell from '@/components/HresultCell.vue';
 import InstallDialog from '@/components/InstallDialog.vue';
+import InstallResultList from '@/components/InstallResultList.vue';
 import JobStateLegend from '@/components/JobStateLegend.vue';
 import SourceLegend from '@/components/SourceLegend.vue';
 import TablePager from '@/components/TablePager.vue';
@@ -64,7 +64,9 @@ import {
   formatRelative,
   installJobBadgeClass,
   installScopeLabel,
+  installSummary,
   jobBadgeClass,
+  kbUrl,
   sourceBadgeClass,
 } from '@/format';
 
@@ -297,32 +299,6 @@ async function cancelInstall(job: InstallJob): Promise<void> {
   }
 }
 
-/** Eine Zeile je Auftrag: wie viele installiert, wie viele gescheitert, wie viele nicht angeboten. */
-function installSummary(job: InstallJob): string {
-  if (!job.results) return '—';
-  if (job.results.length === 0) return job.error ?? 'nichts installiert';
-  const installed = job.results.filter((r) => r.offered && (r.resultCode === 2 || r.resultCode === 3)).length;
-  const notOffered = job.results.filter((r) => !r.offered).length;
-  const failed = job.results.length - installed - notOffered;
-  return [
-    installed > 0 ? `${installed} installiert` : '',
-    failed > 0 ? `${failed} gescheitert` : '',
-    notOffered > 0 ? `${notOffered} nicht angeboten` : '',
-  ]
-    .filter(Boolean)
-    .join(', ');
-}
-
-/** Ergebniscodes von Windows Update: 2 erfolgreich, 3 mit Fehlern, 4 gescheitert, 5 abgebrochen. */
-function installResultBadge(result: InstallJobUpdateResult): { label: string; class: string } {
-  if (!result.offered) return { label: 'nicht angeboten', class: 'text-muted-foreground' };
-  if (result.resultCode === 2 || result.resultCode === 3) {
-    return { label: 'installiert', class: 'bg-success/15 text-success border-success/30' };
-  }
-  if (result.resultCode === 5) return { label: 'abgebrochen', class: 'text-muted-foreground' };
-  return { label: 'gescheitert', class: 'bg-destructive/15 text-destructive border-destructive/30' };
-}
-
 const expandedInstalls = ref(new Set<string>());
 
 function toggleInstall(jobId: string): void {
@@ -410,10 +386,6 @@ async function deleteDevice(): Promise<void> {
   } finally {
     deleting.value = false;
   }
-}
-
-function kbUrl(article: string): string {
-  return `https://support.microsoft.com/help/${article}`;
 }
 
 onMounted(load);
@@ -832,7 +804,19 @@ onMounted(load);
                       <div>{{ formatDateTime(job.createdAt) }}</div>
                       <div class="text-muted-foreground text-xs">{{ job.createdBy }}</div>
                     </TableCell>
-                    <TableCell>{{ installScopeLabel(job) }}</TableCell>
+                    <TableCell>
+                      <div>{{ installScopeLabel(job) }}</div>
+                      <RouterLink
+                        :to="{
+                          name: 'updates',
+                          params: { section: 'installations' },
+                          query: { installation: job.installationId },
+                        }"
+                        class="text-primary text-xs hover:underline"
+                      >
+                        Zur Installation
+                      </RouterLink>
+                    </TableCell>
                     <TableCell>
                       <Badge variant="outline" :class="installJobBadgeClass(job.state)">
                         {{ INSTALL_JOB_STATE_LABELS[job.state] }}
@@ -871,25 +855,7 @@ onMounted(load);
 
                   <TableRow v-if="expandedInstalls.has(job.id)" class="bg-muted/30 hover:bg-muted/30">
                     <TableCell :colspan="6" class="py-2">
-                      <ul class="space-y-1.5 pl-6 text-sm">
-                        <li
-                          v-for="result in job.results ?? []"
-                          :key="result.updateId"
-                          class="flex flex-wrap items-center gap-x-3 gap-y-1"
-                        >
-                          <Badge variant="outline" :class="installResultBadge(result).class">
-                            {{ installResultBadge(result).label }}
-                          </Badge>
-                          <span class="tabular w-24 shrink-0">
-                            {{ result.kbArticle ? `KB${result.kbArticle}` : '—' }}
-                          </span>
-                          <span>{{ result.title ?? result.updateId }}</span>
-                          <span v-if="result.rebootRequired" class="text-warning-foreground dark:text-warning text-xs">
-                            Neustart nötig
-                          </span>
-                          <HresultCell v-if="result.hresult" :value="result.hresult" />
-                        </li>
-                      </ul>
+                      <InstallResultList :results="job.results ?? []" />
                     </TableCell>
                   </TableRow>
                 </template>

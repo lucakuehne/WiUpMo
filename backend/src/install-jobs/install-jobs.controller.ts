@@ -53,7 +53,7 @@ export class InstallJobsController {
   ): Promise<InstallJobViewDto[]> {
     const parsed = Number(limit ?? 50);
     const capped = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 500) : 50;
-    return this.jobs.list(capped, deviceId);
+    return this.jobs.list(capped, { deviceId });
   }
 
   @Post(':id/cancel')

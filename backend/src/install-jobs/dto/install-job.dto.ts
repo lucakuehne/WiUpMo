@@ -108,6 +108,9 @@ export class InstallJobsSkippedDto {
 }
 
 export class CreateInstallJobsResultDto {
+  /** Die angelegte Installation; null, wenn kein Geraet einen Auftrag bekam. */
+  installationId: string | null;
+
   created: number;
   skipped: InstallJobsSkippedDto;
 
@@ -135,6 +138,10 @@ export class InstallJobUpdateResultDto {
 
 export class InstallJobViewDto {
   id: string;
+
+  /** Die Installation, mit der der Auftrag angelegt wurde. */
+  installationId: string;
+
   deviceId: string;
   hostname: string;
   scope: InstallJobScope;
@@ -159,6 +166,75 @@ export class InstallJobViewDto {
 
   /** Erst nach der Rueckmeldung des Agents gesetzt. */
   results: InstallJobUpdateResultDto[] | null;
+}
+
+// --- Installationen ---------------------------------------------------------------
+
+export class InstallationQueryDto {
+  @Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)))
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  page: number = 1;
+
+  @Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)))
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  @IsOptional()
+  limit: number = 25;
+}
+
+/** Auftraege einer Installation je Zustand. */
+export class InstallationStatesDto {
+  pending: number;
+  delivered: number;
+  running: number;
+  done: number;
+  failed: number;
+  expired: number;
+  cancelled: number;
+}
+
+/** Was in einem Zug angelegt wurde: ein Auftrag je Geraet, gemeinsamer Umfang. */
+export class InstallationViewDto {
+  id: string;
+  scope: InstallJobScope;
+  /** Anzahl der gewaehlten Updates bei `scope = selected`, sonst 0. */
+  selectedCount: number;
+  classifications: UpdateClassification[];
+  /** Der angeforderte Start; die Geraete beginnen gestreut danach. */
+  notBefore: string;
+  spreadMinutes: number;
+  /** So viele Geraete waren gewaehlt. */
+  requestedDevices: number;
+  /** Warum gewaehlte Geraete keinen Auftrag bekamen; null bei nachgetragenen. */
+  skipped: InstallJobsSkippedDto | null;
+  createdBy: string;
+  createdAt: string;
+  /** Geraete mit Auftrag. */
+  devices: number;
+  states: InstallationStatesDto;
+  /** Erfolgreich installierte Updates, ueber alle Geraete gezaehlt. */
+  installedUpdates: number;
+  /** Angebotene, aber nicht installierte Updates, ueber alle Geraete gezaehlt. */
+  failedUpdates: number;
+  /** Geraete, die nach der Installation einen Neustart brauchen. */
+  rebootDevices: number;
+  /** Der juengste Abschluss eines Auftrags, null solange keiner fertig ist. */
+  lastCompletedAt: string | null;
+}
+
+export class InstallationListDto {
+  items: InstallationViewDto[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export class InstallationCancelResultDto {
+  /** Abgebrochene Auftraege — nur die, die noch nicht liefen. */
+  cancelled: number;
 }
 
 // --- Agent ----------------------------------------------------------------------

@@ -45,6 +45,21 @@ const CATEGORY_NAMES: ReadonlyArray<[UpdateClassification, readonly string[]]> =
 /** Alle Typen in der Reihenfolge, in der die Oberflaeche sie zeigt. */
 export const UPDATE_CLASSIFICATIONS: readonly UpdateClassification[] = Object.values(UpdateClassification);
 
+/** Bezeichnungen wie in der Oberflaeche, fuer den Export. */
+export const UPDATE_CLASSIFICATION_LABELS: Record<UpdateClassification, string> = {
+  [UpdateClassification.Security]: 'Sicherheitsupdates',
+  [UpdateClassification.Critical]: 'Kritische Updates',
+  [UpdateClassification.Definition]: 'Definitionsupdates',
+  [UpdateClassification.Rollups]: 'Update-Rollups',
+  [UpdateClassification.Updates]: 'Updates',
+  [UpdateClassification.Drivers]: 'Treiber',
+  [UpdateClassification.FeaturePacks]: 'Feature Packs',
+  [UpdateClassification.ServicePacks]: 'Service Packs',
+  [UpdateClassification.Upgrades]: 'Upgrades (Feature-Updates)',
+  [UpdateClassification.Tools]: 'Tools',
+  [UpdateClassification.Other]: 'Ohne Typ',
+};
+
 function literal(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }

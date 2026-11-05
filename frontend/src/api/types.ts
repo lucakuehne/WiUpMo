@@ -175,6 +175,7 @@ export interface UpdateListItem {
   title: string;
   severity: string | null;
   categories: string[];
+  classification: UpdateClassification;
   isSecurity: boolean;
   msrcNumber: string | null;
   sizeBytes: string | null;
@@ -193,6 +194,8 @@ export interface UpdateDevice {
   firstAvailableAt: string | null;
   installedAt: string | null;
   hresult: number | null;
+  /** Eingespielt, wartet aber auf den Neustart. */
+  awaitingReboot: boolean;
   lastSeenAt: string | null;
 }
 
@@ -476,6 +479,7 @@ export interface InstallJobUpdateResult {
 
 export interface InstallJob {
   id: string;
+  installationId: string;
   deviceId: string;
   hostname: string;
   scope: InstallJobScope;
@@ -498,11 +502,52 @@ export interface InstallPreview {
   classifications: { classification: UpdateClassification; updates: number; devices: number }[];
 }
 
+export interface InstallJobsSkipped {
+  openJob: number;
+  agentTooOld: number;
+  notEligible: number;
+  nothingOpen: number;
+}
+
 export interface CreateInstallJobsResult {
+  /** Null, wenn kein Gerät einen Auftrag bekam. */
+  installationId: string | null;
   created: number;
-  skipped: { openJob: number; agentTooOld: number; notEligible: number; nothingOpen: number };
+  skipped: InstallJobsSkipped;
   expiryDays: number;
   minimumAgentVersion: string;
+}
+
+/** Was in einem Zug für mehrere Geräte angelegt wurde. */
+export interface Installation {
+  id: string;
+  scope: InstallJobScope;
+  selectedCount: number;
+  classifications: UpdateClassification[];
+  notBefore: string;
+  spreadMinutes: number;
+  requestedDevices: number;
+  /** Null bei Installationen, die vor der Gruppierung entstanden. */
+  skipped: InstallJobsSkipped | null;
+  createdBy: string;
+  createdAt: string;
+  devices: number;
+  states: Record<InstallJobState, number>;
+  installedUpdates: number;
+  failedUpdates: number;
+  rebootDevices: number;
+  lastCompletedAt: string | null;
+}
+
+/** Einstufung durch Microsoft als Filter; `none` für Updates ohne. */
+export type UpdateSeverityFilter = 'critical' | 'important' | 'moderate' | 'low' | 'none';
+
+/** Zustand über alle aktiven Geräte. */
+export type UpdateStateFilter = 'open' | 'failed' | 'closed';
+
+export interface UpdateClassificationCount {
+  classification: UpdateClassification;
+  updates: number;
 }
 
 export interface AgentSettingsView {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Loader2 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { toast } from 'vue-sonner';
 import { get, post } from '@/api/client';
 import type {
@@ -45,6 +46,8 @@ const emit = defineEmits<{
   'update:open': [value: boolean];
   created: [result: CreateInstallJobsResult];
 }>();
+
+const router = useRouter();
 
 const ALL_TYPES = Object.keys(UPDATE_CLASSIFICATION_LABELS) as UpdateClassification[];
 
@@ -148,9 +151,19 @@ async function submit(): Promise<void> {
       result.skipped.notEligible > 0 ? `${result.skipped.notEligible} archiviert oder ohne Agent` : '',
     ].filter(Boolean);
 
-    if (result.created > 0) {
+    const installationId = result.installationId;
+    if (result.created > 0 && installationId) {
       toast.success(`${result.created} Installationsauftrag/-aufträge angelegt.`, {
         description: skipped.length > 0 ? `Übergangen: ${skipped.join(', ')}.` : undefined,
+        action: {
+          label: 'Anzeigen',
+          onClick: () =>
+            void router.push({
+              name: 'updates',
+              params: { section: 'installations' },
+              query: { installation: installationId },
+            }),
+        },
       });
     } else {
       toast.info('Kein Auftrag angelegt.', { description: `Übergangen: ${skipped.join(', ')}.` });

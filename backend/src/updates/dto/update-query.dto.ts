@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { UpdateClassification } from '../../common/update-classification.js';
 import { UpdateState } from '../../database/enums.js';
 
 const toInt = () =>
@@ -12,15 +13,59 @@ const toBool = () =>
 
 export const UPDATE_SORT_FIELDS = [
   'affectedDevices',
+  'installedDevices',
+  'failedDevices',
   'title',
   'kbArticle',
   'firstSeenAt',
   'severity',
+  'classification',
+  'sizeBytes',
 ] as const;
 
 export type UpdateSortField = (typeof UPDATE_SORT_FIELDS)[number];
 
-export class UpdateQueryDto {
+/** Einstufung durch Microsoft, kleingeschrieben; `none` fuer Updates ohne. */
+export const UPDATE_SEVERITY_FILTERS = ['critical', 'important', 'moderate', 'low', 'none'] as const;
+
+export type UpdateSeverityFilter = (typeof UPDATE_SEVERITY_FILTERS)[number];
+
+/**
+ * Zustand ueber alle aktiven Geraete: offen auf mindestens einem, gescheitert
+ * auf mindestens einem, oder auf keinem mehr offen.
+ */
+export const UPDATE_STATE_FILTERS = ['open', 'failed', 'closed'] as const;
+
+export type UpdateStateFilter = (typeof UPDATE_STATE_FILTERS)[number];
+
+/** Die Filter ohne Seite und Sortierung — gemeinsam fuer Liste, Typen und Export. */
+export class UpdateFilterDto {
+  /** Freitext auf Titel und KB-Nummer. */
+  @IsString()
+  @MaxLength(128)
+  @IsOptional()
+  search?: string;
+
+  @toBool()
+  @IsBoolean()
+  @IsOptional()
+  isSecurity?: boolean;
+
+  /** Update-Typ, wie ihn auch die Installationsauftraege verwenden. */
+  @IsEnum(UpdateClassification)
+  @IsOptional()
+  classification?: UpdateClassification;
+
+  @IsIn(UPDATE_SEVERITY_FILTERS)
+  @IsOptional()
+  severity?: UpdateSeverityFilter;
+
+  @IsIn(UPDATE_STATE_FILTERS)
+  @IsOptional()
+  state?: UpdateStateFilter;
+}
+
+export class UpdateQueryDto extends UpdateFilterDto {
   @toInt()
   @IsInt()
   @Min(1)
@@ -41,23 +86,6 @@ export class UpdateQueryDto {
   @IsIn(['asc', 'desc'])
   @IsOptional()
   sortDir: 'asc' | 'desc' = 'desc';
-
-  /** Freitext auf Titel und KB-Nummer. */
-  @IsString()
-  @MaxLength(128)
-  @IsOptional()
-  search?: string;
-
-  @toBool()
-  @IsBoolean()
-  @IsOptional()
-  isSecurity?: boolean;
-
-  /** Nur Updates, die auf mindestens einem Geraet offen sind. */
-  @toBool()
-  @IsBoolean()
-  @IsOptional()
-  onlyOpen?: boolean;
 }
 
 export class UpdateListItemDto {
@@ -67,6 +95,7 @@ export class UpdateListItemDto {
   title: string;
   severity: string | null;
   categories: string[];
+  classification: UpdateClassification;
   isSecurity: boolean;
   msrcNumber: string | null;
   sizeBytes: string | null;
@@ -78,6 +107,12 @@ export class UpdateListItemDto {
 
   installedDevices: number;
   failedDevices: number;
+}
+
+/** Anzahl der Updates eines Typs unter den uebrigen Filtern. */
+export class UpdateClassificationCountDto {
+  classification: UpdateClassification;
+  updates: number;
 }
 
 export class UpdateListDto {
@@ -95,6 +130,8 @@ export class UpdateDeviceDto {
   firstAvailableAt: string | null;
   installedAt: string | null;
   hresult: number | null;
+  /** Eingespielt, wartet aber auf den Neustart (0x80242014). */
+  awaitingReboot: boolean;
   lastSeenAt: string | null;
 }
 

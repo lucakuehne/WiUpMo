@@ -15,7 +15,21 @@ const router = createRouter({
       component: () => import('@/views/DeviceDetailView.vue'),
       props: true,
     },
-    { path: '/updates', name: 'updates', component: () => import('@/views/UpdatesView.vue') },
+    // Der Tab steht im Pfad wie bei den Einstellungen; ohne Angabe die
+    // offenen Updates. Die Auswahl der Abschnitte grenzt sie von der
+    // Detailseite darunter ab.
+    {
+      path: '/updates/:section(all|installations)?',
+      name: 'updates',
+      component: () => import('@/views/UpdatesView.vue'),
+      props: true,
+    },
+    {
+      path: '/updates/:id',
+      name: 'update',
+      component: () => import('@/views/UpdateDetailView.vue'),
+      props: true,
+    },
     { path: '/reports', name: 'reports', component: () => import('@/views/ReportsView.vue') },
     // Der AD-Abgleich hat keine eigene Seite mehr; er steht bei den
     // Einstellungen, die ihn steuern. Ein Lesezeichen auf /ad soll dorthin

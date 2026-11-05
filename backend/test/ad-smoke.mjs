@@ -51,20 +51,25 @@ const probe = (overrides = {}) => api.post('/api/ad/probe', { ...connection, sea
 /** Was gespeichert ist. Gesendet wird immer alles, so wie die Oberflaeche es tut. */
 let adState = { ...connection, searchBases: [CLIENTS, SERVER] };
 
-const syncRunCount = async () => (await api.get('/api/ad/sync-runs?limit=1')).total;
+const newestRunId = async () => (await api.get('/api/ad/sync-runs?limit=1')).items[0]?.id ?? null;
 
 /**
  * Wartet auf den Abgleich, den das Backend nach einer Aenderung des Bereichs
  * selbst startet (AdSchedulerService). Ein eigener Aufruf von /api/ad/sync
  * stiesse sonst mit 409 auf den laufenden.
+ *
+ * Erkannt wird der neue Lauf an seiner ID, nicht an der Gesamtzahl: Liste und
+ * Zahl liest das Backend in zwei Abfragen. Faellt der Start dazwischen, zaehlt
+ * die Antwort den Lauf schon, listet ihn aber noch nicht.
  */
-async function waitForRun(before) {
+async function waitForRun(beforeId) {
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {
     // Erst wenn kein Lauf mehr offen ist: Ein vorgemerkter Lauf folgt direkt
     // auf den laufenden, und nur der letzte traegt den gespeicherten Stand.
     const runs = await api.get('/api/ad/sync-runs?limit=5');
-    if (runs.total > before && runs.items.every((run) => run.finishedAt)) return runs.items[0];
+    const newest = runs.items[0];
+    if (newest && newest.id !== beforeId && runs.items.every((run) => run.finishedAt)) return newest;
     await sleep(1000);
   }
   throw new Error('Nach dem Speichern lief kein Abgleich, oder er endete nicht.');
@@ -76,7 +81,7 @@ async function waitForRun(before) {
  */
 async function saveAd(changes, { scopeChanges = true } = {}) {
   adState = { ...adState, ...changes };
-  const before = await syncRunCount();
+  const before = await newestRunId();
   const view = await api.put('/api/settings/ad', adState);
   return { view, run: scopeChanges ? await waitForRun(before) : null };
 }

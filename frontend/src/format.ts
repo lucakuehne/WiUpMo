@@ -130,6 +130,27 @@ export function installScopeLabel(job: Pick<InstallJob, 'scope' | 'selectedCount
   return job.classifications.map((type) => UPDATE_CLASSIFICATION_LABELS[type]).join(', ');
 }
 
+/** Der Artikel zu einer KB-Nummer bei Microsoft. */
+export function kbUrl(article: string): string {
+  return `https://support.microsoft.com/help/${article}`;
+}
+
+/** Ein Auftrag in einer Zeile: wie viele installiert, wie viele gescheitert, wie viele nicht angeboten. */
+export function installSummary(job: Pick<InstallJob, 'results' | 'error'>): string {
+  if (!job.results) return '—';
+  if (job.results.length === 0) return job.error ?? 'nichts installiert';
+  const installed = job.results.filter((r) => r.offered && (r.resultCode === 2 || r.resultCode === 3)).length;
+  const notOffered = job.results.filter((r) => !r.offered).length;
+  const failed = job.results.length - installed - notOffered;
+  return [
+    installed > 0 ? `${installed} installiert` : '',
+    failed > 0 ? `${failed} gescheitert` : '',
+    notOffered > 0 ? `${notOffered} nicht angeboten` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
 /** Dieselben Töne wie bei den Agent-Aufträgen; verfallen und abgebrochen sind neutral. */
 export function installJobBadgeClass(state: InstallJobState): string {
   switch (state) {
