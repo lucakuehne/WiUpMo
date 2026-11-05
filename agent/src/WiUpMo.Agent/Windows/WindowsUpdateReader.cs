@@ -38,6 +38,21 @@ public sealed partial class WindowsUpdateReader(AgentOptions options)
             ? Task.FromResult<IReadOnlyList<AvailableUpdate>>([])
             : RunWithTimeoutAsync(SearchAvailable, "Die Update-Suche", ct);
 
+    /// <summary>
+    /// Die installierten Updates mit denselben Angaben wie die offenen — Typ,
+    /// Einstufung, KB. Die Historie traegt als Kategorie nur das Produkt, nie
+    /// den Typ; ohne diese Liste stuende alles, was hier nie als offen gemeldet
+    /// war, im Katalog ohne Typ.
+    ///
+    /// Gesucht wird ohne Verbindung zur Update-Quelle: Was installiert ist,
+    /// kennt Windows selbst, und die Suche dauert so Sekunden statt Minuten.
+    /// Abgeloeste Versionen liefert sie nicht mehr.
+    /// </summary>
+    public Task<IReadOnlyList<AvailableUpdate>> GetInstalledUpdatesAsync(CancellationToken ct) =>
+        options.SimulateWindowsUpdate
+            ? Task.FromResult<IReadOnlyList<AvailableUpdate>>([])
+            : RunWithTimeoutAsync(SearchInstalled, "Die Suche nach installierten Updates", ct);
+
     public Task<IReadOnlyList<HistoryEntry>> GetHistoryAsync(
         DateTimeOffset since,
         CancellationToken ct) =>
@@ -75,7 +90,12 @@ public sealed partial class WindowsUpdateReader(AgentOptions options)
 
     // --- Verfuegbare Updates -------------------------------------------------
 
-    private IReadOnlyList<AvailableUpdate> SearchAvailable()
+    private IReadOnlyList<AvailableUpdate> SearchAvailable() =>
+        Search("IsInstalled=0 and IsHidden=0", options.SearchOnline);
+
+    private IReadOnlyList<AvailableUpdate> SearchInstalled() => Search("IsInstalled=1", online: false);
+
+    private static IReadOnlyList<AvailableUpdate> Search(string criteria, bool online)
     {
         object session = Com.Create("Microsoft.Update.Session");
 
@@ -88,10 +108,9 @@ public sealed partial class WindowsUpdateReader(AgentOptions options)
 
             // Online=true befragt die konfigurierte Quelle (WSUS, Microsoft
             // Update); false liest nur den lokalen Zwischenspeicher.
-            Com.Set(searcher, "Online", options.SearchOnline);
+            Com.Set(searcher, "Online", online);
 
-            object result = Com.Require(
-                Com.Call(searcher, "Search", "IsInstalled=0 and IsHidden=0"), "Search");
+            object result = Com.Require(Com.Call(searcher, "Search", criteria), "Search");
 
             int resultCode = Com.TryGetInt(result, "ResultCode") ?? ResultAborted;
             if (resultCode is not (ResultSucceeded or ResultSucceededWithErrors))

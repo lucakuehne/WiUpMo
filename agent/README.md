@@ -102,15 +102,19 @@ Ereignissen, und ohne Mindestabstand liefe der Agent mehrfach hintereinander los
 
 1. WUApi-Suche `IsInstalled=0 and IsHidden=0`
 2. `QueryHistory` seit dem letzten gemeldeten Zeitstempel
-3. Update-Quelle, Richtlinien, Neustart-Status und zuletzt angemeldeten Benutzer
+3. Ab 0.8.2, nur wenn die Historie Neues meldet oder es einen Tag her ist:
+   WUApi-Suche `IsInstalled=1` ohne Verbindung zur Update-Quelle. Die
+   installierten Updates gehen mit Typ und Einstufung mit, sofern sich ihre
+   Menge geändert hat — die Historie selbst nennt nur das Produkt
+4. Update-Quelle, Richtlinien, Neustart-Status und zuletzt angemeldeten Benutzer
    erfassen (`LogonUI\LastLoggedOnUser` in der Registry, ab 0.7.1), dazu den
    letzten Neustart (Laufzeit seit dem Systemstart, ab 0.8.0)
-4. Snapshot mit `snapshotId` und `collectedAt` (UTC) in die SQLite-Warteschlange
-5. Gesamte Warteschlange per `/checkin/batch` senden
-6. Quittierte Snapshots löschen — auch abgelehnte, die werden durch Wiederholen
+5. Snapshot mit `snapshotId` und `collectedAt` (UTC) in die SQLite-Warteschlange
+6. Gesamte Warteschlange per `/checkin/batch` senden
+7. Quittierte Snapshots löschen — auch abgelehnte, die werden durch Wiederholen
    nicht besser und blockierten die Warteschlange sonst dauerhaft
 
-Erfassen und Senden sind getrennt. Nach Schritt 4 liegt der Snapshot dauerhaft
+Erfassen und Senden sind getrennt. Nach Schritt 5 liegt der Snapshot dauerhaft
 vor; ob das Backend gerade erreichbar ist, spielt für die Erfassung keine Rolle
 mehr. Genau das macht den Offline-Betrieb aus.
 

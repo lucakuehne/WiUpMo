@@ -244,7 +244,7 @@ await step('Historie doppelt gemeldet: jedes Ereignis einmal', async () => {
   assert.equal((await api.get(`/api/devices/${device.deviceId}/timeline`)).total, before);
 });
 
-await step('Store-App uebergangen, nebenbei Eingespieltes zaehlt nicht als Installation', async () => {
+await step('Store-App uebergangen, nebenbei Eingespieltes: keine Installation, Typ aus den installierten', async () => {
   const installedToday = async () =>
     (await api.get('/api/reports/trend?days=1&interval=hour')).reduce((sum, p) => sum + p.installed, 0);
   // Das kritische und das .NET-Update waren offen und wurden installiert.
@@ -268,6 +268,18 @@ await step('Store-App uebergangen, nebenbei Eingespieltes zaehlt nicht als Insta
   assert.equal((await api.get(`/api/updates?search=${encodeURIComponent(`Nebenbei ${RUN}`)}`)).total, 1);
   assert.equal((await api.get(`/api/devices/${device.deviceId}/timeline`)).total, timeline + 1);
   assert.equal(await installedToday(), before, 'nie offenes Update als Installation gezaehlt');
+
+  // Agents ab 0.8.2 melden die installierten Updates mit Typ: Der Katalog
+  // bekommt ihn nachgetragen, Zustand und Verlauf des Geraets bleiben.
+  const listed = async () => (await api.get(`/api/updates?search=${encodeURIComponent(`Nebenbei ${RUN}`)}`)).items[0];
+  assert.equal((await listed()).classification, 'other');
+  await checkin(agent, device.token, {
+    ...snapshot({ hostInfo, collectedAt: minutesAgo(8.4), available: [U.defender, U.late], pendingReboot: true }),
+    installedUpdates: [{ ...sideways, categories: ['Definition Updates'] }, storeApp],
+  });
+  assert.equal((await listed()).classification, 'definition');
+  assert.equal((await api.get(`/api/updates?search=Smoke.${RUN}`)).total, 0);
+  assert.equal((await api.get(`/api/devices/${device.deviceId}/timeline`)).total, timeline + 1);
 });
 
 await step('CSV-Export', async () => {

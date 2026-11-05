@@ -161,6 +161,12 @@ export class CheckinService {
     }
 
     // Nach der Historie eingetragen, damit die reichhaltigeren Angaben gewinnen.
+    // Die installierten Updates tragen dieselben wie die offenen; sie liefern
+    // Typ und Einstufung zu dem, was die Historie ohne beides meldet.
+    for (const update of snapshot.installedUpdates ?? []) {
+      merged.set(update.updateId, this.catalogFromAvailable(update));
+    }
+
     for (const update of snapshot.availableUpdates) {
       merged.set(update.updateId, this.catalogFromAvailable(update));
     }
@@ -537,6 +543,7 @@ function withoutStoreApps(snapshot: SnapshotDto): SnapshotDto {
   return {
     ...snapshot,
     availableUpdates: snapshot.availableUpdates.filter((update) => !isStoreApp(update.title)),
+    installedUpdates: snapshot.installedUpdates?.filter((update) => !isStoreApp(update.title)),
     history: snapshot.history.filter((entry) => !isStoreApp(entry.title)),
   };
 }

@@ -200,6 +200,13 @@ public sealed class Snapshot
     public required IReadOnlyList<HistoryEntry> History { get; init; }
 
     /// <summary>
+    /// Die installierten Updates, nur fuer den Katalog: Typ und Einstufung
+    /// dessen, was die Historie ohne beides meldet. Null, solange sich seit
+    /// dem letzten Mitsenden nichts geaendert hat.
+    /// </summary>
+    public IReadOnlyList<AvailableUpdate>? InstalledUpdates { get; init; }
+
+    /// <summary>
     /// Optional — ein aelteres Backend kennt das Feld nicht und wiese den
     /// gesamten Snapshot ab, wenn es immer mitginge. Der Agent laesst es
     /// deshalb weg, solange es leer ist.

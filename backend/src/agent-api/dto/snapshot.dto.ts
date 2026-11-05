@@ -331,6 +331,20 @@ export class SnapshotDto {
   history: HistoryEntryDto[];
 
   /**
+   * Die installierten Updates mit Typ und Einstufung — nur fuer den Katalog,
+   * der Zustand der Geraete haengt nicht daran. Die Historie meldet als
+   * Kategorie nur das Produkt; ohne diese Liste stuende alles, was nie als
+   * offen gemeldet war, ohne Typ im Katalog. Agents ab 0.8.2, und nur wenn
+   * sich die Menge geaendert hat.
+   */
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AvailableUpdateDto)
+  @ArrayMaxSize(2000)
+  @IsOptional()
+  installedUpdates?: AvailableUpdateDto[];
+
+  /**
    * Optional: Aeltere Agents kennen das Feld nicht. Es ist der einzige Teil des
    * Snapshots, der nicht den Update-Zustand des Rechners beschreibt, sondern
    * den des Agents.
