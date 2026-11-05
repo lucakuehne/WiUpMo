@@ -428,9 +428,13 @@ export class ReportsService {
               count(e.event_type) FILTER (
                 WHERE e.event_type = 'appeared' AND e.vorher IS DISTINCT FROM 'appeared'
               ) AS appeared,
-              -- Fuer den Balken zaehlt jede gemeldete Installation, auch die aus
-              -- der Historie: Sie hat in diesem Abschnitt stattgefunden.
-              count(e.event_type) FILTER (WHERE e.event_type = 'installed') AS installed,
+              -- Nur was vorher offen war, wie bei der Aufloesung: Sonst stuende
+              -- alles im Balken, was Windows zwischen zwei Meldungen selbst
+              -- einspielt — Definitionsupdates etwa —, und die Kurve liesse
+              -- sich aus ihren Balken nicht nachrechnen.
+              count(e.event_type) FILTER (
+                WHERE e.event_type = 'installed' AND e.vorher = 'appeared'
+              ) AS installed,
               count(e.event_type) FILTER (
                 WHERE e.event_type IN ('installed', 'disappeared', 'hidden')
                   AND e.vorher = 'appeared'

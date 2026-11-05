@@ -8,6 +8,7 @@ import { InstallJobs1793577600000 } from '../../migrations/1793577600000-Install
 import { Installations1793836800000 } from '../../migrations/1793836800000-Installations.js';
 import { UserPreferences1793923200000 } from '../../migrations/1793923200000-UserPreferences.js';
 import { UniqueUpdateEvents1794009600000 } from '../../migrations/1794009600000-UniqueUpdateEvents.js';
+import { RemoveStoreApps1794096000000 } from '../../migrations/1794096000000-RemoveStoreApps.js';
 import { LastBootAt1793750400000 } from '../../migrations/1793750400000-LastBootAt.js';
 import { LastLogonUser1793664000000 } from '../../migrations/1793664000000-LastLogonUser.js';
 import { PostRebootPending1789600000000 } from '../../migrations/1789600000000-PostRebootPending.js';
@@ -65,6 +66,7 @@ export const dataSourceOptions: DataSourceOptions = {
     Installations1793836800000,
     UserPreferences1793923200000,
     UniqueUpdateEvents1794009600000,
+    RemoveStoreApps1794096000000,
   ],
   migrationsTableName: 'schema_migrations',
 

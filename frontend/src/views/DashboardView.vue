@@ -193,7 +193,6 @@ const trendData = computed(() => ({
       backgroundColor: 'transparent',
       tension: 0.3,
       pointRadius: 0,
-      yAxisID: 'y',
     },
     {
       label: `Installiert ${PER_INTERVAL[loaded.value.interval]}`,
@@ -201,7 +200,6 @@ const trendData = computed(() => ({
       borderColor: palette.value.series[1],
       backgroundColor: palette.value.series[1],
       type: 'bar' as const,
-      yAxisID: 'y2',
     },
     /**
      * Auch das Auftauchen gehört ins Bild.
@@ -217,7 +215,6 @@ const trendData = computed(() => ({
       borderColor: palette.value.series[2],
       backgroundColor: palette.value.series[2],
       type: 'bar' as const,
-      yAxisID: 'y2',
     },
   ],
 }));
@@ -231,19 +228,13 @@ const trendOptions = computed(() => ({
       ticks: timeTicks.value,
       grid: { display: false },
     },
+    // Eine Achse: Kurve und Balken zählen dasselbe — offene Updates je Gerät —,
+    // und nur so lässt sich im Bild nachrechnen, was die Kurve bewegt.
     y: {
-      position: 'left' as const,
       beginAtZero: true,
-      title: { display: true, text: 'offen', color: palette.value.muted },
+      title: { display: true, text: 'Updates je Gerät', color: palette.value.muted },
       ticks: { color: palette.value.muted },
       grid: { color: palette.value.grid },
-    },
-    y2: {
-      position: 'right' as const,
-      beginAtZero: true,
-      title: { display: true, text: 'installiert', color: palette.value.muted },
-      ticks: { color: palette.value.muted },
-      grid: { display: false },
     },
   },
 }));
@@ -724,10 +715,10 @@ onMounted(load);
             Gezählt je Gerät: Ein Update, das auf fünf Geräten fehlt, zählt fünfmal. Die Kurve ist
             aus dem heutigen Stand rückwärts aus der Zeitreihe rekonstruiert und fällt nicht nur
             durch Installationen — ein Update verschwindet auch, wenn es abgelöst oder ausgeblendet
-            wird. „Installiert" zählt jede Installation einmal, auch von Updates, die nie als offen
-            erfasst waren, etwa Definitionsupdates, die Windows zwischen zwei Meldungen selbst
-            einspielt. Reicht die Kurve weiter zurück als die Aufbewahrungsfrist, wird sie flach;
-            dann fehlen die Ereignisse, nicht die Updates.
+            wird. „Installiert" zählt nur Updates, die vorher offen waren; was Windows zwischen zwei
+            Meldungen selbst einspielt, etwa Definitionsupdates, steht im Verlauf der Geräte. Reicht
+            die Kurve weiter zurück als die Aufbewahrungsfrist, wird sie flach; dann fehlen die
+            Ereignisse, nicht die Updates.
           </CardDescription>
         </CardHeader>
         <CardContent>

@@ -244,6 +244,32 @@ await step('Historie doppelt gemeldet: jedes Ereignis einmal', async () => {
   assert.equal((await api.get(`/api/devices/${device.deviceId}/timeline`)).total, before);
 });
 
+await step('Store-App uebergangen, nebenbei Eingespieltes zaehlt nicht als Installation', async () => {
+  const installedToday = async () =>
+    (await api.get('/api/reports/trend?days=1&interval=hour')).reduce((sum, p) => sum + p.installed, 0);
+  // Das kritische und das .NET-Update waren offen und wurden installiert.
+  const before = await installedToday();
+  assert.ok(before >= 2, `${before} Installationen vorher offener Updates`);
+  const timeline = (await api.get(`/api/devices/${device.deviceId}/timeline`)).total;
+
+  const storeApp = update({ title: `9NRZT3Q9R3DL-Smoke.${RUN}` });
+  const sideways = update({ title: `Nebenbei ${RUN}: Definitionsupdate` });
+  await checkin(agent, device.token, {
+    ...snapshot({ hostInfo, collectedAt: minutesAgo(8.5), available: [U.defender, U.late], pendingReboot: true }),
+    history: [
+      history(storeApp, { resultCode: 2, occurredAt: minutesAgo(8.7) }),
+      history(sideways, { resultCode: 2, occurredAt: minutesAgo(8.6) }),
+    ],
+  });
+
+  // Die Store-App kommt weder in den Katalog noch in den Verlauf; das nebenbei
+  // eingespielte Update schon, nur ohne Installation im Dashboard.
+  assert.equal((await api.get(`/api/updates?search=Smoke.${RUN}`)).total, 0);
+  assert.equal((await api.get(`/api/updates?search=${encodeURIComponent(`Nebenbei ${RUN}`)}`)).total, 1);
+  assert.equal((await api.get(`/api/devices/${device.deviceId}/timeline`)).total, timeline + 1);
+  assert.equal(await installedToday(), before, 'nie offenes Update als Installation gezaehlt');
+});
+
 await step('CSV-Export', async () => {
   const res = await api.request('GET', `/api/devices/export?search=${HOST}`, { raw: true });
   assert.match(res.headers.get('content-type') ?? '', /text\/csv/);

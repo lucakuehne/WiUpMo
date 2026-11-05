@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { isPostRebootPending } from '../common/post-reboot.js';
+import { isStoreApp } from '../common/store-apps.js';
 import { Device } from '../database/entities/index.js';
 import { UpdateEventType, UpdateState } from '../database/enums.js';
 import { SnapshotOutcome, SnapshotResultDto } from './dto/checkin.dto.js';
@@ -74,12 +75,15 @@ export class CheckinService {
           return { snapshotId: snapshot.snapshotId, outcome: SnapshotOutcome.Duplicate };
         }
 
-        const catalog = this.mergeCatalogEntries(snapshot);
+        // Store-Apps gehoeren weder in den Katalog noch in den Verlauf; der
+        // Rohsnapshot oben bleibt, wie er kam.
+        const relevant = withoutStoreApps(snapshot);
+        const catalog = this.mergeCatalogEntries(relevant);
         const catalogIds = await this.upsertCatalog(manager, catalog);
 
         const existing = await this.loadExistingStates(manager, device.id);
         const { targets, events } = this.computeTransitions(
-          snapshot,
+          relevant,
           collectedAt,
           catalogIds,
           existing,
@@ -526,4 +530,13 @@ export class CheckinService {
       ],
     );
   }
+}
+
+/** Der Snapshot ohne Store-Apps (siehe isStoreApp). */
+function withoutStoreApps(snapshot: SnapshotDto): SnapshotDto {
+  return {
+    ...snapshot,
+    availableUpdates: snapshot.availableUpdates.filter((update) => !isStoreApp(update.title)),
+    history: snapshot.history.filter((entry) => !isStoreApp(entry.title)),
+  };
 }
