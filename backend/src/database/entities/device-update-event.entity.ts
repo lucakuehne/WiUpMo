@@ -23,6 +23,7 @@ import { Update } from './update.entity.js';
 @Entity('device_update_events')
 @Index('idx_device_update_events_device_occurred', ['deviceId', 'occurredAt'])
 @Index('idx_device_update_events_occurred', ['occurredAt'])
+@Index('idx_device_update_events_unique', ['deviceId', 'updateId', 'eventType', 'occurredAt'], { unique: true })
 export class DeviceUpdateEvent {
   @PrimaryGeneratedColumn('increment', { type: 'bigint' })
   id: string;

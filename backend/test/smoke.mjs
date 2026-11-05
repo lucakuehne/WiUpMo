@@ -233,6 +233,17 @@ await step('Zeitreihe', async () => {
   for (const type of ['appeared', 'installed', 'failed']) assert.ok(types.has(type), `Ereignis ${type} fehlt`);
 });
 
+await step('Historie doppelt gemeldet: jedes Ereignis einmal', async () => {
+  // Wie beim Agent, dessen Historienfenster mit dem vorigen ueberlappt: Ein
+  // neuer Snapshot bringt die Eintraege des zweiten noch einmal mit.
+  const before = (await api.get(`/api/devices/${device.deviceId}/timeline`)).total;
+  await checkin(agent, device.token, {
+    ...snapshot({ hostInfo, collectedAt: minutesAgo(9), available: [U.defender, U.late], pendingReboot: true }),
+    history: second.history,
+  });
+  assert.equal((await api.get(`/api/devices/${device.deviceId}/timeline`)).total, before);
+});
+
 await step('CSV-Export', async () => {
   const res = await api.request('GET', `/api/devices/export?search=${HOST}`, { raw: true });
   assert.match(res.headers.get('content-type') ?? '', /text\/csv/);
@@ -368,6 +379,20 @@ await step('Melde-Intervall: Vorgabe 5 Minuten, geht mit dem Check-in an den Age
 
   await api.put('/api/settings/agent', { checkIntervalMinutes: before });
   await api.request('PUT', '/api/settings/agent', { body: { checkIntervalMinutes: 1 }, expect: 400 });
+});
+
+await step('Gemerkter Zeitraum des Dashboards, je Benutzer', async () => {
+  assert.deepEqual(await api.get('/api/preferences'), { dashboard: null });
+
+  const saved = await api.put('/api/preferences', { dashboard: { rangeDays: 30, interval: 'week' } });
+  assert.deepEqual(saved.dashboard, { rangeDays: 30, interval: 'week' });
+  assert.deepEqual((await api.get('/api/preferences')).dashboard, { rangeDays: 30, interval: 'week' });
+
+  // Ohne Abschnitt bleibt alles, wie es ist; Unbekanntes lehnt das Backend ab.
+  assert.deepEqual((await api.put('/api/preferences', {})).dashboard, { rangeDays: 30, interval: 'week' });
+  await api.request('PUT', '/api/preferences', { body: { dashboard: { rangeDays: 5, interval: 'day' } }, expect: 400 });
+  await api.request('PUT', '/api/preferences', { body: { dashboard: { rangeDays: 7, interval: 'monat' } }, expect: 400 });
+  await api.request('PUT', '/api/preferences', { body: { farbe: 'blau' }, expect: 400 });
 });
 
 await step('Schwellwerte und Aufbewahrung', async () => {
@@ -678,6 +703,9 @@ await step('Installationsauftrag: Eingespieltes wartet auf den Neustart', async 
   // meldet den Versuch mit 0x80242014. Installieren laesst es sich nicht.
   const rebootHost = host(`REBOOT-${RUN}`);
   const rebootDevice = await enroll(agent, enrollmentToken, rebootHost);
+  const installedToday = async () =>
+    (await api.get('/api/reports/trend?days=1&interval=hour')).reduce((sum, p) => sum + p.installed, 0);
+  const installedBefore = await installedToday();
   await checkin(agent, rebootDevice.token, snapshot({
     hostInfo: rebootHost,
     collectedAt: minutesAgo(2),
@@ -685,6 +713,9 @@ await step('Installationsauftrag: Eingespieltes wartet auf den Neustart', async 
     entries: [history(U.late, { resultCode: 4, hresult: HRESULT_POST_REBOOT, occurredAt: minutesAgo(3) })],
     pendingReboot: true,
   }));
+
+  // Der Eintrag mit 0x80242014 ist keine weitere Installation im Verlauf.
+  assert.equal(await installedToday(), installedBefore, 'Warten auf den Neustart als Installation gezaehlt');
 
   const detail = await api.get(`/api/devices/${rebootDevice.deviceId}`);
   const byKb = Object.fromEntries(detail.updates.map((u) => [u.kbArticle, u]));

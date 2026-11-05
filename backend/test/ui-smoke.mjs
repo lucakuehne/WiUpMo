@@ -115,6 +115,21 @@ await step('Anmelden und Dashboard', async () => {
   await capture(page, 'dashboard');
 });
 
+await step('Dashboard merkt sich den Zeitraum', async () => {
+  // smoke.mjs hat 30 Tage, woechentlich gespeichert.
+  const range = page.getByRole('combobox').first();
+  await range.filter({ hasText: '30 Tage' }).waitFor({ timeout: 10_000 });
+  await page.getByRole('combobox', { name: 'Intervall' }).filter({ hasText: /chentlich/ }).waitFor({ timeout: 5_000 });
+
+  // Gespeichert wird nebenher; erst danach neu laden.
+  const saved = page.waitForResponse((res) => res.url().endsWith('/api/preferences') && res.request().method() === 'PUT');
+  await range.click();
+  await page.getByRole('option', { name: '7 Tage' }).click();
+  await saved;
+  await page.reload();
+  await page.getByRole('combobox').first().filter({ hasText: '7 Tage' }).waitFor({ timeout: 10_000 });
+});
+
 await step('Geraeteliste', async () => {
   await page.goto(`${base}/devices`);
   await page.locator('table tbody tr').first().waitFor({ timeout: 15_000 });
@@ -218,6 +233,10 @@ await step('Agent-Zustand zeigt nur Stoerungen aus dem juengsten Durchlauf', asy
 
 await step('Updates: offene, alle nach Typ, Detailseite und zurueck', async () => {
   await page.goto(`${base}/updates`);
+  await page.locator('table tbody tr').first().waitFor({ timeout: 15_000 });
+  // Auch die offenen haben die Typen daneben, gezaehlt wird nur Offenes.
+  await page.getByRole('button', { name: /^Sicherheitsupdates/ }).click();
+  await page.waitForURL(/\/updates\?.*classification=security/);
   await page.locator('table tbody tr').first().waitFor({ timeout: 15_000 });
   await capture(page, 'updates');
 

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { postRebootPendingEventSql } from '../common/post-reboot.js';
 import { UpdateSource } from '../database/enums.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { TrendInterval } from './dto/reports.dto.js';
@@ -404,6 +405,12 @@ export class ReportsService {
      * Der Vorgaengerzustand je Geraet und Update entscheidet deshalb: Aufgeloest
      * wird nur, was vorher als aufgetaucht vermerkt war. Umgekehrt zaehlt ein
      * zweites `appeared` ohne zwischenzeitliche Aufloesung nicht doppelt.
+     *
+     * Eintraege mit 0x80242014 bleiben ganz draussen. Windows schreibt einen beim
+     * Einspielen und einen weiteren bei jedem neuen Versuch, solange der
+     * Neustart aussteht; das Endergebnis folgt nach dem Neustart als eigener
+     * Eintrag. Gezaehlt wurde dieselbe Installation so zwei- oder mehrmals, und
+     * als Aufloesung galt sie, obwohl das Update bis zum Neustart offen blieb.
      */
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `WITH ${bucketsCte('$1', '$2', '$3')},
@@ -415,6 +422,7 @@ export class ReportsService {
                 ) AS vorher
            FROM device_update_events e
            JOIN devices d ON d.id = e.device_id AND d.status = 'active'
+          WHERE NOT ${postRebootPendingEventSql('e')}
        )
        SELECT a.beginn,
               count(e.event_type) FILTER (

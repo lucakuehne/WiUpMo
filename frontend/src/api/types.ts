@@ -545,6 +545,11 @@ export type UpdateSeverityFilter = 'critical' | 'important' | 'moderate' | 'low'
 /** Zustand über alle aktiven Geräte. */
 export type UpdateStateFilter = 'open' | 'failed' | 'closed';
 
+/** Was sich der angemeldete Benutzer gemerkt hat; im Backend je Benutzername. */
+export interface UserPreferences {
+  dashboard: { rangeDays: number; interval: 'hour' | 'day' | 'week' } | null;
+}
+
 export interface UpdateClassificationCount {
   classification: UpdateClassification;
   updates: number;

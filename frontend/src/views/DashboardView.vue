@@ -2,7 +2,7 @@
 import type { ActiveElement, ChartEvent } from 'chart.js/auto';
 import { computed, onMounted, ref } from 'vue';
 import { useRouter, type RouteLocationRaw } from 'vue-router';
-import { get } from '@/api/client';
+import { get, put } from '@/api/client';
 import type {
   AgentTrendPoint,
   AgentVersionCount,
@@ -12,6 +12,7 @@ import type {
   UpdateSource,
   UpdateSourcesReport,
   UpdateSourceTrendPoint,
+  UserPreferences,
 } from '@/api/types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -596,15 +597,42 @@ async function loadTrends(): Promise<void> {
   }
 }
 
+/**
+ * Der zuletzt gewählte Zeitraum samt Intervall, je Benutzer im Backend — auf
+ * jedem Rechner derselbe. Was nicht (mehr) angeboten wird, bleibt bei der
+ * Vorgabe; ein unpassendes Intervall weicht dem des Zeitraums.
+ */
+async function loadPreference(): Promise<void> {
+  try {
+    const { dashboard } = await get<UserPreferences>('/api/preferences');
+    if (!dashboard || !rangeOptions.some((option) => Number(option.value) === dashboard.rangeDays)) return;
+
+    rangeDays.value = dashboard.rangeDays;
+    interval.value = intervalsFor(dashboard.rangeDays).includes(dashboard.interval)
+      ? dashboard.interval
+      : defaultInterval(dashboard.rangeDays);
+  } catch {
+    // Ohne gespeicherte Auswahl gilt die Vorgabe; das Dashboard selbst bleibt brauchbar.
+  }
+}
+
+function savePreference(): void {
+  put('/api/preferences', {
+    dashboard: { rangeDays: rangeDays.value, interval: interval.value },
+  }).catch(() => undefined);
+}
+
 /** Ein neuer Zeitraum bringt sein passendes Intervall mit; ändern lässt es sich danach. */
 function onRangeChange(value: unknown): void {
   rangeDays.value = Number(value) || 90;
   interval.value = defaultInterval(rangeDays.value);
+  savePreference();
   void loadTrends();
 }
 
 function onIntervalChange(value: unknown): void {
   interval.value = value as TrendInterval;
+  savePreference();
   void loadTrends();
 }
 
@@ -614,6 +642,7 @@ async function load(): Promise<void> {
       get<Summary>('/api/reports/summary'),
       get<AgentVersionCount[]>('/api/reports/agent-versions'),
       get<UpdateSourcesReport>('/api/reports/update-sources'),
+      loadPreference(),
     ]);
 
     summary.value = s;
@@ -692,10 +721,13 @@ onMounted(load);
         <CardHeader>
           <CardTitle>Offene Updates über die Zeit</CardTitle>
           <CardDescription>
-            Aus dem heutigen Stand rückwärts aus der Zeitreihe rekonstruiert. Die Kurve fällt nicht
-            nur durch Installationen — ein Update verschwindet auch, wenn es abgelöst oder
-            ausgeblendet wird. Reicht die Kurve weiter zurück als die Aufbewahrungsfrist, wird sie
-            flach; dann fehlen die Ereignisse, nicht die Updates.
+            Gezählt je Gerät: Ein Update, das auf fünf Geräten fehlt, zählt fünfmal. Die Kurve ist
+            aus dem heutigen Stand rückwärts aus der Zeitreihe rekonstruiert und fällt nicht nur
+            durch Installationen — ein Update verschwindet auch, wenn es abgelöst oder ausgeblendet
+            wird. „Installiert" zählt jede Installation einmal, auch von Updates, die nie als offen
+            erfasst waren, etwa Definitionsupdates, die Windows zwischen zwei Meldungen selbst
+            einspielt. Reicht die Kurve weiter zurück als die Aufbewahrungsfrist, wird sie flach;
+            dann fehlen die Ereignisse, nicht die Updates.
           </CardDescription>
         </CardHeader>
         <CardContent>

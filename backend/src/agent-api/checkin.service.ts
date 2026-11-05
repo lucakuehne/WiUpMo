@@ -454,10 +454,13 @@ export class CheckinService {
       events.map((e) => [deviceId, e.updateId, e.eventType, e.occurredAt, e.details]),
     );
 
+    // Dieselbe Installation kann in zwei Snapshots stehen: Der Agent liest die
+    // Historie ab dem Beginn des vorigen Durchlaufs. Ein Ereignis zaehlt einmal.
     await manager.query(
       `INSERT INTO device_update_events
          (device_id, update_id, event_type, occurred_at, details)
-       VALUES ${text}`,
+       VALUES ${text}
+       ON CONFLICT (device_id, update_id, event_type, occurred_at) DO NOTHING`,
       params,
     );
   }

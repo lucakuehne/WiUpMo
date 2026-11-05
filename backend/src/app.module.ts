@@ -11,6 +11,7 @@ import { validateEnv } from './config/env.validation.js';
 import { dataSourceOptions } from './database/data-source.js';
 import { DevicesModule } from './devices/devices.module.js';
 import { InstallJobsModule } from './install-jobs/install-jobs.module.js';
+import { PreferencesModule } from './preferences/preferences.module.js';
 import { HealthController } from './health/health.controller.js';
 import { ReleasesModule } from './releases/releases.module.js';
 import { ReportsModule } from './reports/reports.module.js';
@@ -45,6 +46,7 @@ const frontendAvailable = existsSync(frontendRoot);
     ReportsModule,
     ReleasesModule,
     InstallJobsModule,
+    PreferencesModule,
     RetentionModule,
     AdModule,
     ...(frontendAvailable

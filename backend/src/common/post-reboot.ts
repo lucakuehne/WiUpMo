@@ -32,3 +32,11 @@ export function isPostRebootPending(hresult: number | null | undefined): boolean
 export function postRebootPendingSql(alias: string): string {
   return `coalesce((${alias}.hresult::bigint & 4294967295) = ${WU_E_UH_POSTREBOOTSTILLPENDING}, false)`;
 }
+
+/**
+ * Dasselbe ueber ein Ereignis aus `device_update_events`; dort steht der
+ * HRESULT des Historieneintrags in `details`.
+ */
+export function postRebootPendingEventSql(alias: string): string {
+  return `coalesce(((${alias}.details->>'hresult')::bigint & 4294967295) = ${WU_E_UH_POSTREBOOTSTILLPENDING}, false)`;
+}
