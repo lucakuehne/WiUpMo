@@ -799,7 +799,7 @@ onMounted(load);
           <CardTitle>Agent-Versionen</CardTitle>
           <CardDescription>
             Was auf den aktiven Geräten läuft. Ein Klick auf ein Stück oder eine Zeile zeigt die
-            zugehörigen Geräte; ausgerollt wird unter Einstellungen → Agent-Versionen.
+            zugehörigen Geräte; ausgerollt wird unter Agents → Versionen.
           </CardDescription>
         </CardHeader>
 

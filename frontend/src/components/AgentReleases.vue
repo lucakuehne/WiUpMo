@@ -1,16 +1,15 @@
 <script setup lang="ts">
-import { Ban, Download, Loader2, Send, Trash2, Upload } from '@lucide/vue';
-import { computed, onMounted, ref, useTemplateRef } from 'vue';
+import { Download, Loader2, Send, Trash2, Upload } from '@lucide/vue';
+import { onMounted, ref, useTemplateRef } from 'vue';
 import { useRouter } from 'vue-router';
 import { toast } from 'vue-sonner';
 import { del, get, post, upload } from '@/api/client';
-import type { AgentRelease, AgentUpdateJobView, CreateUpdateJobsResult } from '@/api/types';
+import type { AgentRelease, CreateUpdateJobsResult } from '@/api/types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardFooter,
@@ -35,22 +34,17 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import JobStateLegend from '@/components/JobStateLegend.vue';
-import TablePager from '@/components/TablePager.vue';
-import { JOB_STATE_LABELS, formatBytes, formatDateTime, jobBadgeClass } from '@/format';
-import { usePagedList } from '@/paged';
+import { formatBytes, formatDateTime } from '@/format';
 
 /**
- * Agent-Versionen und Update-Aufträge.
+ * Die hinterlegten Agent-Versionen: aufnehmen, als aktuell setzen, ausrollen.
  *
- * Als Abschnitt der Einstellungen statt als eigene Seite: Das Hinterlegen einer
- * Version ist eine Einrichtungsaufgabe, keine tägliche Arbeit — und sie gehört
- * neben das Enrollment-Token, mit dem sie zusammenspielt.
+ * Was ein Ausrollen danach auf den Geräten bewirkt, steht im Tab
+ * „Agent-Updates" — dorthin führt die Bestätigung.
  */
 const router = useRouter();
 
 const releases = ref<AgentRelease[]>([]);
-const jobs = ref<AgentUpdateJobView[]>([]);
 const loading = ref(true);
 const busy = ref(false);
 const error = ref<string | null>(null);
@@ -59,21 +53,11 @@ const notes = ref('');
 const file = ref<File | null>(null);
 const fileInput = useTemplateRef<HTMLInputElement>('fileInput');
 
-// Zehn: Die Auftragsliste steht unter zwei anderen Karten, sie soll die Seite
-// nicht in die Länge ziehen.
-const jobsPage = usePagedList(jobs, 10);
-
 async function load(): Promise<void> {
   error.value = null;
 
   try {
-    const [r, j] = await Promise.all([
-      get<AgentRelease[]>('/api/agent-releases'),
-      get<AgentUpdateJobView[]>('/api/agent-update-jobs', { limit: 100 }),
-    ]);
-
-    releases.value = r;
-    jobs.value = j;
+    releases.value = await get<AgentRelease[]>('/api/agent-releases');
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Die Releases konnten nicht geladen werden.';
   } finally {
@@ -183,62 +167,20 @@ async function rollOut(): Promise<void> {
       targetVersion: release.version,
     });
 
+    const rolloutId = result.rolloutId;
     toast.success(`${result.created} Auftrag/Aufträge auf ${result.targetVersion} angelegt.`, {
       description:
         result.skipped > 0
           ? `${result.skipped} übersprungen — dort ist bereits ein Auftrag offen.`
           : 'Die Geräte holen ihn beim nächsten Check-in ab.',
+      action: rolloutId
+        ? { label: 'Anzeigen', onClick: () => void router.push({ name: 'agents', query: { rollout: rolloutId } }) }
+        : undefined,
     });
 
     await load();
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Ausrollen fehlgeschlagen.';
-  } finally {
-    busy.value = false;
-  }
-}
-
-/**
- * Ein Auftrag ist offen, solange er nicht abgeschlossen ist. Nur solche lassen
- * sich abbrechen — bei den übrigen wäre der Knopf eine Falle.
- */
-function isOpen(job: AgentUpdateJobView): boolean {
-  return job.state === 'pending' || job.state === 'delivered' || job.state === 'installing';
-}
-
-const openJobs = computed(() => jobs.value.filter(isOpen).length);
-
-/** Rückfrage nur beim Sammelabbruch — der einzelne ist überschaubar. */
-const cancelAllOpen = ref(false);
-
-async function cancel(job: AgentUpdateJobView): Promise<void> {
-  busy.value = true;
-
-  try {
-    await post(`/api/agent-update-jobs/${job.id}/cancel`);
-    toast.success(`Auftrag für ${job.hostname} abgebrochen.`);
-    await load();
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Abbrechen fehlgeschlagen.';
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function cancelOpen(): Promise<void> {
-  cancelAllOpen.value = false;
-  busy.value = true;
-
-  try {
-    const result = await post<{ cancelled: number }>('/api/agent-update-jobs/cancel-open');
-
-    toast.success(`${result.cancelled} Auftrag/Aufträge abgebrochen.`, {
-      description: 'Die betroffenen Geräte können jetzt wieder beauftragt werden.',
-    });
-
-    await load();
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Abbrechen fehlgeschlagen.';
   } finally {
     busy.value = false;
   }
@@ -390,95 +332,6 @@ onMounted(load);
       </CardContent>
     </Card>
 
-    <Card>
-      <CardHeader>
-        <CardTitle>Update-Aufträge</CardTitle>
-        <CardDescription>
-          Ein Auftrag wird beim nächsten Check-in des Geräts abgeholt. Bis dahin bleibt er offen —
-          und solange er offen ist, bekommt das Gerät keinen neuen.
-        </CardDescription>
-
-        <CardAction>
-          <Button
-            variant="outline"
-            size="sm"
-            :disabled="busy || openJobs === 0"
-            @click="cancelAllOpen = true"
-          >
-            <Ban class="size-3.5" />
-            {{ openJobs }} offene abbrechen
-          </Button>
-        </CardAction>
-      </CardHeader>
-
-      <CardContent>
-        <div class="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Gerät</TableHead>
-                <TableHead class="w-32">Zielversion</TableHead>
-                <TableHead class="w-40">
-                  <span class="inline-flex items-center gap-1">Status <JobStateLegend /></span>
-                </TableHead>
-                <TableHead class="w-40">Angelegt</TableHead>
-                <TableHead class="w-40">Abgeschlossen</TableHead>
-                <TableHead>Fehler</TableHead>
-                <TableHead class="w-12" />
-              </TableRow>
-            </TableHeader>
-
-            <TableBody>
-              <TableRow v-if="!loading && jobs.length === 0">
-                <TableCell :colspan="7" class="text-muted-foreground py-8 text-center">
-                  Noch keine Aufträge.
-                </TableCell>
-              </TableRow>
-
-              <TableRow
-                v-for="job in jobsPage.items"
-                :key="job.id"
-                class="cursor-pointer"
-                @click="router.push({ name: 'device', params: { id: job.deviceId } })"
-              >
-                <TableCell class="font-medium">{{ job.hostname }}</TableCell>
-                <TableCell class="tabular">{{ job.targetVersion }}</TableCell>
-                <TableCell>
-                  <Badge variant="outline" :class="jobBadgeClass(job.state)">
-                    {{ JOB_STATE_LABELS[job.state] }}
-                  </Badge>
-                </TableCell>
-                <TableCell>{{ formatDateTime(job.createdAt) }}</TableCell>
-                <TableCell>{{ formatDateTime(job.completedAt) }}</TableCell>
-                <TableCell class="text-destructive text-xs">{{ job.error ?? '' }}</TableCell>
-
-                <TableCell @click.stop>
-                  <Button
-                    v-if="isOpen(job)"
-                    variant="ghost"
-                    size="icon"
-                    class="text-muted-foreground hover:text-destructive size-8"
-                    title="Auftrag abbrechen"
-                    :disabled="busy"
-                    @click="cancel(job)"
-                  >
-                    <Ban class="size-4" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </div>
-
-        <TablePager
-          v-model:page="jobsPage.page"
-          v-model:limit="jobsPage.limit"
-          :total="jobsPage.total"
-          :page-sizes="[10, 25, 50]"
-        />
-      </CardContent>
-    </Card>
-
     <!-- ===================== Rückfragen ===================== -->
     <Dialog :open="pendingRemoval !== null" @update:open="pendingRemoval = null">
       <DialogContent class="sm:max-w-lg">
@@ -493,24 +346,6 @@ onMounted(load);
         <DialogFooter>
           <Button variant="outline" @click="pendingRemoval = null">Abbrechen</Button>
           <Button variant="destructive" @click="remove">Entfernen</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    <Dialog :open="cancelAllOpen" @update:open="cancelAllOpen = false">
-      <DialogContent class="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Offene Aufträge abbrechen</DialogTitle>
-          <DialogDescription>
-            {{ openJobs }} noch nicht abgeschlossene Aufträge werden als gescheitert vermerkt. Die
-            betroffenen Geräte lassen sich danach wieder beauftragen. Bereits laufende Tauschvorgänge
-            auf den Geräten hält das nicht auf.
-          </DialogDescription>
-        </DialogHeader>
-
-        <DialogFooter>
-          <Button variant="outline" @click="cancelAllOpen = false">Abbrechen</Button>
-          <Button variant="destructive" @click="cancelOpen">Aufträge abbrechen</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

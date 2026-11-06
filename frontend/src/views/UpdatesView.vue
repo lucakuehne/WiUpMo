@@ -27,7 +27,7 @@ const tab = computed<Section>({
 
 <template>
   <div class="mx-auto max-w-[1600px] px-5 py-6">
-    <h1 class="mb-4 text-xl font-semibold">Updates</h1>
+    <h1 class="mb-4 text-xl font-semibold">Windows Updates</h1>
 
     <Tabs v-model="tab">
       <TabsList class="mb-3">

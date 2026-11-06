@@ -16,7 +16,7 @@ import { chromium } from 'playwright';
 const [base = 'http://backend:3000', out = '/out'] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const USER = process.env.SMOKE_USER ?? 'admin';
 const PASSWORD = process.env.SMOKE_PASSWORD ?? 'nur-fuer-den-test-stack';
-const SETTINGS = ['ad', 'agent', 'releases', 'auth', 'thresholds', 'retention'];
+const SETTINGS = ['ad', 'agent', 'auth', 'thresholds', 'retention'];
 
 await mkdir(out, { recursive: true });
 
@@ -253,7 +253,7 @@ await step('Updates: offene, alle nach Typ, Detailseite und zurueck', async () =
   await capture(page, 'update-detail');
 
   // Zurueck in dieselbe Auswahl, nicht in die ungefilterte Liste.
-  await page.getByRole('button', { name: 'Updates', exact: true }).click();
+  await page.getByRole('button', { name: 'Windows Updates', exact: true }).click();
   await page.waitForURL(/\/updates\/all\?.*classification=definition/);
 });
 
@@ -264,6 +264,29 @@ await step('Installationen mit ihren Geraeten', async () => {
   await first.click();
   await page.locator('table table a[href^="/devices/"]').first().waitFor({ timeout: 10_000 });
   await capture(page, 'installationen');
+});
+
+await step('Agents: Ausrollen mit Geraeten, Versionen, Stoerungen', async () => {
+  await page.goto(`${base}/agents`);
+  const first = page.locator('table tbody tr').first();
+  await first.waitFor({ timeout: 15_000 });
+  await first.click();
+  await page.locator('table table a[href^="/devices/"]').first().waitFor({ timeout: 10_000 });
+  await capture(page, 'agents-updates');
+
+  await page.getByRole('tab', { name: 'Versionen' }).click();
+  await page.waitForURL(/\/agents\/versions/);
+  await page.getByText('Hinterlegte Versionen').waitFor({ timeout: 10_000 });
+  await capture(page, 'agents-versionen');
+
+  await page.getByRole('tab', { name: 'Störungen' }).click();
+  await page.waitForURL(/\/agents\/problems/);
+  await page.getByText('Testeintrag aus dem Smoke-Test').first().waitFor({ timeout: 10_000 });
+  await capture(page, 'agents-stoerungen');
+
+  // Ein altes Lesezeichen auf die Versionen in den Einstellungen findet hierher.
+  await page.goto(`${base}/settings/releases`);
+  await page.waitForURL(/\/agents\/versions/);
 });
 
 await step('Berichte', async () => {

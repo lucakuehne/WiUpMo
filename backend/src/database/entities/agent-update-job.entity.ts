@@ -17,6 +17,10 @@ export class AgentUpdateJob {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /** Das Ausrollen, mit dem der Auftrag angelegt wurde (Tabelle `agent_rollouts`). */
+  @Column({ type: 'uuid', name: 'rollout_id' })
+  rolloutId: string;
+
   @Column({ type: 'uuid', name: 'device_id' })
   deviceId: string;
 

@@ -219,6 +219,8 @@ export interface AgentRelease {
 
 export interface AgentUpdateJobView {
   id: string;
+  /** Das Ausrollen, mit dem der Auftrag angelegt wurde. */
+  rolloutId: string;
   deviceId: string;
   hostname: string;
   targetVersion: string;
@@ -229,6 +231,8 @@ export interface AgentUpdateJobView {
 }
 
 export interface CreateUpdateJobsResult {
+  /** Null, wenn kein Gerät einen Auftrag bekam. */
+  rolloutId: string | null;
   created: number;
   skipped: number;
   targetVersion: string;
@@ -546,6 +550,32 @@ export type UpdateSeverityFilter = 'critical' | 'important' | 'moderate' | 'low'
 export type UpdateStateFilter = 'open' | 'failed' | 'closed';
 
 /** Was sich der angemeldete Benutzer gemerkt hat; im Backend je Benutzername. */
+/** Was in einem Zug beauftragt wurde: ein Update-Auftrag je Gerät. */
+export interface AgentRollout {
+  id: string;
+  targetVersion: string;
+  /** `outdated`: alle mit abweichender Version, `selected`: eine Auswahl, `unknown`: nachgetragen. */
+  scope: 'outdated' | 'selected' | 'unknown';
+  requestedDevices: number | null;
+  skipped: number;
+  createdBy: string | null;
+  createdAt: string;
+  devices: number;
+  states: Record<AgentUpdateJobState | 'cancelled', number>;
+  lastCompletedAt: string | null;
+}
+
+/** Gleichartige Warnungen und Fehler der Agents über alle Geräte. */
+export interface AgentProblem {
+  key: string;
+  message: string;
+  level: 'error' | 'warning';
+  devices: number;
+  occurrences: number;
+  lastAt: string;
+  entries: { deviceId: string; hostname: string; lastAt: string; occurrences: number; message: string }[];
+}
+
 export interface UserPreferences {
   dashboard: { rangeDays: number; interval: 'hour' | 'day' | 'week' } | null;
 }

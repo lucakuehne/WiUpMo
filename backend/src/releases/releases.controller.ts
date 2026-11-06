@@ -10,6 +10,7 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  Req,
   Res,
   UploadedFile,
   UseGuards,
@@ -22,9 +23,11 @@ import { diskStorage } from 'multer';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { SessionGuard } from '../auth/session.guard.js';
+import { RequestWithSession, SessionGuard } from '../auth/session.guard.js';
 import {
   AgentReleaseDto,
+  AgentRolloutListDto,
+  AgentRolloutQueryDto,
   AgentUpdateJobViewDto,
   CreateUpdateJobsDto,
   CreateUpdateJobsResultDto,
@@ -140,7 +143,7 @@ export class AgentUpdateJobsController {
     const parsed = Number(limit ?? 100);
     const capped = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 500) : 100;
 
-    return this.releases.jobs(capped, deviceId);
+    return this.releases.jobs(capped, { deviceId });
   }
 
   /**
@@ -150,8 +153,11 @@ export class AgentUpdateJobsController {
   @Post()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Legt Update-Auftraege an.' })
-  create(@Body() dto: CreateUpdateJobsDto): Promise<CreateUpdateJobsResultDto> {
-    return this.releases.createJobs(dto.deviceIds, dto.targetVersion);
+  create(
+    @Body() dto: CreateUpdateJobsDto,
+    @Req() request: RequestWithSession,
+  ): Promise<CreateUpdateJobsResultDto> {
+    return this.releases.createJobs(dto.deviceIds, dto.targetVersion, request.session!.username);
   }
 
   /** Muss vor `:id/cancel` stehen, sonst faengt die Kennungsroute den Pfad ab. */
@@ -167,5 +173,35 @@ export class AgentUpdateJobsController {
   @ApiOperation({ summary: 'Bricht einen offenen Update-Auftrag ab.' })
   async cancel(@Param('id', ParseUUIDPipe) id: string): Promise<{ cancelled: number }> {
     return { cancelled: await this.releases.cancelJobs(id) };
+  }
+}
+
+/**
+ * Ausrollen: was in einem Zug beauftragt wurde. Die Auftraege je Geraet stehen
+ * weiterhin unter `api/agent-update-jobs`.
+ */
+@ApiTags('agent-releases')
+@Controller('api/agent-rollouts')
+@UseGuards(SessionGuard)
+export class AgentRolloutsController {
+  constructor(private readonly releases: ReleasesService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'Ausrollen, neueste zuerst, mit Fortschritt.' })
+  list(@Query() query: AgentRolloutQueryDto): Promise<AgentRolloutListDto> {
+    return this.releases.listRollouts(query.page, query.limit);
+  }
+
+  @Get(':id/jobs')
+  @ApiOperation({ summary: 'Die Auftraege eines Ausrollens, ein Geraet je Zeile.' })
+  jobs(@Param('id', ParseUUIDPipe) id: string): Promise<AgentUpdateJobViewDto[]> {
+    return this.releases.rolloutJobs(id);
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Bricht die offenen Auftraege eines Ausrollens ab.' })
+  async cancel(@Param('id', ParseUUIDPipe) id: string): Promise<{ cancelled: number }> {
+    return { cancelled: await this.releases.cancelRollout(id) };
   }
 }

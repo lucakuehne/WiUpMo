@@ -5,7 +5,7 @@ puffert und an das Backend meldet.
 
 ## Installation
 
-Die EXE gibt es fertig im Backend: **Einstellungen → Agent-Versionen**, dort das
+Die EXE gibt es fertig im Backend: **Agents → Versionen**, dort das
 Download-Symbol in der gewünschten Zeile. Sie wird mit dem Backend-Image
 ausgeliefert und beim Start aufgenommen — selbst bauen muss man dafür nichts.
 

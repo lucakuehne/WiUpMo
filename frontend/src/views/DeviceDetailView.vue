@@ -956,8 +956,8 @@ onMounted(load);
         <!-- ===================== Agent-Updates ===================== -->
         <TabsContent value="agent">
           <p class="text-muted-foreground mb-3 text-sm">
-            Die Update-Aufträge dieses Geräts. Ausgerollt wird unter Einstellungen →
-            Agent-Versionen; ein offener Auftrag verhindert, dass ein weiterer angelegt wird.
+            Die Update-Aufträge dieses Geräts. Ausgerollt wird unter Agents → Versionen; ein
+            offener Auftrag verhindert, dass ein weiterer angelegt wird.
           </p>
 
           <div class="rounded-md border">
@@ -982,7 +982,15 @@ onMounted(load);
                 </TableRow>
 
                 <TableRow v-for="job in jobs" :key="job.id">
-                  <TableCell class="tabular">{{ job.targetVersion }}</TableCell>
+                  <TableCell class="tabular">
+                    <div>{{ job.targetVersion }}</div>
+                    <RouterLink
+                      :to="{ name: 'agents', query: { rollout: job.rolloutId } }"
+                      class="text-primary text-xs hover:underline"
+                    >
+                      Zum Ausrollen
+                    </RouterLink>
+                  </TableCell>
                   <TableCell>
                     <Badge variant="outline" :class="jobBadgeClass(job.state)">
                       {{ JOB_STATE_LABELS[job.state] }}

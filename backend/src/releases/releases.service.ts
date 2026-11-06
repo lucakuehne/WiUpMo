@@ -18,6 +18,9 @@ import { returnedRows } from '../common/query-result.js';
 import { AgentUpdateJobState } from '../database/enums.js';
 import {
   AgentReleaseDto,
+  AgentRolloutListDto,
+  AgentRolloutScope,
+  AgentRolloutStatesDto,
   AgentUpdateJobDto,
   AgentUpdateJobViewDto,
   CreateUpdateJobsResultDto,
@@ -427,8 +430,15 @@ export class ReleasesService implements OnModuleInit {
   /**
    * Legt Auftraege an. Ohne Geraeteliste alle aktiven Geraete mit
    * abweichender Version — das ist der Regelfall beim Ausrollen.
+   *
+   * Zusammen mit dem Ausrollen, das sie buendelt, in einer Transaktion: Ein
+   * Ausrollen gibt es nur mit mindestens einem Auftrag.
    */
-  async createJobs(deviceIds: string[] | undefined, targetVersion?: string): Promise<CreateUpdateJobsResultDto> {
+  async createJobs(
+    deviceIds: string[] | undefined,
+    targetVersion: string | undefined,
+    createdBy: string,
+  ): Promise<CreateUpdateJobsResultDto> {
     const version = targetVersion ?? (await this.currentVersion());
 
     if (!version) {
@@ -445,47 +455,66 @@ export class ReleasesService implements OnModuleInit {
       throw new NotFoundException(`Version ${version} ist nicht hinterlegt.`);
     }
 
-    const rows: Array<{ id: string }> = await this.dataSource.query(
-      `WITH kandidaten AS (
-         SELECT d.id
+    const selected = deviceIds && deviceIds.length > 0 ? [...new Set(deviceIds)] : null;
+    const scope: AgentRolloutScope = selected ? 'selected' : 'outdated';
+
+    const { rolloutId, rows, skipped } = await this.dataSource.transaction(async (manager) => {
+      // Vor dem Anlegen gezaehlt: Danach haetten auch die gerade beauftragten
+      // Geraete einen offenen Auftrag und zaehlten als uebergangen mit.
+      const open: Array<{ count: string }> = await manager.query(
+        `SELECT count(*)::text AS count
            FROM devices d
           WHERE d.status = 'active'
             AND d.enrolled_at IS NOT NULL
             AND coalesce(d.agent_version, '') <> $1
             AND ($2::uuid[] IS NULL OR d.id = ANY($2::uuid[]))
-            -- Kein zweiter Auftrag, solange einer offen ist: Zwei parallele
-            -- Auftraege wuerden dasselbe Geraet zweimal tauschen lassen.
-            AND NOT EXISTS (
+            AND EXISTS (
               SELECT 1 FROM agent_update_jobs j
-               WHERE j.device_id = d.id
-                 AND j.state IN ('pending', 'delivered', 'installing')
-            )
-       )
-       INSERT INTO agent_update_jobs (device_id, target_version, state)
-       SELECT id, $1, 'pending' FROM kandidaten
-       RETURNING id`,
-      [version, deviceIds && deviceIds.length > 0 ? deviceIds : null],
-    );
+               WHERE j.device_id = d.id AND j.state IN ('pending', 'delivered', 'installing')
+            )`,
+        [version, selected],
+      );
+      const skippedCount = Number(open[0]?.count ?? 0);
 
-    // Wie viele waeren betroffen gewesen, sind aber wegen eines offenen
-    // Auftrags uebergangen worden?
-    const skipped: Array<{ count: string }> = await this.dataSource.query(
-      `SELECT count(*)::text AS count
-         FROM devices d
-        WHERE d.status = 'active'
-          AND d.enrolled_at IS NOT NULL
-          AND coalesce(d.agent_version, '') <> $1
-          AND ($2::uuid[] IS NULL OR d.id = ANY($2::uuid[]))
-          AND EXISTS (
-            SELECT 1 FROM agent_update_jobs j
-             WHERE j.device_id = d.id AND j.state IN ('pending', 'delivered', 'installing')
-          )`,
-      [version, deviceIds && deviceIds.length > 0 ? deviceIds : null],
-    );
+      const [rollout] = (await manager.query(
+        `INSERT INTO agent_rollouts (target_version, scope, requested_devices, skipped, created_by)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id`,
+        [version, scope, selected?.length ?? null, skippedCount, createdBy],
+      )) as Array<{ id: string }>;
 
-    this.logger.log(`${rows.length} Update-Auftraege auf Version ${version} angelegt.`);
+      const inserted: Array<{ id: string }> = await manager.query(
+        `WITH kandidaten AS (
+           SELECT d.id
+             FROM devices d
+            WHERE d.status = 'active'
+              AND d.enrolled_at IS NOT NULL
+              AND coalesce(d.agent_version, '') <> $1
+              AND ($2::uuid[] IS NULL OR d.id = ANY($2::uuid[]))
+              -- Kein zweiter Auftrag, solange einer offen ist: Zwei parallele
+              -- Auftraege wuerden dasselbe Geraet zweimal tauschen lassen.
+              AND NOT EXISTS (
+                SELECT 1 FROM agent_update_jobs j
+                 WHERE j.device_id = d.id
+                   AND j.state IN ('pending', 'delivered', 'installing')
+              )
+         )
+         INSERT INTO agent_update_jobs (rollout_id, device_id, target_version, state)
+         SELECT $3, id, $1, 'pending' FROM kandidaten
+         RETURNING id`,
+        [version, selected, rollout.id],
+      );
 
-    return { created: rows.length, skipped: Number(skipped[0]?.count ?? 0), targetVersion: version };
+      if (inserted.length === 0) {
+        await manager.query('DELETE FROM agent_rollouts WHERE id = $1', [rollout.id]);
+        return { rolloutId: null, rows: inserted, skipped: skippedCount };
+      }
+      return { rolloutId: rollout.id, rows: inserted, skipped: skippedCount };
+    });
+
+    this.logger.log(`${rows.length} Update-Auftraege auf Version ${version} von ${createdBy} angelegt.`);
+
+    return { rolloutId, created: rows.length, skipped, targetVersion: version };
   }
 
   private async currentVersion(): Promise<string | null> {
@@ -566,11 +595,11 @@ export class ReleasesService implements OnModuleInit {
       `UPDATE agent_update_jobs SET
          state        = 'failed',
          completed_at = now(),
-         error        = 'Von Hand abgebrochen.'
+         error        = $2
        WHERE state IN ('pending', 'delivered', 'installing')
          AND ($1::uuid IS NULL OR id = $1)
        RETURNING id`,
-      [id ?? null],
+      [id ?? null, CANCELLED_ERROR],
     );
     const rows = returnedRows<{ id: string }>(result);
 
@@ -706,20 +735,29 @@ export class ReleasesService implements OnModuleInit {
     }
   }
 
-  async jobs(limit: number, deviceId?: string): Promise<AgentUpdateJobViewDto[]> {
+  /**
+   * Die Auftraege eines Geraets oder eines Ausrollens, neueste zuerst. Die
+   * eines Ausrollens sind gleich alt und stehen nach Hostname.
+   */
+  async jobs(
+    limit: number,
+    filter: { deviceId?: string; rolloutId?: string } = {},
+  ): Promise<AgentUpdateJobViewDto[]> {
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
-      `SELECT j.id, j.device_id, d.hostname, j.target_version, j.state,
+      `SELECT j.id, j.rollout_id, j.device_id, d.hostname, j.target_version, j.state,
               j.created_at, j.completed_at, j.error
          FROM agent_update_jobs j
          JOIN devices d ON d.id = j.device_id
-        WHERE $2::uuid IS NULL OR j.device_id = $2
-        ORDER BY j.created_at DESC
+        WHERE ($2::uuid IS NULL OR j.device_id = $2)
+          AND ($3::uuid IS NULL OR j.rollout_id = $3)
+        ORDER BY j.created_at DESC, d.hostname ASC
         LIMIT $1`,
-      [limit, deviceId ?? null],
+      [limit, filter.deviceId ?? null, filter.rolloutId ?? null],
     );
 
     return rows.map((row) => ({
       id: row.id as string,
+      rolloutId: row.rollout_id as string,
       deviceId: row.device_id as string,
       hostname: row.hostname as string,
       targetVersion: row.target_version as string,
@@ -728,6 +766,90 @@ export class ReleasesService implements OnModuleInit {
       completedAt: iso(row.completed_at),
       error: (row.error as string | null) ?? null,
     }));
+  }
+
+  // --- Ausrollen ------------------------------------------------------------------
+
+  /** Die Ausrollen, neueste zuerst, mit ihren Auftraegen je Zustand. */
+  async listRollouts(page: number, limit: number): Promise<AgentRolloutListDto> {
+    const rows: Array<Record<string, unknown>> = await this.dataSource.query(
+      `SELECT r.id, r.target_version, r.scope, r.requested_devices, r.skipped, r.created_by, r.created_at,
+              count(j.id)::int AS devices,
+              count(j.id) FILTER (WHERE j.state = 'pending')::int AS pending,
+              count(j.id) FILTER (WHERE j.state = 'delivered')::int AS delivered,
+              count(j.id) FILTER (WHERE j.state = 'installing')::int AS installing,
+              count(j.id) FILTER (WHERE j.state = 'done')::int AS done,
+              count(j.id) FILTER (WHERE j.state = 'failed' AND j.error IS DISTINCT FROM $3)::int AS failed,
+              count(j.id) FILTER (WHERE j.state = 'failed' AND j.error = $3)::int AS cancelled,
+              max(j.completed_at) AS last_completed_at
+         FROM agent_rollouts r
+         LEFT JOIN agent_update_jobs j ON j.rollout_id = r.id
+        GROUP BY r.id
+        ORDER BY r.created_at DESC
+        LIMIT $1 OFFSET $2`,
+      [limit, (page - 1) * limit, CANCELLED_ERROR],
+    );
+
+    const totals: Array<{ total: number }> = await this.dataSource.query(
+      'SELECT count(*)::int AS total FROM agent_rollouts',
+    );
+
+    return {
+      items: rows.map((row) => ({
+        id: row.id as string,
+        targetVersion: row.target_version as string,
+        scope: row.scope as AgentRolloutScope,
+        requestedDevices: row.requested_devices === null ? null : Number(row.requested_devices),
+        skipped: Number(row.skipped),
+        createdBy: (row.created_by as string | null) ?? null,
+        createdAt: iso(row.created_at) ?? '',
+        devices: Number(row.devices),
+        states: {
+          pending: Number(row.pending),
+          delivered: Number(row.delivered),
+          installing: Number(row.installing),
+          done: Number(row.done),
+          failed: Number(row.failed),
+          cancelled: Number(row.cancelled),
+        } satisfies AgentRolloutStatesDto,
+        lastCompletedAt: iso(row.last_completed_at),
+      })),
+      total: Number(totals[0]?.total ?? 0),
+      page,
+      limit,
+    };
+  }
+
+  /** Die Auftraege eines Ausrollens, ein Geraet je Zeile. */
+  async rolloutJobs(rolloutId: string): Promise<AgentUpdateJobViewDto[]> {
+    await this.requireRollout(rolloutId);
+    return this.jobs(5000, { rolloutId });
+  }
+
+  /** Bricht ab, was von einem Ausrollen noch offen ist — wie `cancelJobs`, nur auf ein Ausrollen beschraenkt. */
+  async cancelRollout(rolloutId: string): Promise<number> {
+    await this.requireRollout(rolloutId);
+
+    const rows = returnedRows<{ id: string }>(
+      await this.dataSource.query(
+        `UPDATE agent_update_jobs SET state = 'failed', completed_at = now(), error = $2
+          WHERE rollout_id = $1 AND state IN ('pending', 'delivered', 'installing')
+          RETURNING id`,
+        [rolloutId, CANCELLED_ERROR],
+      ),
+    );
+
+    if (rows.length > 0) {
+      this.logger.log(`Ausrollen ${rolloutId}: ${rows.length} Auftrag/Auftraege abgebrochen.`);
+    }
+    return rows.length;
+  }
+
+  private async requireRollout(rolloutId: string): Promise<void> {
+    const exists: unknown[] = await this.dataSource.query('SELECT 1 FROM agent_rollouts WHERE id = $1', [
+      rolloutId,
+    ]);
+    if (exists.length === 0) throw new NotFoundException('Ausrollen nicht gefunden.');
   }
 
   private hashFile(path: string): Promise<string> {
@@ -740,6 +862,13 @@ export class ReleasesService implements OnModuleInit {
     });
   }
 }
+
+/**
+ * So steht ein von Hand abgebrochener Auftrag in der Tabelle. Er bleibt
+ * `failed` — der Versuch hat stattgefunden —, wird in den Ausrollen aber
+ * getrennt gezaehlt: Abgebrochen ist nicht gescheitert.
+ */
+const CANCELLED_ERROR = 'Von Hand abgebrochen.';
 
 function iso(value: unknown): string | null {
   return value instanceof Date ? value.toISOString() : null;

@@ -352,6 +352,7 @@ async function updateAgents(): Promise<void> {
     const ids = updatableSelected.value.map((row) => row.id);
     const result = await post<CreateUpdateJobsResult>('/api/agent-update-jobs', { deviceIds: ids });
     const current = ids.length - result.created - result.skipped;
+    const rolloutId = result.rolloutId;
     toast.success(`${result.created} Update-Auftrag/-Aufträge auf ${result.targetVersion} angelegt.`, {
       description:
         [
@@ -360,6 +361,9 @@ async function updateAgents(): Promise<void> {
         ]
           .filter(Boolean)
           .join(', ') || 'Die Geräte holen den Auftrag beim nächsten Check-in ab.',
+      action: rolloutId
+        ? { label: 'Anzeigen', onClick: () => void router.push({ name: 'agents', query: { rollout: rolloutId } }) }
+        : undefined,
     });
     clearSelection();
     void load();

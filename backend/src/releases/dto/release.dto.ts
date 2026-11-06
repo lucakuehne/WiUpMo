@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsOptional, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsArray, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min } from 'class-validator';
 import { AgentUpdateJobState } from '../../database/enums.js';
 
 /**
@@ -102,6 +103,10 @@ export class CreateUpdateJobsDto {
 
 export class AgentUpdateJobViewDto {
   id: string;
+
+  /** Das Ausrollen, mit dem der Auftrag angelegt wurde. */
+  rolloutId: string;
+
   deviceId: string;
   hostname: string;
   targetVersion: string;
@@ -112,6 +117,9 @@ export class AgentUpdateJobViewDto {
 }
 
 export class CreateUpdateJobsResultDto {
+  @ApiProperty({ description: 'Das angelegte Ausrollen; null, wenn kein Geraet einen Auftrag bekam.' })
+  rolloutId: string | null;
+
   @ApiProperty({ description: 'Angelegte Auftraege.' })
   created: number;
 
@@ -119,4 +127,61 @@ export class CreateUpdateJobsResultDto {
   skipped: number;
 
   targetVersion: string;
+}
+
+// --- Ausrollen --------------------------------------------------------------------
+
+export type AgentRolloutScope = 'outdated' | 'selected' | 'unknown';
+
+export class AgentRolloutQueryDto {
+  @Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)))
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  page: number = 1;
+
+  @Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)))
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  @IsOptional()
+  limit: number = 25;
+}
+
+/**
+ * Auftraege je Zustand. `cancelled` sind die von Hand abgebrochenen; sie
+ * stehen in der Tabelle als `failed`, zaehlen hier aber nicht als gescheitert.
+ */
+export class AgentRolloutStatesDto {
+  pending: number;
+  delivered: number;
+  installing: number;
+  done: number;
+  failed: number;
+  cancelled: number;
+}
+
+/** Was in einem Zug beauftragt wurde: ein Auftrag je Geraet, dieselbe Zielversion. */
+export class AgentRolloutViewDto {
+  id: string;
+  targetVersion: string;
+  /** `outdated`: alle mit abweichender Version, `selected`: eine Auswahl, `unknown`: nachgetragen. */
+  scope: AgentRolloutScope;
+  /** Gewaehlte Geraete bei `selected`, sonst null. */
+  requestedDevices: number | null;
+  /** Uebergangen, weil schon ein Auftrag offen war. */
+  skipped: number;
+  /** Null bei nachgetragenen Ausrollen. */
+  createdBy: string | null;
+  createdAt: string;
+  devices: number;
+  states: AgentRolloutStatesDto;
+  lastCompletedAt: string | null;
+}
+
+export class AgentRolloutListDto {
+  items: AgentRolloutViewDto[];
+  total: number;
+  page: number;
+  limit: number;
 }

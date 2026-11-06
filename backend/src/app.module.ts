@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { AdModule } from './ad/ad.module.js';
 import { AgentApiModule } from './agent-api/agent-api.module.js';
+import { AgentsModule } from './agents/agents.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { validateEnv } from './config/env.validation.js';
 import { dataSourceOptions } from './database/data-source.js';
@@ -39,6 +40,7 @@ const frontendAvailable = existsSync(frontendRoot);
     }),
     TypeOrmModule.forRoot(dataSourceOptions),
     AgentApiModule,
+    AgentsModule,
     AuthModule,
     DevicesModule,
     UpdatesModule,

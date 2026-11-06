@@ -122,7 +122,7 @@ onMounted(load);
   <div class="mx-auto max-w-[1600px] px-5 py-6">
     <Button variant="ghost" size="sm" class="-ml-2 mb-2" @click="back">
       <ArrowLeft class="size-4" />
-      Updates
+      Windows Updates
     </Button>
 
     <Alert v-if="error" variant="destructive" class="mb-4">

@@ -35,9 +35,18 @@ const router = createRouter({
     // Einstellungen, die ihn steuern. Ein Lesezeichen auf /ad soll dorthin
     // finden statt auf dem Dashboard zu landen.
     { path: '/ad', redirect: '/settings' },
-    // Wie /ad: Die Agent-Versionen stehen jetzt bei den Einstellungen. Ein
-    // Lesezeichen soll dorthin finden statt auf dem Dashboard zu landen.
-    { path: '/agent-releases', redirect: '/settings' },
+    // Die Agent-Versionen standen zuerst hier, dann bei den Einstellungen; jetzt
+    // gehoeren sie zu den Agents. Lesezeichen auf beide frueheren Orte sollen
+    // dorthin finden statt auf dem Dashboard zu landen.
+    { path: '/agent-releases', redirect: '/agents/versions' },
+    { path: '/settings/releases', redirect: '/agents/versions' },
+    // Wie bei den Updates: Der Tab steht im Pfad, ohne Angabe die Agent-Updates.
+    {
+      path: '/agents/:section(versions|problems)?',
+      name: 'agents',
+      component: () => import('@/views/AgentsView.vue'),
+      props: true,
+    },
     // Der Abschnitt steht im Pfad, damit ein Link auf „Aufbewahrung" auch dort
     // landet. Optional, weil /settings ohne Angabe weiterhin gültig ist.
     {

@@ -529,7 +529,9 @@ await step('Selbst-Update: Auftrag, Auslieferung beim Check-in, Download, Rueckm
   const current = (await api.get('/api/agent-releases')).find((r) => r.isCurrent);
   const created = await api.post('/api/agent-update-jobs', { deviceIds: [device.deviceId] });
   assert.equal(created.created, 1);
+  assert.equal(created.skipped, 0, 'das gerade beauftragte Geraet zaehlt als uebergangen');
   assert.equal(created.targetVersion, current.version);
+  assert.match(created.rolloutId ?? '', UUID);
 
   const res = await checkin(agent, device.token, snapshot({ hostInfo, collectedAt: minutesAgo(1), available: [U.defender, U.late], pendingReboot: true }));
   assert.ok(res.agentUpdate, 'der Check-in liefert keinen Auftrag aus');
@@ -545,6 +547,39 @@ await step('Selbst-Update: Auftrag, Auslieferung beim Check-in, Download, Rueckm
   assert.equal(jobs.find((j) => j.id === res.agentUpdate.jobId)?.state, 'done');
   assert.equal((await api.get(`/api/devices/${device.deviceId}`)).agentVersion, current.version);
   assert.equal((await api.post('/api/agent-update-jobs/cancel-open')).cancelled, 0);
+
+  // Das Ausrollen dazu: eine Auswahl von einem Geraet, erledigt.
+  const rollout = (await api.get('/api/agent-rollouts?limit=5')).items.find((r) => r.id === created.rolloutId);
+  assert.ok(rollout, 'das Ausrollen fehlt in der Liste');
+  assert.deepEqual(
+    [rollout.scope, rollout.requestedDevices, rollout.devices, rollout.states.done, rollout.createdBy, rollout.targetVersion],
+    ['selected', 1, 1, 1, ADMIN.username, current.version],
+  );
+  const rolloutJobs = await api.get(`/api/agent-rollouts/${created.rolloutId}/jobs`);
+  assert.deepEqual(rolloutJobs.map((j) => [j.hostname, j.rolloutId]), [[HOST, created.rolloutId]]);
+});
+
+await step('Ausrollen: uebergangene Geraete, Abbruch zaehlt nicht als gescheitert', async () => {
+  // Ein Geraet mit altem Agent; das Testgeraet ist schon aktuell und faellt heraus.
+  const old = (
+    await agent.request('POST', '/api/agent/v1/enroll', {
+      body: { enrollmentToken, host: host(`ROLL-${RUN}`), agentVersion: '0.6.3' },
+    })
+  ).data;
+  const first = await api.post('/api/agent-update-jobs', { deviceIds: [old.deviceId, device.deviceId] });
+  assert.deepEqual([first.created, first.skipped], [1, 0]);
+
+  // Ein zweites Mal: schon ein Auftrag offen, also kein neues Ausrollen.
+  const again = await api.post('/api/agent-update-jobs', { deviceIds: [old.deviceId] });
+  assert.deepEqual([again.created, again.skipped, again.rolloutId], [0, 1, null]);
+
+  assert.deepEqual(await api.post(`/api/agent-rollouts/${first.rolloutId}/cancel`), { cancelled: 1 });
+  const rollout = (await api.get('/api/agent-rollouts?limit=5')).items[0];
+  assert.equal(rollout.id, first.rolloutId);
+  assert.deepEqual([rollout.requestedDevices, rollout.states.cancelled, rollout.states.failed], [2, 1, 0]);
+
+  await api.request('GET', '/api/agent-rollouts/00000000-0000-4000-8000-000000000000/jobs', { expect: 404 });
+  await api.request('GET', '/api/agent-rollouts?limit=500', { expect: 400 });
 });
 
 // --- Installationsauftraege -----------------------------------------------------
@@ -796,6 +831,23 @@ await step('Agent-Zustand: Protokoll ueber zwei Check-ins (fuer ui-smoke)', asyn
   const detail = await api.get(`/api/devices/${logDevice.deviceId}`);
   assert.equal(detail.checkins.length, 2);
   assert.equal(detail.agentDiagnostics.recentLogs.length, 3);
+});
+
+await step('Stoerungen der Agents, nach Meldung zusammengefasst', async () => {
+  const problems = await api.get('/api/agent-problems?days=1');
+  const byKey = Object.fromEntries(problems.map((p) => [p.key, p]));
+
+  // Jeder Snapshot der Tests traegt diesen Eintrag; alle Geraete fallen zusammen.
+  const common = byKey['Testeintrag aus dem Smoke-Test'];
+  assert.ok(common && common.devices >= 3, `${common?.devices} Geraete mit dem Testeintrag`);
+  assert.equal(common.level, 'warning');
+  assert.equal(common.entries.length, common.devices);
+
+  const fresh = byKey['Neue Warnung aus dem Smoke-Test'];
+  assert.deepEqual(fresh?.entries.map((e) => e.hostname), [`AGENTLOG-${RUN}`]);
+  assert.ok(!problems.some((p) => p.key.startsWith('Uebermittlung fehlgeschlagen')), 'Uebermittlungsfehler als Stoerung');
+
+  await api.request('GET', '/api/agent-problems?days=3', { expect: 400 });
 });
 
 // --- Auslieferung des Frontends -------------------------------------------------
