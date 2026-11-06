@@ -16,7 +16,7 @@ import { chromium } from 'playwright';
 const [base = 'http://backend:3000', out = '/out'] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const USER = process.env.SMOKE_USER ?? 'admin';
 const PASSWORD = process.env.SMOKE_PASSWORD ?? 'nur-fuer-den-test-stack';
-const SETTINGS = ['ad', 'agent', 'auth', 'thresholds', 'retention'];
+const SETTINGS = ['ad', 'agent', 'auth', 'operation'];
 
 await mkdir(out, { recursive: true });
 
@@ -301,6 +301,16 @@ for (const section of SETTINGS) {
     await capture(page, `einstellungen-${section}`);
   });
 }
+
+await step('Einstellungen: Schwellwerte und Aufbewahrung stehen unter Betrieb', async () => {
+  // Alte Lesezeichen auf die frueheren Abschnitte landen dort.
+  for (const old of ['thresholds', 'retention']) {
+    await page.goto(`${base}/settings/${old}`);
+    for (const title of ['Melde-Intervall', 'Installationsaufträge', 'Schwellwerte', 'Aufbewahrung']) {
+      await page.getByRole('heading', { name: title, exact: true }).waitFor({ timeout: 10_000 });
+    }
+  }
+});
 
 await step('Dunkles Farbschema', async () => {
   const dark = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'de-CH', colorScheme: 'dark' });

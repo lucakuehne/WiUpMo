@@ -80,8 +80,7 @@ const sections = [
   { id: 'ad', label: 'Active Directory' },
   { id: 'agent', label: 'Agent-Registrierung' },
   { id: 'auth', label: 'Anmeldung' },
-  { id: 'thresholds', label: 'Schwellwerte' },
-  { id: 'retention', label: 'Aufbewahrung' },
+  { id: 'operation', label: 'Betrieb' },
 ] as const;
 
 type SectionId = (typeof sections)[number]['id'];
@@ -97,8 +96,12 @@ type SectionId = (typeof sections)[number]['id'];
 const route = useRoute();
 const router = useRouter();
 
+/** Früher eigene Abschnitte, heute Teil von „Betrieb"; ein Lesezeichen soll dort landen. */
+const MOVED: Record<string, SectionId> = { thresholds: 'operation', retention: 'operation' };
+
 const active = computed<SectionId>(() => {
-  const value = route.params.section;
+  const value = String(route.params.section ?? '');
+  if (MOVED[value]) return MOVED[value];
   return sections.some((section) => section.id === value) ? (value as SectionId) : 'ad';
 });
 
@@ -1009,136 +1012,50 @@ onMounted(load);
 
         <AdSyncLog v-if="active === 'ad' && !loading" ref="syncLog" class="mt-4" />
 
-        <!-- ================= Agent ================= -->
-        <div
-          v-if="active === 'agent' && !loading"
-          class="grid items-start gap-4 xl:grid-cols-2"
-        >
-          <Card>
-            <CardHeader>
-              <CardTitle>Agent-Registrierung</CardTitle>
-              <CardDescription>
-                Dieses Token legt ein Agent beim erstmaligen Start vor. Danach arbeitet jedes Gerät
-                mit einem eigenen, serverseitig erzeugten Secret.
-              </CardDescription>
-            </CardHeader>
+        <!-- ================= Agent-Registrierung ================= -->
+        <Card v-if="active === 'agent' && !loading" class="xl:w-1/2">
+          <CardHeader>
+            <CardTitle>Agent-Registrierung</CardTitle>
+            <CardDescription>
+              Dieses Token legt ein Agent beim erstmaligen Start vor. Danach arbeitet jedes Gerät
+              mit einem eigenen, serverseitig erzeugten Secret.
+            </CardDescription>
+          </CardHeader>
 
-            <CardContent class="space-y-4">
-              <div class="space-y-1.5">
-                <Label for="token">Enrollment-Token</Label>
-                <div class="flex gap-2">
-                  <Input
-                    id="token"
-                    :model-value="agent.enrollmentToken"
-                    readonly
-                    class="font-mono"
-                  />
-                  <Button variant="secondary" size="icon" @click="copyToken">
-                    <Check v-if="copied" class="size-4" />
-                    <span v-else class="i">⧉</span>
-                  </Button>
-                </div>
-                <p class="text-muted-foreground text-xs">
-                  Ein neues Token betrifft nur Neuinstallationen — bereits registrierte Geräte
-                  laufen unverändert weiter. Rotieren ist deshalb billig.
-                </p>
-              </div>
-
-              <div class="bg-muted overflow-x-auto rounded-md p-3 font-mono text-xs">
-                wiupmo-agent.exe --install --backend-url {{ backendUrl }} --enrollment-token
-                {{ agent.enrollmentToken }}
-              </div>
-            </CardContent>
-
-            <CardFooter>
-              <Button variant="secondary" :disabled="rotating" @click="rotateToken">
-                <RefreshCw class="size-4" :class="rotating ? 'animate-spin' : ''" />
-                Neues Token erzeugen
-              </Button>
-            </CardFooter>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Melde-Intervall</CardTitle>
-              <CardDescription>
-                Abstand zwischen zwei regulären Durchläufen. Zusätzlich meldet sich ein Agent,
-                sobald sich am Netzwerk etwas ändert — beim VPN-Aufbau also sofort.
-              </CardDescription>
-            </CardHeader>
-
-            <CardContent>
-              <div class="space-y-1.5">
-                <Label for="interval">Minuten</Label>
-                <div class="flex items-center gap-3">
-                  <Input
-                    id="interval"
-                    v-model.number="agent.checkIntervalMinutes"
-                    type="number"
-                    min="2"
-                    max="360"
-                    step="1"
-                    class="w-40"
-                  />
-                  <span class="text-muted-foreground text-sm">{{ intervalHint }}</span>
-                </div>
-                <p class="text-muted-foreground text-xs">
-                  Zwischen 2 Minuten und 6 Stunden. Der Wert geht mit jeder Check-in-Antwort an die
-                  Geräte und ersetzt dort die örtliche Einstellung — wirksam wird er entsprechend
-                  erst beim nächsten Durchlauf, im ungünstigsten Fall also nach dem bisherigen
-                  Abstand. Agents vor Version 0.8.1 melden sich höchstens alle 5 Minuten.
-                </p>
-                <p class="text-muted-foreground text-xs">
-                  Jeder Durchlauf sucht bei WSUS bzw. Microsoft Update nach Updates. Bei wenigen
-                  Minuten Abstand summiert sich das über alle Geräte: 2 Minuten sind 30 Suchen pro
-                  Stunde und Gerät.
-                </p>
-              </div>
-            </CardContent>
-
-            <CardFooter>
-              <Button :disabled="savingAgent" @click="saveAgent">
-                <Loader2 v-if="savingAgent" class="size-4 animate-spin" />
-                Speichern
-              </Button>
-            </CardFooter>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Installationsaufträge</CardTitle>
-              <CardDescription>
-                Wie lange ein Auftrag zum Installieren offener Updates auf das Gerät wartet. Wer im
-                Urlaub ist, holt ihn nach der Rückkehr noch ab — danach verfällt er.
-              </CardDescription>
-            </CardHeader>
-
-            <CardContent>
-              <div class="space-y-1.5">
-                <Label for="install-expiry">Tage ab dem geplanten Zeitpunkt</Label>
+          <CardContent class="space-y-4">
+            <div class="space-y-1.5">
+              <Label for="token">Enrollment-Token</Label>
+              <div class="flex gap-2">
                 <Input
-                  id="install-expiry"
-                  v-model.number="install.expiryDays"
-                  type="number"
-                  min="1"
-                  max="90"
-                  class="w-40"
+                  id="token"
+                  :model-value="agent.enrollmentToken"
+                  readonly
+                  class="font-mono"
                 />
-                <p class="text-muted-foreground text-xs">
-                  Zwischen 1 und 90 Tagen, Standard 14. Gilt für neu angelegte Aufträge; bestehende
-                  behalten ihre Frist.
-                </p>
+                <Button variant="secondary" size="icon" @click="copyToken">
+                  <Check v-if="copied" class="size-4" />
+                  <span v-else class="i">⧉</span>
+                </Button>
               </div>
-            </CardContent>
+              <p class="text-muted-foreground text-xs">
+                Ein neues Token betrifft nur Neuinstallationen — bereits registrierte Geräte
+                laufen unverändert weiter. Rotieren ist deshalb billig.
+              </p>
+            </div>
 
-            <CardFooter>
-              <Button :disabled="savingInstall" @click="saveInstall">
-                <Loader2 v-if="savingInstall" class="size-4 animate-spin" />
-                Speichern
-              </Button>
-            </CardFooter>
-          </Card>
-        </div>
+            <div class="bg-muted overflow-x-auto rounded-md p-3 font-mono text-xs">
+              wiupmo-agent.exe --install --backend-url {{ backendUrl }} --enrollment-token
+              {{ agent.enrollmentToken }}
+            </div>
+          </CardContent>
+
+          <CardFooter>
+            <Button variant="secondary" :disabled="rotating" @click="rotateToken">
+              <RefreshCw class="size-4" :class="rotating ? 'animate-spin' : ''" />
+              Neues Token erzeugen
+            </Button>
+          </CardFooter>
+        </Card>
 
         <!-- ================= Anmeldung ================= -->
         <Card v-if="active === 'auth' && !loading" class="xl:w-1/2">
@@ -1281,82 +1198,169 @@ onMounted(load);
           </CardFooter>
         </Card>
 
-        <!-- ================= Schwellwerte ================= -->
-        <Card v-if="active === 'thresholds' && !loading" class="xl:w-1/2">
-          <CardHeader>
-            <CardTitle>Schwellwerte</CardTitle>
-            <CardDescription>
-              Ab wann ein Zustand in den Auswertungen auffällig wird.
-            </CardDescription>
-          </CardHeader>
+        <!-- ================= Betrieb ================= -->
+        <!-- Was den laufenden Betrieb taktet und begrenzt: wie oft sich Agents melden,
+             wie lange Aufträge warten, ab wann etwas auffällt, wie lange Daten bleiben. -->
+        <div
+          v-if="active === 'operation' && !loading"
+          class="grid items-start gap-4 xl:grid-cols-2"
+        >
+          <Card>
+            <CardHeader>
+              <CardTitle>Melde-Intervall</CardTitle>
+              <CardDescription>
+                Abstand zwischen zwei regulären Durchläufen. Zusätzlich meldet sich ein Agent,
+                sobald sich am Netzwerk etwas ändert — beim VPN-Aufbau also sofort.
+              </CardDescription>
+            </CardHeader>
 
-          <CardContent class="space-y-4">
-            <div class="space-y-1.5">
-              <Label for="t-stale">Kein Check-in seit (Tage)</Label>
-              <Input id="t-stale" v-model.number="thresholds.staleAgentDays" type="number" min="1" />
-              <p class="text-muted-foreground text-xs">
-                Unterscheidet „gepatcht" von „meldet sich nicht mehr".
-              </p>
-            </div>
+            <CardContent>
+              <div class="space-y-1.5">
+                <Label for="interval">Minuten</Label>
+                <div class="flex items-center gap-3">
+                  <Input
+                    id="interval"
+                    v-model.number="agent.checkIntervalMinutes"
+                    type="number"
+                    min="2"
+                    max="360"
+                    step="1"
+                    class="w-40"
+                  />
+                  <span class="text-muted-foreground text-sm">{{ intervalHint }}</span>
+                </div>
+                <p class="text-muted-foreground text-xs">
+                  Zwischen 2 Minuten und 6 Stunden. Der Wert geht mit jeder Check-in-Antwort an die
+                  Geräte und ersetzt dort die örtliche Einstellung — wirksam wird er entsprechend
+                  erst beim nächsten Durchlauf, im ungünstigsten Fall also nach dem bisherigen
+                  Abstand. Agents vor Version 0.8.1 melden sich höchstens alle 5 Minuten.
+                </p>
+                <p class="text-muted-foreground text-xs">
+                  Jeder Durchlauf sucht bei WSUS bzw. Microsoft Update nach Updates. Bei wenigen
+                  Minuten Abstand summiert sich das über alle Geräte: 2 Minuten sind 30 Suchen pro
+                  Stunde und Gerät.
+                </p>
+              </div>
+            </CardContent>
 
-            <div class="space-y-1.5">
-              <Label for="t-critical">Kritisch offen seit (Tage)</Label>
-              <Input id="t-critical" v-model.number="thresholds.criticalOpenDays" type="number" min="1" />
-            </div>
+            <CardFooter>
+              <Button :disabled="savingAgent" @click="saveAgent">
+                <Loader2 v-if="savingAgent" class="size-4 animate-spin" />
+                Speichern
+              </Button>
+            </CardFooter>
+          </Card>
 
-            <div class="space-y-1.5">
-              <Label for="t-reboot">Neustart ausstehend seit (Tage)</Label>
-              <Input id="t-reboot" v-model.number="thresholds.pendingRebootDays" type="number" min="1" />
-            </div>
-          </CardContent>
+          <Card>
+            <CardHeader>
+              <CardTitle>Installationsaufträge</CardTitle>
+              <CardDescription>
+                Wie lange ein Auftrag zum Installieren offener Updates auf das Gerät wartet. Wer im
+                Urlaub ist, holt ihn nach der Rückkehr noch ab — danach verfällt er.
+              </CardDescription>
+            </CardHeader>
 
-          <CardFooter>
-            <Button :disabled="savingThresholds" @click="saveThresholds">
-              <Loader2 v-if="savingThresholds" class="size-4 animate-spin" />
-              Speichern
-            </Button>
-          </CardFooter>
-        </Card>
+            <CardContent>
+              <div class="space-y-1.5">
+                <Label for="install-expiry">Tage ab dem geplanten Zeitpunkt</Label>
+                <Input
+                  id="install-expiry"
+                  v-model.number="install.expiryDays"
+                  type="number"
+                  min="1"
+                  max="90"
+                  class="w-40"
+                />
+                <p class="text-muted-foreground text-xs">
+                  Zwischen 1 und 90 Tagen, Standard 14. Gilt für neu angelegte Aufträge; bestehende
+                  behalten ihre Frist.
+                </p>
+              </div>
+            </CardContent>
 
-        <!-- ================= Aufbewahrung ================= -->
-        <Card v-if="active === 'retention' && !loading" class="xl:w-1/2">
-          <CardHeader>
-            <CardTitle>Aufbewahrung</CardTitle>
-            <CardDescription>
-              Ein Job räumt nachts um 03:15 auf: Ereignisse und Check-ins, die älter sind als die
-              Fristen. Die aktuellen Update-Zustände bleiben unberührt.
-            </CardDescription>
-          </CardHeader>
+            <CardFooter>
+              <Button :disabled="savingInstall" @click="saveInstall">
+                <Loader2 v-if="savingInstall" class="size-4 animate-spin" />
+                Speichern
+              </Button>
+            </CardFooter>
+          </Card>
 
-          <CardContent class="space-y-4">
-            <div class="space-y-1.5">
-              <Label for="r-events">Ereignisse (Tage)</Label>
-              <Input id="r-events" v-model.number="retention.eventDays" type="number" min="7" />
-              <p class="text-muted-foreground text-xs">
-                Betrifft die Zeitreihe. Der aktuelle Update-Zustand bleibt unberührt.
-              </p>
-            </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Schwellwerte</CardTitle>
+              <CardDescription>
+                Ab wann ein Zustand in den Auswertungen auffällig wird.
+              </CardDescription>
+            </CardHeader>
 
-            <div class="space-y-1.5">
-              <Label for="r-checkins">Check-ins (Tage)</Label>
-              <Input id="r-checkins" v-model.number="retention.checkinDays" type="number" min="7" />
-            </div>
-          </CardContent>
+            <CardContent class="space-y-4">
+              <div class="space-y-1.5">
+                <Label for="t-stale">Kein Check-in seit (Tage)</Label>
+                <Input id="t-stale" v-model.number="thresholds.staleAgentDays" type="number" min="1" class="w-40" />
+                <p class="text-muted-foreground text-xs">
+                  Unterscheidet „gepatcht" von „meldet sich nicht mehr".
+                </p>
+              </div>
 
-          <CardFooter class="flex-wrap gap-3">
-            <Button :disabled="savingRetention" @click="saveRetention">
-              <Loader2 v-if="savingRetention" class="size-4 animate-spin" />
-              Speichern
-            </Button>
-            <Button variant="outline" :disabled="cleaning" @click="runRetention">
-              <Trash2 class="size-4" />
-              Jetzt aufräumen
-            </Button>
-            <span class="text-muted-foreground text-xs">
-              Löscht endgültig. Sinnvoll, um zu sehen, was eine geänderte Frist tatsächlich trifft.
-            </span>
-          </CardFooter>
-        </Card>
+              <div class="space-y-1.5">
+                <Label for="t-critical">Kritisch offen seit (Tage)</Label>
+                <Input id="t-critical" v-model.number="thresholds.criticalOpenDays" type="number" min="1" class="w-40" />
+              </div>
+
+              <div class="space-y-1.5">
+                <Label for="t-reboot">Neustart ausstehend seit (Tage)</Label>
+                <Input id="t-reboot" v-model.number="thresholds.pendingRebootDays" type="number" min="1" class="w-40" />
+              </div>
+            </CardContent>
+
+            <CardFooter>
+              <Button :disabled="savingThresholds" @click="saveThresholds">
+                <Loader2 v-if="savingThresholds" class="size-4 animate-spin" />
+                Speichern
+              </Button>
+            </CardFooter>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Aufbewahrung</CardTitle>
+              <CardDescription>
+                Ein Job räumt nachts um 03:15 auf: Ereignisse und Check-ins, die älter sind als die
+                Fristen. Die aktuellen Update-Zustände bleiben unberührt.
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent class="space-y-4">
+              <div class="space-y-1.5">
+                <Label for="r-events">Ereignisse (Tage)</Label>
+                <Input id="r-events" v-model.number="retention.eventDays" type="number" min="7" class="w-40" />
+                <p class="text-muted-foreground text-xs">
+                  Betrifft die Zeitreihe. Der aktuelle Update-Zustand bleibt unberührt.
+                </p>
+              </div>
+
+              <div class="space-y-1.5">
+                <Label for="r-checkins">Check-ins (Tage)</Label>
+                <Input id="r-checkins" v-model.number="retention.checkinDays" type="number" min="7" class="w-40" />
+              </div>
+            </CardContent>
+
+            <CardFooter class="flex-wrap gap-3">
+              <Button :disabled="savingRetention" @click="saveRetention">
+                <Loader2 v-if="savingRetention" class="size-4 animate-spin" />
+                Speichern
+              </Button>
+              <Button variant="outline" :disabled="cleaning" @click="runRetention">
+                <Trash2 class="size-4" />
+                Jetzt aufräumen
+              </Button>
+              <span class="text-muted-foreground text-xs">
+                Löscht endgültig. Sinnvoll, um zu sehen, was eine geänderte Frist tatsächlich trifft.
+              </span>
+            </CardFooter>
+          </Card>
+        </div>
       </div>
     </div>
   </div>
