@@ -138,8 +138,9 @@ public sealed class AgentOptions
 
     /// <summary>
     /// Startet nicht neu, sondern legt nur eine Datei ab, und behandelt das
-    /// Geraet, als waere niemand angemeldet — auf dem Runner gibt es keinen
-    /// Benutzer, dem sich eine Meldung zeigen liesse. Im Betrieb nie setzen.
+    /// Geraet als Arbeitsplatz, an dem niemand angemeldet ist — der Runner ist
+    /// ein Windows Server ohne Benutzer, dem sich eine Meldung zeigen liesse.
+    /// Im Betrieb nie setzen.
     /// </summary>
     public bool SimulateRestart { get; set; }
 }

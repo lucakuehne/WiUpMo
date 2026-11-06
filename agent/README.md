@@ -141,7 +141,7 @@ Drei Quellen, die einander in dieser Reihenfolge überschreiben:
 | `Agent:InstallTimeoutMinutes` | — | 180 | Obergrenze für einen Installationsauftrag, Download und Installation zusammen. |
 | `Agent:UpdateVerificationMinutes` | — | 20 | Frist, in der sich eine neue Fassung bestätigen muss, sonst stellt der Updater zurück. |
 | `Agent:SimulateWindowsUpdate` | — | false | **Nur für den Ende-zu-Ende-Test:** fragt Windows Update nicht ab. Im Betrieb nie setzen. |
-| `Agent:SimulateRestart` | — | false | **Nur für den Ende-zu-Ende-Test:** startet nicht neu, sondern legt `restart-simulated.txt` ab, und behandelt das Gerät, als wäre niemand angemeldet. Im Betrieb nie setzen. |
+| `Agent:SimulateRestart` | — | false | **Nur für den Ende-zu-Ende-Test:** startet nicht neu, sondern legt `restart-simulated.txt` ab, und behandelt das Gerät als Arbeitsplatz, an dem niemand angemeldet ist — der Runner ist ein Windows Server. Im Betrieb nie setzen. |
 | `Agent:InitialHistoryDays` | — | 90 | Rückblick beim allerersten Check-in. |
 | `Agent:LogRetentionDays` | — | 14 | Aufbewahrung der Protokolldateien. |
 

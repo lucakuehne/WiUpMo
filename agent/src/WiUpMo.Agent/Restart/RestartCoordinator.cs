@@ -182,7 +182,9 @@ public sealed class RestartCoordinator(
             return;
         }
 
-        if (host.IsServer())
+        // Simuliert wird nie neu gestartet; der Test laeuft auf einem
+        // Windows-Server-Runner und braucht den Weg fuer Arbeitsplaetze.
+        if (!options.SimulateRestart && host.IsServer())
         {
             await FailAsync(state, "Server werden nicht auf Anforderung neu gestartet.", ct).ConfigureAwait(false);
             return;
