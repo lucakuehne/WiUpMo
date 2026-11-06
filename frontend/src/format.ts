@@ -2,6 +2,7 @@ import type {
   AgentUpdateJobState,
   InstallJob,
   InstallJobState,
+  RestartJobState,
   UpdateClassification,
   UpdateSource,
   UpdateState,
@@ -128,6 +129,46 @@ export function installScopeLabel(job: Pick<InstallJob, 'scope' | 'selectedCount
     return 'alle Typen';
   }
   return job.classifications.map((type) => UPDATE_CLASSIFICATION_LABELS[type]).join(', ');
+}
+
+export const RESTART_JOB_STATE_LABELS: Record<RestartJobState, string> = {
+  pending: 'geplant',
+  delivered: 'zugestellt',
+  notified: 'gemeldet',
+  deferred: 'verschoben',
+  restarting: 'startet neu',
+  done: 'neu gestartet',
+  failed: 'gescheitert',
+  expired: 'verfallen',
+  cancelled: 'abgebrochen',
+};
+
+/** Dieselben Töne wie bei Installationen; verschoben wartet wie zugestellt. */
+export function restartJobBadgeClass(state: RestartJobState): string {
+  switch (state) {
+    case 'pending':
+      return 'bg-chart-1/15 text-chart-1 border-chart-1/30';
+    case 'delivered':
+    case 'notified':
+    case 'deferred':
+      return 'bg-chart-4/15 text-chart-4 border-chart-4/30';
+    case 'restarting':
+      return 'bg-warning/15 text-warning-foreground border-warning/40 dark:text-warning';
+    case 'done':
+      return 'bg-success/15 text-success border-success/30';
+    case 'failed':
+      return 'bg-destructive/15 text-destructive border-destructive/30';
+    default:
+      return 'bg-muted text-muted-foreground border-transparent';
+  }
+}
+
+/** „1 Stunde", „4 Stunden", „30 Minuten" — wie in der Meldung beim Benutzer. */
+export function durationLabel(minutes: number): string {
+  if (minutes < 60) return `${minutes} Minuten`;
+  if (minutes === 60) return '1 Stunde';
+  if (minutes % 60 === 0) return `${minutes / 60} Stunden`;
+  return `${Math.floor(minutes / 60)} Std. ${minutes % 60} Min.`;
 }
 
 /** Der Artikel zu einer KB-Nummer bei Microsoft. */

@@ -15,8 +15,10 @@ import {
   DEFAULT_RETENTION,
   DEFAULT_THRESHOLDS,
   DEFAULT_INSTALL,
+  DEFAULT_RESTART,
   InstallSettings,
   migrateAuthSettings,
+  RestartSettings,
   RetentionSettings,
   SETTING_KEYS,
   ThresholdSettings,
@@ -102,6 +104,10 @@ export class SettingsService implements OnModuleInit {
     return this.read(SETTING_KEYS.install, DEFAULT_INSTALL);
   }
 
+  async getRestart(): Promise<RestartSettings> {
+    return this.read(SETTING_KEYS.restart, DEFAULT_RESTART);
+  }
+
   /**
    * Bewusst ohne Zwischenspeicher. Die Werte werden pro Abgleich einmal
    * gelesen, nicht pro Anfrage — ein Cache waere hier nur eine weitere Stelle,
@@ -183,6 +189,15 @@ export class SettingsService implements OnModuleInit {
   async updateInstall(patch: Partial<InstallSettings>): Promise<InstallSettings> {
     const next = { ...(await this.getInstall()), ...definedOnly(patch) };
     await this.write(SETTING_KEYS.install, next, 'Installationsauftraege.');
+    return next;
+  }
+
+  /** Die Wahlmoeglichkeiten kommen sortiert und ohne Doppel an. */
+  async updateRestart(patch: Partial<RestartSettings>): Promise<RestartSettings> {
+    const next = { ...(await this.getRestart()), ...definedOnly(patch) };
+    next.deferralMinutes = [...new Set(next.deferralMinutes)].sort((a, b) => a - b);
+    next.message = next.message.trim();
+    await this.write(SETTING_KEYS.restart, next, 'Neustarts.');
     return next;
   }
 

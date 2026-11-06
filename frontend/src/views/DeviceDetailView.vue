@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Loader2,
   MonitorDown,
+  Power,
   Trash2,
 } from '@lucide/vue';
 import { computed, onMounted, ref } from 'vue';
@@ -20,6 +21,7 @@ import type {
   DeviceDetail,
   DeviceUpdate,
   InstallJob,
+  RestartJob,
   Timeline,
   TimelineEntry,
 } from '@/api/types';
@@ -48,6 +50,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import HresultCell from '@/components/HresultCell.vue';
 import InstallDialog from '@/components/InstallDialog.vue';
+import RestartDialog from '@/components/RestartDialog.vue';
+import RestartEvents from '@/components/RestartEvents.vue';
 import InstallResultList from '@/components/InstallResultList.vue';
 import JobStateLegend from '@/components/JobStateLegend.vue';
 import SourceLegend from '@/components/SourceLegend.vue';
@@ -57,6 +61,7 @@ import {
   EVENT_TYPE_LABELS,
   INSTALL_JOB_STATE_LABELS,
   JOB_STATE_LABELS,
+  RESTART_JOB_STATE_LABELS,
   UPDATE_SOURCE_LABELS,
   eventBadgeClass,
   formatBytes,
@@ -67,6 +72,7 @@ import {
   installSummary,
   jobBadgeClass,
   kbUrl,
+  restartJobBadgeClass,
   sourceBadgeClass,
 } from '@/format';
 
@@ -283,6 +289,21 @@ function togglePageUpdates(checked: boolean): void {
 }
 
 const installDialog = ref(false);
+const restartDialog = ref(false);
+const restartJobs = ref<RestartJob[]>([]);
+
+/** Ein offener Neustart steht neben „Letzter Neustart"; ein zweiter liesse sich ohnehin nicht anlegen. */
+const openRestart = computed(() =>
+  restartJobs.value.find((job) => ['pending', 'delivered', 'notified', 'deferred', 'restarting'].includes(job.state)),
+);
+
+const expandedRestarts = ref(new Set<string>());
+
+function toggleRestart(jobId: string): void {
+  const next = new Set(expandedRestarts.value);
+  if (!next.delete(jobId)) next.add(jobId);
+  expandedRestarts.value = next;
+}
 
 function onInstallCreated(): void {
   selectedUpdates.value = new Set();
@@ -312,11 +333,12 @@ async function load(): Promise<void> {
   error.value = null;
 
   try {
-    const [detail, events, updateJobs, installs] = await Promise.all([
+    const [detail, events, updateJobs, installs, restarts] = await Promise.all([
       get<DeviceDetail>(`/api/devices/${props.id}`),
       get<Timeline>(`/api/devices/${props.id}/timeline`, { limit: 100 }),
       get<AgentUpdateJobView[]>('/api/agent-update-jobs', { deviceId: props.id, limit: 50 }),
       get<InstallJob[]>('/api/install-jobs', { deviceId: props.id, limit: 50 }),
+      get<RestartJob[]>('/api/restart-jobs', { deviceId: props.id, limit: 50 }),
     ]);
 
     device.value = detail;
@@ -324,6 +346,7 @@ async function load(): Promise<void> {
     timelineTotal.value = events.total;
     jobs.value = updateJobs;
     installJobs.value = installs;
+    restartJobs.value = restarts;
 
     // Was inzwischen installiert oder zurückgezogen ist, fällt aus der Auswahl.
     const open = new Set(installableUpdates.value.map((update) => update.updateId));
@@ -512,10 +535,25 @@ onMounted(load);
               <!-- Vom Agent ab 0.8.0. Ein Hochfahren mit Schnellstart zählt
                    nicht — für Windows Update ist es auch kein Neustart. -->
               <dt class="text-muted-foreground text-xs">Letzter Neustart</dt>
-              <dd v-if="device.lastBootAt" :title="formatDateTime(device.lastBootAt)">
-                {{ formatRelative(device.lastBootAt) }}
+              <dd class="flex flex-wrap items-center gap-2">
+                <span v-if="device.lastBootAt" :title="formatDateTime(device.lastBootAt)">
+                  {{ formatRelative(device.lastBootAt) }}
+                </span>
+                <span v-else>—</span>
+                <Badge v-if="openRestart" variant="outline" :class="restartJobBadgeClass(openRestart.state)">
+                  Neustart {{ RESTART_JOB_STATE_LABELS[openRestart.state] }}
+                </Badge>
+                <Button
+                  v-else-if="device.enrolledAt && device.status === 'active'"
+                  variant="outline"
+                  size="sm"
+                  class="h-7"
+                  @click="restartDialog = true"
+                >
+                  <Power class="size-3.5" />
+                  Neustart anfordern
+                </Button>
               </dd>
-              <dd v-else>—</dd>
             </div>
             <div>
               <dt class="text-muted-foreground text-xs">Organisationseinheit</dt>
@@ -566,6 +604,7 @@ onMounted(load);
         <TabsList>
           <TabsTrigger value="updates">Offene Updates ({{ openUpdates.length }})</TabsTrigger>
           <TabsTrigger value="installs">Installationen ({{ installJobs.length }})</TabsTrigger>
+          <TabsTrigger value="restarts">Neustarts ({{ restartJobs.length }})</TabsTrigger>
           <TabsTrigger value="timeline">Verlauf ({{ timelineTotal }})</TabsTrigger>
           <TabsTrigger value="checkins">Check-ins ({{ device.checkins.length }})</TabsTrigger>
           <TabsTrigger value="agent">Agent-Updates ({{ jobs.length }})</TabsTrigger>
@@ -864,6 +903,75 @@ onMounted(load);
           </div>
         </TabsContent>
 
+        <!-- ===================== Neustarts ===================== -->
+        <TabsContent value="restarts">
+          <p class="text-muted-foreground mb-3 text-sm">
+            Die angeforderten Neustarts dieses Geräts, neueste zuerst. Erledigt ist einer, sobald das
+            Gerät den Neustart meldet.
+          </p>
+
+          <div class="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead class="w-10" />
+                  <TableHead class="w-40">Angelegt</TableHead>
+                  <TableHead>Grund</TableHead>
+                  <TableHead class="w-36">Status</TableHead>
+                  <TableHead class="w-48">Benutzer</TableHead>
+                  <TableHead class="w-28">Verschoben</TableHead>
+                  <TableHead class="w-40">Abgeschlossen</TableHead>
+                </TableRow>
+              </TableHeader>
+
+              <TableBody>
+                <TableRow v-if="restartJobs.length === 0">
+                  <TableCell :colspan="7" class="text-muted-foreground py-8 text-center">
+                    Für dieses Gerät wurde noch kein Neustart angefordert.
+                  </TableCell>
+                </TableRow>
+
+                <template v-for="job in restartJobs" :key="job.id">
+                  <TableRow class="cursor-pointer" @click="toggleRestart(job.id)">
+                    <TableCell>
+                      <ChevronRight
+                        class="text-muted-foreground size-4 transition-transform"
+                        :class="expandedRestarts.has(job.id) ? 'rotate-90' : ''"
+                      />
+                    </TableCell>
+                    <TableCell>{{ formatDateTime(job.createdAt) }}</TableCell>
+                    <TableCell>
+                      <div>{{ job.reason ?? '—' }}</div>
+                      <RouterLink
+                        :to="{ name: 'restarts', query: { request: job.requestId } }"
+                        class="text-primary text-xs hover:underline"
+                        @click.stop
+                      >
+                        Zur Anforderung
+                      </RouterLink>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" :class="restartJobBadgeClass(job.state)">
+                        {{ RESTART_JOB_STATE_LABELS[job.state] }}
+                      </Badge>
+                      <div v-if="job.error" class="text-destructive mt-1 text-xs">{{ job.error }}</div>
+                    </TableCell>
+                    <TableCell class="text-sm">{{ job.lastUser ?? '—' }}</TableCell>
+                    <TableCell class="tabular">{{ job.deferrals }}×</TableCell>
+                    <TableCell>{{ formatDateTime(job.completedAt) }}</TableCell>
+                  </TableRow>
+
+                  <TableRow v-if="expandedRestarts.has(job.id)" class="bg-muted/30 hover:bg-muted/30">
+                    <TableCell :colspan="7" class="py-2">
+                      <RestartEvents :events="job.events" />
+                    </TableCell>
+                  </TableRow>
+                </template>
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
         <!-- ===================== Verlauf ===================== -->
         <TabsContent value="timeline">
           <div class="rounded-md border">
@@ -1060,6 +1168,13 @@ onMounted(load);
         :selected-update-ids="[...selectedUpdates]"
         :hostname="device.hostname"
         @created="onInstallCreated"
+      />
+
+      <RestartDialog
+        v-model:open="restartDialog"
+        :device-ids="[device.id]"
+        :hostname="device.hostname"
+        @created="load"
       />
     </template>
   </div>

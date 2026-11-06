@@ -10,6 +10,7 @@ import { UserPreferences1793923200000 } from '../../migrations/1793923200000-Use
 import { UniqueUpdateEvents1794009600000 } from '../../migrations/1794009600000-UniqueUpdateEvents.js';
 import { RemoveStoreApps1794096000000 } from '../../migrations/1794096000000-RemoveStoreApps.js';
 import { AgentRollouts1794182400000 } from '../../migrations/1794182400000-AgentRollouts.js';
+import { RestartJobs1794268800000 } from '../../migrations/1794268800000-RestartJobs.js';
 import { LastBootAt1793750400000 } from '../../migrations/1793750400000-LastBootAt.js';
 import { LastLogonUser1793664000000 } from '../../migrations/1793664000000-LastLogonUser.js';
 import { PostRebootPending1789600000000 } from '../../migrations/1789600000000-PostRebootPending.js';
@@ -69,6 +70,7 @@ export const dataSourceOptions: DataSourceOptions = {
     UniqueUpdateEvents1794009600000,
     RemoveStoreApps1794096000000,
     AgentRollouts1794182400000,
+    RestartJobs1794268800000,
   ],
   migrationsTableName: 'schema_migrations',
 

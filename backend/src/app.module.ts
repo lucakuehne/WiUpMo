@@ -16,6 +16,7 @@ import { PreferencesModule } from './preferences/preferences.module.js';
 import { HealthController } from './health/health.controller.js';
 import { ReleasesModule } from './releases/releases.module.js';
 import { ReportsModule } from './reports/reports.module.js';
+import { RestartJobsModule } from './restart-jobs/restart-jobs.module.js';
 import { RetentionModule } from './retention/retention.module.js';
 import { SettingsModule } from './settings/settings.module.js';
 import { UpdatesModule } from './updates/updates.module.js';
@@ -49,6 +50,7 @@ const frontendAvailable = existsSync(frontendRoot);
     ReleasesModule,
     InstallJobsModule,
     PreferencesModule,
+    RestartJobsModule,
     RetentionModule,
     AdModule,
     ...(frontendAvailable

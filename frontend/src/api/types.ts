@@ -446,6 +446,89 @@ export interface InstallSettings {
   expiryDays: number;
 }
 
+/** Wie ein angeforderter Neustart beim Benutzer abläuft. */
+export interface RestartSettings {
+  /** Wahlen zum Verschieben, in Minuten. */
+  deferralMinutes: number[];
+  /** „Bis morgen um … Uhr"; null blendet die Wahl aus. */
+  nextMorningHour: number | null;
+  maxDeferrals: number;
+  /** Ab der ersten Meldung. */
+  deadlineHours: number;
+  countdownMinutes: number;
+  message: string;
+  expiryDays: number;
+}
+
+export type RestartJobState =
+  | 'pending'
+  | 'delivered'
+  | 'notified'
+  | 'deferred'
+  | 'restarting'
+  | 'done'
+  | 'failed'
+  | 'expired'
+  | 'cancelled';
+
+/** Eine Rückmeldung des Agents im Verlauf eines Neustarts. */
+export interface RestartEvent {
+  at: string;
+  state: string;
+  user?: string;
+  until?: string;
+  note?: string;
+}
+
+export interface RestartJob {
+  id: string;
+  requestId: string;
+  reason: string | null;
+  deviceId: string;
+  hostname: string;
+  state: RestartJobState;
+  createdAt: string;
+  deliveredAt: string | null;
+  notifiedAt: string | null;
+  deadlineAt: string | null;
+  deferrals: number;
+  deferredUntil: string | null;
+  lastUser: string | null;
+  completedAt: string | null;
+  error: string | null;
+  events: RestartEvent[];
+}
+
+export interface RestartJobsSkipped {
+  openJob: number;
+  agentTooOld: number;
+  server: number;
+  notEligible: number;
+}
+
+/** Was in einem Zug für mehrere Geräte angefordert wurde. */
+export interface RestartRequestView {
+  id: string;
+  reason: string | null;
+  rules: Omit<RestartSettings, 'expiryDays'>;
+  requestedDevices: number;
+  skipped: RestartJobsSkipped | null;
+  createdBy: string;
+  createdAt: string;
+  devices: number;
+  states: Record<RestartJobState, number>;
+  deferrals: number;
+  lastCompletedAt: string | null;
+}
+
+export interface CreateRestartJobsResult {
+  /** Null, wenn kein Gerät einen Auftrag bekam. */
+  requestId: string | null;
+  created: number;
+  skipped: RestartJobsSkipped;
+  minimumAgentVersion: string;
+}
+
 /** Klassifikation von Windows Update; das Backend leitet sie aus den Kategorien ab. */
 export type UpdateClassification =
   | 'security'
@@ -622,6 +705,7 @@ export interface SettingsView {
   thresholds: ThresholdSettings;
   retention: RetentionSettings;
   install: InstallSettings;
+  restart: RestartSettings;
 }
 
 export interface AdStatus {

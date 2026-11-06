@@ -11,6 +11,7 @@ export const SETTING_KEYS = {
   thresholds: 'thresholds',
   retention: 'retention',
   install: 'install',
+  restart: 'restart',
 } as const;
 
 export type AuthProviderName = 'local' | 'ldap';
@@ -287,6 +288,58 @@ export const MAX_INSTALL_EXPIRY_DAYS = 90;
 
 export const DEFAULT_INSTALL: InstallSettings = {
   expiryDays: 14,
+};
+
+/**
+ * Wie ein angeforderter Neustart beim angemeldeten Benutzer ablaeuft.
+ *
+ * Die Werte gehen beim Anlegen mit in den Auftrag: Eine spaetere Aenderung
+ * gilt fuer neue Auftraege, ein laufender behaelt seine Regeln.
+ */
+export interface RestartSettings {
+  /** Wahlmoeglichkeiten zum Verschieben, in Minuten. */
+  deferralMinutes: number[];
+
+  /** „Bis morgen um … Uhr" als weitere Wahl; null blendet sie aus. */
+  nextMorningHour: number | null;
+
+  /** So oft darf der Benutzer verschieben. */
+  maxDeferrals: number;
+
+  /** Spaetestens so viele Stunden nach der ersten Meldung wird neu gestartet. */
+  deadlineHours: number;
+
+  /** Der letzte Countdown, nicht mehr verschiebbar, in Minuten. */
+  countdownMinutes: number;
+
+  /** Zusaetzlicher Text in der Meldung, etwa ein Ansprechpartner. Leer: keiner. */
+  message: string;
+
+  /** Tage, bis ein nicht abgeholter Auftrag verfaellt. */
+  expiryDays: number;
+}
+
+export const RESTART_LIMITS = {
+  deferralMinutes: { min: 5, max: 1440, maxOptions: 6 },
+  maxDeferrals: { min: 0, max: 10 },
+  deadlineHours: { min: 1, max: 168 },
+  countdownMinutes: { min: 1, max: 60 },
+  messageLength: 500,
+  expiryDays: { min: 1, max: 30 },
+} as const;
+
+/**
+ * Wie geplant: verschieben um eine oder vier Stunden oder bis zum naechsten
+ * Morgen, hoechstens dreimal, spaetestens einen Tag nach der ersten Meldung.
+ */
+export const DEFAULT_RESTART: RestartSettings = {
+  deferralMinutes: [60, 240],
+  nextMorningHour: 8,
+  maxDeferrals: 3,
+  deadlineHours: 24,
+  countdownMinutes: 10,
+  message: '',
+  expiryDays: 7,
 };
 
 export const DEFAULT_RETENTION: RetentionSettings = {

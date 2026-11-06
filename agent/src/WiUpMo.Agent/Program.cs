@@ -11,6 +11,7 @@ using WiUpMo.Agent;
 using WiUpMo.Agent.Backend;
 using WiUpMo.Agent.Install;
 using WiUpMo.Agent.Installation;
+using WiUpMo.Agent.Restart;
 using WiUpMo.Agent.Storage;
 using WiUpMo.Agent.Update;
 using WiUpMo.Agent.Windows;
@@ -51,6 +52,21 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
+        // Die Neustart-Meldung laeuft im Konto des Benutzers, in seiner Sitzung.
+        // Sie braucht weder Konfiguration noch Protokoll und kommt deshalb vor
+        // allem anderen — auch, weil der Benutzer das Datenverzeichnis nicht
+        // beschreiben darf.
+        if (HasFlag(args, "--restart-prompt"))
+        {
+            int index = Array.FindIndex(args, a => a.Equals("--pipe", StringComparison.OrdinalIgnoreCase));
+            return RestartPromptApp.Run(index >= 0 && index + 1 < args.Length ? args[index + 1] : null);
+        }
+
+        if (HasFlag(args, "--restart-prompt-preview"))
+        {
+            return RestartPromptApp.Preview(final: HasFlag(args, "--final"));
+        }
+
         AgentOptions options = LoadOptions(args);
 
         // Einrichtung laeuft ohne Host und ohne Serilog: sie schreibt auf die
@@ -209,6 +225,8 @@ internal static class Program
         builder.Services.AddSingleton<SelfUpdateService>();
         builder.Services.AddSingleton<WindowsUpdateInstaller>();
         builder.Services.AddSingleton<InstallJobRunner>();
+        builder.Services.AddSingleton<RestartCoordinator>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<RestartCoordinator>());
         builder.Services.AddSingleton<AgentCycle>();
         builder.Services.AddHostedService<Worker>();
 

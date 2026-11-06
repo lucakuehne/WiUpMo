@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BarChart3, Bot, Download, LineChart, LogOut, Monitor, Settings } from '@lucide/vue';
+import { BarChart3, Bot, Download, LineChart, LogOut, Monitor, Power, Settings } from '@lucide/vue';
 import { computed, watchEffect } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,7 @@ const items = [
   { label: 'Dashboard', icon: BarChart3, to: '/' },
   { label: 'Geräte', icon: Monitor, to: '/devices' },
   { label: 'Windows Updates', icon: Download, to: '/updates' },
+  { label: 'Neustarts', icon: Power, to: '/restarts' },
   { label: 'Agents', icon: Bot, to: '/agents' },
   { label: 'Auswertungen', icon: LineChart, to: '/reports' },
   { label: 'Einstellungen', icon: Settings, to: '/settings' },

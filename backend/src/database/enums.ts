@@ -76,6 +76,22 @@ export enum AgentUpdateJobState {
   Failed = 'failed',
 }
 
+/**
+ * Weg eines Neustart-Auftrags: abgeholt, dem Benutzer gezeigt, verschoben,
+ * eingeleitet. `done` setzt erst der naechste gemeldete Neustart.
+ */
+export enum RestartJobState {
+  Pending = 'pending',
+  Delivered = 'delivered',
+  Notified = 'notified',
+  Deferred = 'deferred',
+  Restarting = 'restarting',
+  Done = 'done',
+  Failed = 'failed',
+  Expired = 'expired',
+  Cancelled = 'cancelled',
+}
+
 export enum InstallJobState {
   /** Angelegt, wartet auf den Zeitpunkt bzw. den naechsten Check-in. */
   Pending = 'pending',

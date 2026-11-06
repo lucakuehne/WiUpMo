@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { InstallRequestDto } from '../../install-jobs/dto/install-job.dto.js';
 import { AgentUpdateJobDto } from '../../releases/dto/release.dto.js';
+import { RestartRequestDto } from '../../restart-jobs/dto/restart-job.dto.js';
 import { ArrayMaxSize, ArrayMinSize, IsArray, ValidateNested } from 'class-validator';
 import { SnapshotDto } from './snapshot.dto.js';
 
@@ -77,4 +78,17 @@ export class CheckinResponseDto {
     description: 'Faelliger Installationsauftrag, sonst null.',
   })
   installRequest: InstallRequestDto | null = null;
+
+  /**
+   * Offener Neustart-Auftrag, sonst null. Nur fuer Agents ab 0.9.0. Geht mit,
+   * bis der Neustart eingeleitet ist: Fehlt er, ist er weggefallen, und der
+   * Agent schliesst eine offene Meldung.
+   */
+  @ApiProperty({
+    type: () => RestartRequestDto,
+    nullable: true,
+    required: false,
+    description: 'Offener Neustart-Auftrag, sonst null.',
+  })
+  restartRequest: RestartRequestDto | null = null;
 }

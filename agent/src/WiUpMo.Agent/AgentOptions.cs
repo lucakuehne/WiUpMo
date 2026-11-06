@@ -135,4 +135,11 @@ public sealed class AgentOptions
     /// Test prueft das Selbst-Update, nicht Windows Update. Im Betrieb nie setzen.
     /// </summary>
     public bool SimulateWindowsUpdate { get; set; }
+
+    /// <summary>
+    /// Startet nicht neu, sondern legt nur eine Datei ab, und behandelt das
+    /// Geraet, als waere niemand angemeldet — auf dem Runner gibt es keinen
+    /// Benutzer, dem sich eine Meldung zeigen liesse. Im Betrieb nie setzen.
+    /// </summary>
+    public bool SimulateRestart { get; set; }
 }

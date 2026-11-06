@@ -155,6 +155,8 @@ function Set-TestSettings {
   $json = Get-Content $file -Raw | ConvertFrom-Json
   $json.Agent | Add-Member -Force -NotePropertyName StartupDelaySeconds -NotePropertyValue 0
   $json.Agent | Add-Member -Force -NotePropertyName SimulateWindowsUpdate -NotePropertyValue $true
+  # Auf dem Runner wird nicht neu gestartet; der Agent legt nur eine Datei ab.
+  $json.Agent | Add-Member -Force -NotePropertyName SimulateRestart -NotePropertyValue $true
   $json.Agent | Add-Member -Force -NotePropertyName UpdateVerificationMinutes -NotePropertyValue $VerificationMinutes
   # Fuer die alte Fassung, die den Schalter oben nicht kennt: lokal suchen, kurz warten.
   $json.Agent | Add-Member -Force -NotePropertyName SearchOnline -NotePropertyValue $false
@@ -302,6 +304,22 @@ try {
     $state.enrollments -gt $enrolledBefore -and $state.lastCheckin.agentVersion -eq $versionA
   } | Out-Null
   Save-Evidence '4-neu-installiert'
+
+  # --- 3. Neustart auf Anforderung ---------------------------------------------
+  # Simuliert: Auf dem Runner ist niemand angemeldet, also wird ohne Meldung
+  # "neu gestartet" - an Stelle des Neustarts legt der Agent eine Datei ab.
+
+  Write-Step 'Neustart auf Anforderung (simuliert)'
+  Invoke-RestMethod -Method Post "$Backend/control/restart" | Out-Null
+  Restart-Agent
+  Wait-Until 'Neustart eingeleitet und gemeldet' 180 {
+    @((Get-State).restartReports | Where-Object { $_.state -eq 'restarting' }).Count -gt 0
+  } | Out-Null
+  $restart = @((Get-State).restartReports | Where-Object { $_.state -eq 'restarting' })[0]
+  Assert-That ($restart.note -eq 'niemand angemeldet') "Begruendung: $($restart.note)"
+  Assert-That (Test-Path (Join-Path $Data 'restart-simulated.txt')) 'Simulierter Neustart abgelegt'
+  Assert-That (-not (Test-Path (Join-Path $Data 'restart.json'))) 'Auftrag danach abgelegt'
+  Save-Evidence '5-neustart'
 
   Write-Step 'Deinstallation'
   Uninstall-Agent

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using WiUpMo.Agent.Backend;
 using WiUpMo.Agent.Contracts;
 using WiUpMo.Agent.Installation;
+using WiUpMo.Agent.Restart;
 using WiUpMo.Agent.Storage;
 using WiUpMo.Agent.Update;
 using WiUpMo.Agent.Windows;
@@ -25,6 +26,7 @@ public sealed class AgentCycle(
     BackendClient backend,
     SelfUpdateService selfUpdate,
     InstallJobRunner installs,
+    RestartCoordinator restarts,
     CheckinSchedule schedule,
     AgentHealth health,
     ILogger<AgentCycle> logger)
@@ -193,6 +195,15 @@ public sealed class AgentCycle(
             {
                 await installs.AcceptAsync(identity, install, ct).ConfigureAwait(false);
             }
+
+            // Nur mit einer Antwort: Ohne sie laesst sich nicht sagen, ob ein
+            // Neustart-Auftrag weggefallen ist.
+            if (letzte is not null)
+            {
+                await restarts.ApplyAsync(letzte.RestartRequest, ct).ConfigureAwait(false);
+            }
+
+            await restarts.ReportPendingAsync(identity, ct).ConfigureAwait(false);
         }
         catch (BackendException ex) when (ex.StatusCode == HttpStatusCode.Forbidden)
         {

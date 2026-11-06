@@ -269,6 +269,50 @@ public sealed class InstallRequest
     public List<string> UpdateIds { get; init; } = [];
 }
 
+/// <summary>
+/// Neustart-Auftrag, den das Backend der Check-in-Antwort beilegt — samt den
+/// Regeln, nach denen der Benutzer verschieben darf. Geht mit, bis der Neustart
+/// eingeleitet ist; fehlt er, ist er weggefallen.
+/// </summary>
+public sealed class RestartRequest
+{
+    public string JobId { get; init; } = string.Empty;
+
+    /// <summary>Grund fuer die Meldung beim Benutzer; null fuer den Standardtext.</summary>
+    public string? Reason { get; init; }
+
+    public List<int> DeferralMinutes { get; init; } = [];
+
+    /// <summary>„Bis morgen um … Uhr" als weitere Wahl; null blendet sie aus.</summary>
+    public int? NextMorningHour { get; init; }
+
+    public int MaxDeferrals { get; init; }
+
+    /// <summary>Spaetestens so viele Stunden nach der ersten Meldung.</summary>
+    public int DeadlineHours { get; init; } = 24;
+
+    public int CountdownMinutes { get; init; } = 10;
+
+    /// <summary>Zusaetzlicher Text der IT, etwa ein Ansprechpartner.</summary>
+    public string? Message { get; init; }
+}
+
+public sealed class RestartResultRequest
+{
+    public required string JobId { get; init; }
+
+    /// <summary><c>notified</c>, <c>deferred</c>, <c>restarting</c> oder <c>failed</c>.</summary>
+    public required string State { get; init; }
+
+    public DateTimeOffset? At { get; init; }
+    public DateTimeOffset? DeadlineAt { get; init; }
+    public DateTimeOffset? DeferredUntil { get; init; }
+    public int? Deferrals { get; init; }
+    public string? User { get; init; }
+    public string? Note { get; init; }
+    public string? Error { get; init; }
+}
+
 public sealed class CheckinResponse
 {
     public List<SnapshotResult> Results { get; init; } = [];
@@ -281,6 +325,12 @@ public sealed class CheckinResponse
     /// Schritt 1 der Installationsauftraege kennt das Feld nicht.
     /// </summary>
     public InstallRequest? InstallRequest { get; init; }
+
+    /// <summary>
+    /// Offener Neustart-Auftrag, sonst <c>null</c>. Ein Backend vor den
+    /// Neustarts kennt das Feld nicht; der Agent haelt dann nichts fest.
+    /// </summary>
+    public RestartRequest? RestartRequest { get; init; }
 
     /// <summary>
     /// Der zentral eingestellte Abstand bis zum naechsten Durchlauf, in

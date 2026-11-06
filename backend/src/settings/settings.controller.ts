@@ -11,6 +11,8 @@ import {
   EnrollmentTokenDto,
   InstallSettingsDto,
   InstallSettingsViewDto,
+  RestartSettingsDto,
+  RestartSettingsViewDto,
   RetentionSettingsDto,
   RetentionSettingsViewDto,
   SettingsViewDto,
@@ -34,16 +36,17 @@ export class SettingsController {
   @Get()
   @ApiOperation({ summary: 'Alle Laufzeiteinstellungen.' })
   async read(): Promise<SettingsViewDto> {
-    const [agent, ad, auth, thresholds, retention, install] = await Promise.all([
+    const [agent, ad, auth, thresholds, retention, install, restart] = await Promise.all([
       this.settings.getAgent(),
       this.settings.getAd(),
       this.settings.getAuth(),
       this.settings.getThresholds(),
       this.settings.getRetention(),
       this.settings.getInstall(),
+      this.settings.getRestart(),
     ]);
 
-    return { agent, ad: toAdView(ad), auth, thresholds, retention, install };
+    return { agent, ad: toAdView(ad), auth, thresholds, retention, install, restart };
   }
 
   @Put('auth')
@@ -91,6 +94,12 @@ export class SettingsController {
   @ApiOperation({ summary: 'Aendert die Frist fuer Installationsauftraege.' })
   updateInstall(@Body() dto: InstallSettingsDto): Promise<InstallSettingsViewDto> {
     return this.settings.updateInstall(dto);
+  }
+
+  @Put('restart')
+  @ApiOperation({ summary: 'Aendert, wie ein angeforderter Neustart beim Benutzer ablaeuft.' })
+  updateRestart(@Body() dto: RestartSettingsDto): Promise<RestartSettingsViewDto> {
+    return this.settings.updateRestart(dto);
   }
 
   @Put('retention')

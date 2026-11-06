@@ -18,6 +18,7 @@ import {
   MAX_INSTALL_EXPIRY_DAYS,
   MIN_CHECK_INTERVAL_MINUTES,
   MIN_INSTALL_EXPIRY_DAYS,
+  RESTART_LIMITS,
 } from '../settings.types.js';
 
 const toInt = () =>
@@ -250,6 +251,67 @@ export class InstallSettingsViewDto {
   expiryDays: number;
 }
 
+/** Wie ein angeforderter Neustart beim Benutzer ablaeuft; nicht gesendete Felder bleiben. */
+export class RestartSettingsDto {
+  @IsArray()
+  @IsInt({ each: true })
+  @Min(RESTART_LIMITS.deferralMinutes.min, { each: true })
+  @Max(RESTART_LIMITS.deferralMinutes.max, { each: true })
+  @ArrayMaxSize(RESTART_LIMITS.deferralMinutes.maxOptions)
+  @IsOptional()
+  deferralMinutes?: number[];
+
+  /** Null blendet „bis morgen" aus. */
+  @IsInt()
+  @Min(0)
+  @Max(23)
+  @IsOptional()
+  nextMorningHour?: number | null;
+
+  @toInt()
+  @IsInt()
+  @Min(RESTART_LIMITS.maxDeferrals.min)
+  @Max(RESTART_LIMITS.maxDeferrals.max)
+  @IsOptional()
+  maxDeferrals?: number;
+
+  @toInt()
+  @IsInt()
+  @Min(RESTART_LIMITS.deadlineHours.min)
+  @Max(RESTART_LIMITS.deadlineHours.max)
+  @IsOptional()
+  deadlineHours?: number;
+
+  @toInt()
+  @IsInt()
+  @Min(RESTART_LIMITS.countdownMinutes.min)
+  @Max(RESTART_LIMITS.countdownMinutes.max)
+  @IsOptional()
+  countdownMinutes?: number;
+
+  @IsString()
+  @MaxLength(RESTART_LIMITS.messageLength)
+  @IsOptional()
+  message?: string;
+
+  @toInt()
+  @IsInt()
+  @Min(RESTART_LIMITS.expiryDays.min)
+  @Max(RESTART_LIMITS.expiryDays.max)
+  @IsOptional()
+  expiryDays?: number;
+}
+
+export class RestartSettingsViewDto {
+  deferralMinutes: number[];
+  nextMorningHour: number | null;
+  maxDeferrals: number;
+  deadlineHours: number;
+  countdownMinutes: number;
+  message: string;
+  expiryDays: number;
+}
+
 /** Ansicht der AD-Einstellungen ohne das Passwort. */
 export class AdSettingsViewDto {
   url: string;
@@ -300,4 +362,5 @@ export class SettingsViewDto {
   thresholds: ThresholdSettingsViewDto;
   retention: RetentionSettingsViewDto;
   install: InstallSettingsViewDto;
+  restart: RestartSettingsViewDto;
 }

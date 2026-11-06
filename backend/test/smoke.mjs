@@ -850,6 +850,116 @@ await step('Stoerungen der Agents, nach Meldung zusammengefasst', async () => {
   await api.request('GET', '/api/agent-problems?days=3', { expect: 400 });
 });
 
+// --- Neustarts -------------------------------------------------------------------
+
+await step('Neustart-Regeln in den Einstellungen', async () => {
+  const defaults = (await api.get('/api/settings')).restart;
+  assert.deepEqual(
+    [defaults.deferralMinutes, defaults.nextMorningHour, defaults.maxDeferrals, defaults.deadlineHours, defaults.countdownMinutes],
+    [[60, 240], 8, 3, 24, 10],
+  );
+
+  // Sortiert, ohne Doppel, Text getrimmt; nicht Gesendetes bleibt.
+  const saved = await api.put('/api/settings/restart', { maxDeferrals: 2, message: '  Service Desk  ', deferralMinutes: [240, 60, 60] });
+  assert.deepEqual([saved.maxDeferrals, saved.message, saved.deferralMinutes, saved.deadlineHours], [2, 'Service Desk', [60, 240], 24]);
+  assert.equal((await api.put('/api/settings/restart', { nextMorningHour: null })).nextMorningHour, null);
+  await api.put('/api/settings/restart', { nextMorningHour: 8 });
+
+  await api.request('PUT', '/api/settings/restart', { body: { deadlineHours: 0 }, expect: 400 });
+  await api.request('PUT', '/api/settings/restart', { body: { deferralMinutes: [1] }, expect: 400 });
+  await api.request('PUT', '/api/settings/restart', { body: { nextMorningHour: 24 }, expect: 400 });
+});
+
+await step('Neustart: angefordert, gemeldet, verschoben, durch den Systemstart erledigt', async () => {
+  // Ein Server und ein Agent vor 0.9.0 werden uebergangen.
+  const serverHost = host(`SRV-${RUN}`, { osName: 'Windows Server 2022 Standard' });
+  const server = await enroll(agent, enrollmentToken, serverHost);
+  await checkin(agent, server.token, snapshot({ hostInfo: serverHost, collectedAt: minutesAgo(1) }));
+  const old = (
+    await agent.request('POST', '/api/agent/v1/enroll', {
+      body: { enrollmentToken, host: host(`OLDR-${RUN}`), agentVersion: '0.8.2' },
+    })
+  ).data;
+
+  const created = await api.post('/api/restart-jobs', {
+    deviceIds: [device.deviceId, server.deviceId, old.deviceId],
+    reason: 'Updates abschliessen',
+  });
+  assert.equal(created.created, 1);
+  assert.deepEqual(created.skipped, { openJob: 0, agentTooOld: 1, server: 1, notEligible: 0 });
+  assert.equal(created.minimumAgentVersion, '0.9.0');
+  const again = await api.post('/api/restart-jobs', { deviceIds: [device.deviceId] });
+  assert.deepEqual([again.created, again.skipped.openJob, again.requestId], [0, 1, null]);
+
+  // Beim Check-in, mit den Regeln zum Zeitpunkt des Anlegens.
+  const current = (minutes, extra = {}) =>
+    snapshot({ hostInfo: { ...hostInfo, ...extra }, collectedAt: minutesAgo(minutes), available: [U.defender, U.late], pendingReboot: true });
+  const delivered = (await checkin(agent, device.token, current(0.5))).restartRequest;
+  assert.equal(delivered?.reason, 'Updates abschliessen');
+  assert.deepEqual(
+    [delivered.maxDeferrals, delivered.message, delivered.deferralMinutes, delivered.nextMorningHour, delivered.deadlineHours, delivered.countdownMinutes],
+    [2, 'Service Desk', [60, 240], 8, 24, 10],
+  );
+
+  // Gemeldet und verschoben, von einem Benutzer; fremde Geraete schliessen ihn nicht.
+  const jobId = delivered.jobId;
+  const deadlineAt = new Date(Date.now() + 24 * 3_600_000).toISOString();
+  await agent.post('/api/agent/v1/restart-result', { jobId, state: 'notified', deadlineAt, deferrals: 0, user: 'TEST\\lena' }, { token: device.token });
+  const until = new Date(Date.now() + 3_600_000).toISOString();
+  await agent.post('/api/agent/v1/restart-result', { jobId, state: 'deferred', deferredUntil: until, deferrals: 1, user: 'TEST\\lena' }, { token: device.token });
+  await agent.request('POST', '/api/agent/v1/restart-result', { body: { jobId, state: 'restarting' }, token: server.token, expect: 404 });
+
+  const [deferred] = await api.get(`/api/restart-jobs?deviceId=${device.deviceId}`);
+  assert.deepEqual([deferred.state, deferred.deferrals, deferred.lastUser], ['deferred', 1, 'TEST\\lena']);
+  assert.equal(new Date(deferred.deferredUntil).toISOString(), until);
+  assert.equal(new Date(deferred.deadlineAt).toISOString(), deadlineAt);
+  assert.deepEqual(deferred.events.map((e) => e.state), ['delivered', 'notified', 'deferred']);
+
+  // Bis zum Einleiten geht er weiter mit, danach nicht mehr.
+  assert.equal((await checkin(agent, device.token, current(0.4))).restartRequest?.jobId, jobId);
+  const restartingAt = new Date(Date.now() - 60_000).toISOString();
+  await agent.post('/api/agent/v1/restart-result', { jobId, state: 'restarting', at: restartingAt, user: 'TEST\\lena', note: 'vom Benutzer bestaetigt' }, { token: device.token });
+  assert.equal((await checkin(agent, device.token, current(0.3))).restartRequest, null);
+  assert.equal((await api.get(`/api/restart-jobs?deviceId=${device.deviceId}`))[0].state, 'restarting');
+
+  // Erledigt erst mit einem gemeldeten Systemstart nach dem Einleiten.
+  await checkin(agent, device.token, current(0.2, { lastBootAt: new Date().toISOString() }));
+  const [done] = await api.get(`/api/restart-jobs?deviceId=${device.deviceId}`);
+  assert.equal(done.state, 'done');
+  assert.ok(done.completedAt);
+
+  const request = (await api.get('/api/restart-requests?limit=5')).items.find((r) => r.id === created.requestId);
+  assert.deepEqual(
+    [request.devices, request.requestedDevices, request.states.done, request.deferrals, request.rules.maxDeferrals, request.createdBy],
+    [1, 3, 1, 1, 2, ADMIN.username],
+  );
+  assert.deepEqual(request.skipped, created.skipped);
+  const jobs = await api.get(`/api/restart-requests/${created.requestId}/jobs`);
+  assert.deepEqual(jobs.map((j) => [j.hostname, j.state]), [[HOST, 'done']]);
+});
+
+await step('Neustart abgebrochen: die Meldung entfaellt beim naechsten Check-in', async () => {
+  const created = await api.post('/api/restart-jobs', { deviceIds: [device.deviceId] });
+  assert.equal(created.created, 1);
+  const current = (minutes) =>
+    snapshot({ hostInfo, collectedAt: minutesAgo(minutes), available: [U.defender, U.late], pendingReboot: true });
+  assert.ok((await checkin(agent, device.token, current(0.15))).restartRequest);
+
+  assert.deepEqual(await api.post(`/api/restart-requests/${created.requestId}/cancel`), { cancelled: 1 });
+  assert.deepEqual(await api.post(`/api/restart-requests/${created.requestId}/cancel`), { cancelled: 0 });
+  assert.equal((await checkin(agent, device.token, current(0.1))).restartRequest, null);
+
+  const [job] = await api.get(`/api/restart-jobs?deviceId=${device.deviceId}`);
+  assert.equal(job.state, 'cancelled');
+  await api.request('POST', `/api/restart-jobs/${job.id}/cancel`, { expect: 409 });
+
+  await api.request('GET', '/api/restart-requests/00000000-0000-4000-8000-000000000000/jobs', { expect: 404 });
+  await api.request('POST', '/api/restart-jobs', { body: { deviceIds: [] }, expect: 400 });
+  await api.request('GET', '/api/restart-requests?limit=500', { expect: 400 });
+
+  await api.put('/api/settings/restart', { maxDeferrals: 3, message: '' });
+});
+
 // --- Auslieferung des Frontends -------------------------------------------------
 
 await step('Frontend und API-Grenze', async () => {

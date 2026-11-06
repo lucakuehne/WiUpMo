@@ -23,6 +23,7 @@ import type {
   AgentSettingsView,
   AuthSettings,
   InstallSettings,
+  RestartSettings,
   OrganizationalUnit,
   RetentionResult,
   RetentionSettings,
@@ -59,10 +60,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import AdSyncLog from '@/components/AdSyncLog.vue';
 import GroupPicker from '@/components/GroupPicker.vue';
 import OuPicker from '@/components/OuPicker.vue';
 import { domainOfDn, formatDnPath } from '@/dn';
+import { durationLabel } from '@/format';
 import {
   adjustPortForScheme,
   buildLdapUrl,
@@ -207,6 +210,15 @@ const thresholds = reactive<ThresholdSettings>({
 });
 const retention = reactive<RetentionSettings>({ eventDays: 90, checkinDays: 90 });
 const install = reactive<InstallSettings>({ expiryDays: 14 });
+const restart = reactive<RestartSettings>({
+  deferralMinutes: [60, 240],
+  nextMorningHour: 8,
+  maxDeferrals: 3,
+  deadlineHours: 24,
+  countdownMinutes: 10,
+  message: '',
+  expiryDays: 7,
+});
 
 const probe = ref<AdProbeResult | null>(null);
 const probing = ref(false);
@@ -220,6 +232,7 @@ const savingAuth = ref(false);
 const savingThresholds = ref(false);
 const savingRetention = ref(false);
 const savingInstall = ref(false);
+const savingRestart = ref(false);
 const rotating = ref(false);
 const cleaning = ref(false);
 
@@ -243,6 +256,7 @@ async function load(): Promise<void> {
     Object.assign(thresholds, settings.thresholds);
     Object.assign(retention, settings.retention);
     Object.assign(install, settings.install);
+    Object.assign(restart, settings.restart);
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Die Einstellungen konnten nicht geladen werden.';
   } finally {
@@ -254,7 +268,7 @@ async function load(): Promise<void> {
 const syncLog = ref<{ reload: () => Promise<void> } | null>(null);
 
 async function save(
-  section: 'ad' | 'agent' | 'auth' | 'thresholds' | 'retention' | 'install',
+  section: 'ad' | 'agent' | 'auth' | 'thresholds' | 'retention' | 'install' | 'restart',
   busy: Ref<boolean>,
   payload: unknown,
 ): Promise<void> {
@@ -351,6 +365,24 @@ const saveAuth = () => void save('auth', savingAuth, { ...authSettings });
 const saveThresholds = () => void save('thresholds', savingThresholds, { ...thresholds });
 const saveRetention = () => void save('retention', savingRetention, { ...retention });
 const saveInstall = () => void save('install', savingInstall, { ...install });
+const saveRestart = () => void save('restart', savingRestart, { ...restart });
+
+/** Die Wahlen zum Verschieben, die angeboten werden — plus bereits gespeicherte, falls andere. */
+const deferralChoices = computed(() =>
+  [...new Set([15, 30, 60, 120, 240, 480, ...restart.deferralMinutes])].sort((a, b) => a - b),
+);
+
+function toggleDeferral(minutes: number, checked: boolean): void {
+  const next = new Set(restart.deferralMinutes);
+  if (checked) next.add(minutes);
+  else next.delete(minutes);
+  restart.deferralMinutes = [...next].sort((a, b) => a - b);
+}
+
+/** „Bis morgen" an oder aus; beim Einschalten gilt 8 Uhr. */
+function toggleNextMorning(enabled: boolean): void {
+  restart.nextMorningHour = enabled ? 8 : null;
+}
 
 // --- Active Directory ------------------------------------------------------
 
@@ -1281,6 +1313,95 @@ onMounted(load);
             <CardFooter>
               <Button :disabled="savingInstall" @click="saveInstall">
                 <Loader2 v-if="savingInstall" class="size-4 animate-spin" />
+                Speichern
+              </Button>
+            </CardFooter>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Neustarts</CardTitle>
+              <CardDescription>
+                Wie ein angeforderter Neustart beim angemeldeten Benutzer abläuft. Gilt für neu
+                angeforderte Neustarts; laufende behalten ihre Regeln.
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent class="space-y-4">
+              <fieldset class="space-y-1.5">
+                <legend class="mb-1.5 text-sm font-medium">Verschieben um</legend>
+                <div class="flex flex-wrap gap-x-4 gap-y-1.5">
+                  <label
+                    v-for="minutes in deferralChoices"
+                    :key="minutes"
+                    class="flex items-center gap-2 text-sm"
+                  >
+                    <Checkbox
+                      :model-value="restart.deferralMinutes.includes(minutes)"
+                      @update:model-value="toggleDeferral(minutes, $event === true)"
+                    />
+                    {{ durationLabel(minutes) }}
+                  </label>
+                </div>
+              </fieldset>
+
+              <div class="flex flex-wrap items-center gap-3">
+                <Switch
+                  id="r-morning"
+                  :model-value="restart.nextMorningHour !== null"
+                  @update:model-value="toggleNextMorning($event === true)"
+                />
+                <Label for="r-morning">Bis zum nächsten Morgen um</Label>
+                <Input
+                  v-if="restart.nextMorningHour !== null"
+                  v-model.number="restart.nextMorningHour"
+                  type="number"
+                  min="0"
+                  max="23"
+                  class="w-20"
+                  aria-label="Uhrzeit (Stunde)"
+                />
+                <span v-if="restart.nextMorningHour !== null" class="text-sm">Uhr</span>
+              </div>
+
+              <div class="grid gap-4 sm:grid-cols-2">
+                <div class="space-y-1.5">
+                  <Label for="r-max">Höchstens so oft verschieben</Label>
+                  <Input id="r-max" v-model.number="restart.maxDeferrals" type="number" min="0" max="10" class="w-40" />
+                </div>
+                <div class="space-y-1.5">
+                  <Label for="r-deadline">Spätestens nach (Stunden)</Label>
+                  <Input id="r-deadline" v-model.number="restart.deadlineHours" type="number" min="1" max="168" class="w-40" />
+                </div>
+                <div class="space-y-1.5">
+                  <Label for="r-countdown">Letzter Countdown (Minuten)</Label>
+                  <Input id="r-countdown" v-model.number="restart.countdownMinutes" type="number" min="1" max="60" class="w-40" />
+                </div>
+                <div class="space-y-1.5">
+                  <Label for="r-expiry">Nicht abgeholt verfällt nach (Tagen)</Label>
+                  <Input id="r-expiry" v-model.number="restart.expiryDays" type="number" min="1" max="30" class="w-40" />
+                </div>
+              </div>
+              <p class="text-muted-foreground text-xs">
+                Die Frist zählt ab der ersten Meldung. Ist niemand angemeldet, startet das Gerät
+                sofort neu; Server werden nie neu gestartet.
+              </p>
+
+              <div class="space-y-1.5">
+                <Label for="r-message">Zusätzlicher Text in der Meldung</Label>
+                <Textarea
+                  id="r-message"
+                  v-model="restart.message"
+                  maxlength="500"
+                  rows="2"
+                  placeholder="z. B. Fragen beantwortet der Service Desk unter 1234."
+                />
+              </div>
+            </CardContent>
+
+            <CardFooter>
+              <Button :disabled="savingRestart" @click="saveRestart">
+                <Loader2 v-if="savingRestart" class="size-4 animate-spin" />
                 Speichern
               </Button>
             </CardFooter>

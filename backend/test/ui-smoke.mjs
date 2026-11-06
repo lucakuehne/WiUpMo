@@ -266,6 +266,28 @@ await step('Installationen mit ihren Geraeten', async () => {
   await capture(page, 'installationen');
 });
 
+await step('Neustarts: Anforderung mit Geraeten, Geraet mit Verlauf und Dialog', async () => {
+  await page.goto(`${base}/restarts`);
+  const first = page.locator('table tbody tr').first();
+  await first.waitFor({ timeout: 15_000 });
+  await first.click();
+  const deviceLink = page.locator('table table a[href^="/devices/"]').first();
+  await deviceLink.waitFor({ timeout: 10_000 });
+  await capture(page, 'neustarts');
+
+  // Das Geraet: Verlauf im eigenen Tab, und anfordern laesst sich ein neuer.
+  await deviceLink.click();
+  await page.getByRole('tab', { name: /^Neustarts/ }).click();
+  await page.locator('table tbody tr', { hasText: /neu gestartet|abgebrochen/ }).first().waitFor({ timeout: 10_000 });
+  await capture(page, 'geraet-neustarts');
+
+  await page.getByRole('button', { name: 'Neustart anfordern' }).click();
+  await page.getByRole('dialog').getByText('Der Benutzer kann').waitFor({ timeout: 10_000 });
+  await capture(page, 'geraet-neustart-anfordern');
+  await page.getByRole('dialog').getByRole('button', { name: 'Abbrechen' }).click();
+  await page.getByRole('dialog').waitFor({ state: 'detached', timeout: 5_000 });
+});
+
 await step('Agents: Ausrollen mit Geraeten, Versionen, Stoerungen', async () => {
   await page.goto(`${base}/agents`);
   const first = page.locator('table tbody tr').first();
@@ -306,7 +328,7 @@ await step('Einstellungen: Schwellwerte und Aufbewahrung stehen unter Betrieb', 
   // Alte Lesezeichen auf die frueheren Abschnitte landen dort.
   for (const old of ['thresholds', 'retention']) {
     await page.goto(`${base}/settings/${old}`);
-    for (const title of ['Melde-Intervall', 'Installationsaufträge', 'Schwellwerte', 'Aufbewahrung']) {
+    for (const title of ['Melde-Intervall', 'Installationsaufträge', 'Neustarts', 'Schwellwerte', 'Aufbewahrung']) {
       await page.getByRole('heading', { name: title, exact: true }).waitFor({ timeout: 10_000 });
     }
   }

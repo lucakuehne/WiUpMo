@@ -141,6 +141,7 @@ Drei Quellen, die einander in dieser Reihenfolge überschreiben:
 | `Agent:InstallTimeoutMinutes` | — | 180 | Obergrenze für einen Installationsauftrag, Download und Installation zusammen. |
 | `Agent:UpdateVerificationMinutes` | — | 20 | Frist, in der sich eine neue Fassung bestätigen muss, sonst stellt der Updater zurück. |
 | `Agent:SimulateWindowsUpdate` | — | false | **Nur für den Ende-zu-Ende-Test:** fragt Windows Update nicht ab. Im Betrieb nie setzen. |
+| `Agent:SimulateRestart` | — | false | **Nur für den Ende-zu-Ende-Test:** startet nicht neu, sondern legt `restart-simulated.txt` ab, und behandelt das Gerät, als wäre niemand angemeldet. Im Betrieb nie setzen. |
 | `Agent:InitialHistoryDays` | — | 90 | Rückblick beim allerersten Check-in. |
 | `Agent:LogRetentionDays` | — | 14 | Aufbewahrung der Protokolldateien. |
 
@@ -153,6 +154,7 @@ Unter `%ProgramData%\WiUpMo`:
 | `identity.dat` | Geräte-ID und Secret, mit DPAPI im Maschinenkontext verschlüsselt |
 | `queue.db` | Offline-Warteschlange und Fortschrittsmarker der Historie |
 | `install.json` | Stand eines Installationsauftrags, bis das Backend das Ergebnis hat |
+| `restart.json` | Stand eines Neustart-Auftrags: Frist, Verschiebungen, noch nicht gemeldete Rückmeldungen |
 | `update.json` | Stand eines Selbst-Updates, geteilt zwischen Dienst und Updater |
 | `logs\agent-*.log` | Tagesrotierendes Protokoll des Dienstes |
 | `logs\updater-*.log` | Protokoll des Updaters, nur wenn er etwas zu tun hatte |
@@ -352,13 +354,15 @@ ein Test-Backend (`e2e/fake-backend.mjs`) durch:
 | Update auf B | Umstellen per `binPath` nach `versions\`, vorige Fassung bleibt, Updater-Protokoll |
 | Update auf C (defekt) | bestätigt sich nicht, wird nach der Frist zurückgenommen, `failed` mit Begründung |
 | Deinstallation, Neuinstallation von A | gleich unter `versions\`, nichts am alten Ort, neue Registrierung |
+| Neustart auf Anforderung | simuliert: ohne angemeldeten Benutzer sofort, `restarting` gemeldet, Auftrag abgelegt |
 
 Die Protokolle von Agent und Updater, `sc qc`, die Task-Definition und der
 Zustand des Test-Backends hängen am Lauf als Artefakt `agent-e2e`.
 
-Für den Test setzt das Skript drei Einstellungen in die `appsettings.json`:
-keine Startverzögerung, `SimulateWindowsUpdate` und eine Bestätigungsfrist von
-2 Minuten. Echte Update-Installationen prüft der Test nicht — dafür braucht es
+Für den Test setzt das Skript vier Einstellungen in die `appsettings.json`:
+keine Startverzögerung, `SimulateWindowsUpdate`, `SimulateRestart` und eine
+Bestätigungsfrist von 2 Minuten. Die Meldung beim Benutzer prüft der Test nicht —
+auf dem Runner ist niemand angemeldet; dafür gibt es die Vorschau (siehe unten). Echte Update-Installationen prüft der Test nicht — dafür braucht es
 ein Gerät mit offenen Updates.
 
 ## Installationsaufträge
@@ -393,3 +397,42 @@ nach.
 Vor dem ersten Auftrag auf einem Gerät zeigt `wiupmo-agent.exe --install-probe`
 (als Administrator), ob der Weg trägt. Mit `--once` bleibt der Prozess bis zum
 Ende einer angenommenen Installation offen.
+
+
+## Neustart auf Anforderung
+
+Ab 0.9.0 startet der Agent auf Anforderung aus der Oberfläche neu — für ein Gerät
+oder eine Auswahl, nie für Server. Der Auftrag kommt mit der Check-in-Antwort
+(`restartRequest`) samt den Regeln, nach denen der Benutzer verschieben darf; sie
+stehen unter Einstellungen → Betrieb und gelten so, wie sie beim Anlegen waren.
+
+| Lage | Was passiert |
+|---|---|
+| Niemand angemeldet | Sofort neu starten. |
+| Angemeldet, Sitzung getrennt | Dort lässt sich nichts zeigen. Die Frist läuft; die Meldung kommt, sobald jemand zurück ist, an ihrem Ende wird neu gestartet. |
+| Jemand aktiv | Meldung mit „Jetzt neu starten" und den Wahlen zum Verschieben. Sind die Verschiebungen aufgebraucht oder ist die Frist um, nur noch der letzte Countdown. |
+| Server | Abgelehnt mit Begründung — das Backend legt für Server gar keinen Auftrag an, der Agent prüft den Produkttyp ein zweites Mal. |
+
+Die Frist beginnt mit der ersten Meldung. Wahlen, die über sie hinausgingen,
+fallen weg; bleibt keine, wird bis zur Frist verschoben.
+
+Der Dienst läuft als LocalSystem in Sitzung 0 und kann selbst nichts zeigen. Er
+startet deshalb dieselbe EXE mit `--restart-prompt` im Konto des Benutzers, in
+dessen Sitzung, und spricht mit ihr über eine Named Pipe, die nur dieser
+Benutzer und das System öffnen dürfen. Die Meldung hat keine Adminrechte und
+meldet nur die Wahl; neu startet ausschliesslich der Dienst, über
+`shutdown.exe /r /t 30 /d p:2:17` mit einem Kommentar — im Ereignisprotokoll
+als Ereignis 1074 nachvollziehbar.
+
+Jeder Schritt geht ans Backend (`/restart-result`): gezeigt, verschoben bis wann
+und von wem, eingeleitet, gescheitert. Ob der Neustart geklappt hat, entscheidet
+das Backend am nächsten gemeldeten Systemstart. Wird der Auftrag im Backend
+abgebrochen, schliesst sich eine offene Meldung beim nächsten Check-in.
+
+Wie die Meldung aussieht, zeigt die Vorschau — ohne Dienst und ohne Folgen,
+auch ohne Adminrechte:
+
+```powershell
+.\wiupmo-agent.exe --restart-prompt-preview          # mit Verschieben
+.\wiupmo-agent.exe --restart-prompt-preview --final  # letzter Countdown
+```

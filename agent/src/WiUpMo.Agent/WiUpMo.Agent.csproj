@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>WiUpMo.Agent</RootNamespace>
     <AssemblyName>wiupmo-agent</AssemblyName>
-    <Version>0.8.2</Version>
+    <Version>0.9.0</Version>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
     <!--
@@ -18,6 +18,17 @@
       fuer jeden Build und jede CI.
     -->
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+
+    <!--
+      Fuer die Meldung beim Benutzer, wenn ein Neustart angefordert ist. Sie
+      laeuft als eigener Prozess dieser EXE in der Sitzung des Benutzers.
+    -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <!--
+      Das Backend-Image baut den Agent unter Linux. Fuer die Windows-Frameworks
+      (hier Windows Forms) verlangt das SDK dort diese ausdrueckliche Freigabe.
+    -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
 
     <!--
       Wird beim Publish zu einer einzelnen EXE mit mitgelieferter Runtime.
@@ -46,6 +57,15 @@
     <DefineConstants>$(DefineConstants);E2E_BROKEN</DefineConstants>
   </PropertyGroup>
 
+  <!--
+    Die impliziten Usings von Windows Forms wuerden mit bestehenden Namen
+    kollidieren (Timer, Message); die Meldung bindet sie ausdruecklich ein.
+  -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -64,7 +84,6 @@
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageReference Include="Serilog.Sinks.EventLog" Version="4.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
   </ItemGroup>
 
 </Project>

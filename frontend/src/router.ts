@@ -30,6 +30,7 @@ const router = createRouter({
       component: () => import('@/views/UpdateDetailView.vue'),
       props: true,
     },
+    { path: '/restarts', name: 'restarts', component: () => import('@/views/RestartsView.vue') },
     { path: '/reports', name: 'reports', component: () => import('@/views/ReportsView.vue') },
     // Der AD-Abgleich hat keine eigene Seite mehr; er steht bei den
     // Einstellungen, die ihn steuern. Ein Lesezeichen auf /ad soll dorthin

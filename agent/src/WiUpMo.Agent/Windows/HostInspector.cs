@@ -135,6 +135,21 @@ public sealed class HostInspector(ILogger<HostInspector> logger)
     }
 
     /// <summary>
+    /// Server werden nicht auf Anforderung neu gestartet — das Backend legt fuer
+    /// sie keinen Auftrag an, der Agent prueft es hier ein zweites Mal, falls die
+    /// gemeldete Betriebssystem-Angabe fehlt oder nicht stimmt. Gelesen wird der
+    /// Produkttyp: <c>WinNT</c> ist ein Arbeitsplatz, alles andere ein Server
+    /// oder Domaenencontroller.
+    /// </summary>
+    public bool IsServer()
+    {
+        using RegistryKey hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+        using RegistryKey? key = hklm.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\ProductOptions");
+        string? productType = key?.GetValue("ProductType") as string;
+        return productType is not null && !productType.Equals("WinNT", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Drei Quellen, verodert. Die WUApi kennt nur Neustarts, die aus einem
     /// Update-Vorgang stammen; die beiden Registry-Schluessel fangen die Faelle
     /// ab, in denen das Servicing-Stack den Neustart vorgemerkt hat.

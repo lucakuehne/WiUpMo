@@ -4,6 +4,7 @@ import { isVersionAtLeast } from '../common/agent-version.js';
 import { Device } from '../database/entities/index.js';
 import { InstallJobsService } from '../install-jobs/install-jobs.service.js';
 import { ReleasesService } from '../releases/releases.service.js';
+import { RestartJobsService } from '../restart-jobs/restart-jobs.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import {
   LEGACY_MIN_CHECK_INTERVAL_MINUTES,
@@ -25,6 +26,7 @@ export class CheckinController {
     private readonly releases: ReleasesService,
     private readonly settings: SettingsService,
     private readonly installJobs: InstallJobsService,
+    private readonly restartJobs: RestartJobsService,
   ) {}
 
   @Post('checkin')
@@ -41,6 +43,7 @@ export class CheckinController {
       agentUpdate: await this.releases.claimJob(device.id),
       checkIntervalMinutes: await this.checkInterval(snapshot.agentVersion),
       installRequest: await this.installJobs.claim(device.id, device.agentVersion),
+      restartRequest: await this.restartJobs.claim(device.id, snapshot.agentVersion),
     };
   }
 
@@ -74,6 +77,7 @@ export class CheckinController {
       agentUpdate: await this.releases.claimJob(device.id),
       checkIntervalMinutes: await this.checkInterval(ordered.at(-1)?.agentVersion),
       installRequest: await this.installJobs.claim(device.id, device.agentVersion),
+      restartRequest: await this.restartJobs.claim(device.id, ordered.at(-1)?.agentVersion),
     };
   }
 

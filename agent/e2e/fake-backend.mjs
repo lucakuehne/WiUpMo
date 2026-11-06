@@ -8,6 +8,7 @@
  *
  * Gesteuert wird ueber /control:
  *   POST /control/offer  { version, file }  bietet ein Update an
+ *   POST /control/restart                   fordert einen Neustart an
  *   GET  /control/state                     was bisher geschah
  *
  *   node agent/e2e/fake-backend.mjs [Port]
@@ -27,6 +28,10 @@ const state = {
   reports: [],
   /** Der angebotene Auftrag; ausgeliefert, solange er pending oder delivered ist. */
   job: null,
+  /** Der angeforderte Neustart; ausgeliefert, bis der Agent ihn einleitet. */
+  restart: null,
+  /** Alle Rueckmeldungen zu Neustarts, in Reihenfolge. */
+  restartReports: [],
 };
 
 function log(message) {
@@ -77,6 +82,20 @@ function recordCheckin(snapshots) {
     agentUpdate,
     checkIntervalMinutes: 5,
     installRequest: null,
+    // Wie im echten Backend: bis der Neustart eingeleitet oder gescheitert ist.
+    restartRequest:
+      state.restart && !['restarting', 'failed'].includes(state.restart.state)
+        ? {
+            jobId: state.restart.jobId,
+            reason: 'Ende-zu-Ende-Test',
+            deferralMinutes: [60],
+            nextMorningHour: null,
+            maxDeferrals: 1,
+            deadlineHours: 1,
+            countdownMinutes: 1,
+            message: null,
+          }
+        : null,
   };
 }
 
@@ -116,6 +135,21 @@ const server = createServer(async (request, response) => {
 
     if (route === 'POST /api/agent/v1/install-result') {
       return json(response, 200, { ok: true });
+    }
+
+    if (route === 'POST /api/agent/v1/restart-result') {
+      const body = await readBody(request);
+      if (state.restart?.jobId !== body.jobId) return json(response, 404, { message: 'Kein offener Neustart.' });
+      state.restartReports.push({ ...body, received: new Date().toISOString() });
+      state.restart.state = body.state;
+      log(`Neustart ${body.jobId}: ${body.state}${body.note ? ` (${body.note})` : ''}${body.error ? ` — ${body.error}` : ''}`);
+      return json(response, 200, { ok: true });
+    }
+
+    if (route === 'POST /control/restart') {
+      state.restart = { jobId: randomUUID(), state: 'pending' };
+      log(`Neustart angefordert: ${state.restart.jobId}`);
+      return json(response, 200, state.restart);
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/api/agent/v1/binary/')) {

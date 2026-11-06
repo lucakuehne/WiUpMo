@@ -119,6 +119,12 @@ public sealed class BackendClient : IDisposable
         CancellationToken ct) =>
         PostAsync<InstallResultRequest, UpdateAck>("api/agent/v1/install-result", identity, request, ct);
 
+    public Task ReportRestartResultAsync(
+        DeviceIdentity identity,
+        RestartResultRequest request,
+        CancellationToken ct) =>
+        PostAsync<RestartResultRequest, UpdateAck>("api/agent/v1/restart-result", identity, request, ct);
+
     /// <summary>
     /// Laedt ein Agent-Binary in eine Datei.
     ///

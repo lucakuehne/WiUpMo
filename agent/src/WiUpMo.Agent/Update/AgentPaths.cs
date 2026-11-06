@@ -75,6 +75,12 @@ public sealed class AgentPaths
     /// <summary>Stand eines Installationsauftrags; siehe <c>Installation/InstallMarker.cs</c>.</summary>
     public string InstallMarkerPath => Path.Combine(DataDirectory, "install.json");
 
+    /// <summary>Stand eines Neustart-Auftrags; siehe <c>Restart/RestartState.cs</c>.</summary>
+    public string RestartStatePath => Path.Combine(DataDirectory, "restart.json");
+
+    /// <summary>Nur mit <c>SimulateRestart</c>: an Stelle des Neustarts.</summary>
+    public string RestartSimulatedPath => Path.Combine(DataDirectory, "restart-simulated.txt");
+
     public string LogDirectory => Path.Combine(DataDirectory, "logs");
 
     // --- Alter Weg (vor 0.8.0): EXE im Programmverzeichnis, Tausch per Datei ---
