@@ -456,7 +456,8 @@ export interface RestartSettings {
   /** Ab der ersten Meldung. */
   deadlineHours: number;
   countdownMinutes: number;
-  message: string;
+  /** Text der Meldung zwischen Überschrift und Frist, mit Platzhaltern. */
+  promptText: string;
   expiryDays: number;
 }
 

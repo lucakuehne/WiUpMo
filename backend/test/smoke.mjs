@@ -855,13 +855,21 @@ await step('Stoerungen der Agents, nach Meldung zusammengefasst', async () => {
 await step('Neustart-Regeln in den Einstellungen', async () => {
   const defaults = (await api.get('/api/settings')).restart;
   assert.deepEqual(
-    [defaults.deferralMinutes, defaults.nextMorningHour, defaults.maxDeferrals, defaults.deadlineHours, defaults.countdownMinutes],
-    [[60, 240], 8, 3, 24, 10],
+    [defaults.deferralMinutes, defaults.nextMorningHour, defaults.maxDeferrals, defaults.deadlineHours, defaults.countdownMinutes, defaults.promptText],
+    [[60, 240], 8, 3, 24, 10, 'Grund: {grund}'],
   );
 
-  // Sortiert, ohne Doppel, Text getrimmt; nicht Gesendetes bleibt.
-  const saved = await api.put('/api/settings/restart', { maxDeferrals: 2, message: '  Service Desk  ', deferralMinutes: [240, 60, 60] });
-  assert.deepEqual([saved.maxDeferrals, saved.message, saved.deferralMinutes, saved.deadlineHours], [2, 'Service Desk', [60, 240], 24]);
+  // Sortiert, ohne Doppel, Text getrimmt und mit einheitlichen Zeilenenden;
+  // nicht Gesendetes bleibt.
+  const promptText = 'Grund: {grund}\nFragen beantwortet der Service Desk.';
+  const saved = await api.put('/api/settings/restart', {
+    maxDeferrals: 2,
+    promptText: `  ${promptText.replace('\n', '\r\n')}  \n`,
+    deferralMinutes: [240, 60, 60],
+  });
+  assert.deepEqual([saved.maxDeferrals, saved.promptText, saved.deferralMinutes, saved.deadlineHours], [2, promptText, [60, 240], 24]);
+  // Den Zusatztext bis 0.9.0 gibt es nicht mehr.
+  await api.request('PUT', '/api/settings/restart', { body: { message: 'alt' }, expect: 400 });
   assert.equal((await api.put('/api/settings/restart', { nextMorningHour: null })).nextMorningHour, null);
   await api.put('/api/settings/restart', { nextMorningHour: 8 });
 
@@ -897,8 +905,8 @@ await step('Neustart: angefordert, gemeldet, verschoben, durch den Systemstart e
   const delivered = (await checkin(agent, device.token, current(0.5))).restartRequest;
   assert.equal(delivered?.reason, 'Updates abschliessen');
   assert.deepEqual(
-    [delivered.maxDeferrals, delivered.message, delivered.deferralMinutes, delivered.nextMorningHour, delivered.deadlineHours, delivered.countdownMinutes],
-    [2, 'Service Desk', [60, 240], 8, 24, 10],
+    [delivered.maxDeferrals, delivered.promptText, delivered.message, delivered.deferralMinutes, delivered.nextMorningHour, delivered.deadlineHours, delivered.countdownMinutes],
+    [2, 'Grund: {grund}\nFragen beantwortet der Service Desk.', null, [60, 240], 8, 24, 10],
   );
 
   // Gemeldet und verschoben, von einem Benutzer; fremde Geraete schliessen ihn nicht.
@@ -957,7 +965,7 @@ await step('Neustart abgebrochen: die Meldung entfaellt beim naechsten Check-in'
   await api.request('POST', '/api/restart-jobs', { body: { deviceIds: [] }, expect: 400 });
   await api.request('GET', '/api/restart-requests?limit=500', { expect: 400 });
 
-  await api.put('/api/settings/restart', { maxDeferrals: 3, message: '' });
+  await api.put('/api/settings/restart', { maxDeferrals: 3, promptText: 'Grund: {grund}' });
 });
 
 // --- Auslieferung des Frontends -------------------------------------------------

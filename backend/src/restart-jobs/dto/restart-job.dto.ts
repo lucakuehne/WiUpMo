@@ -73,7 +73,7 @@ export class RestartRulesDto {
   maxDeferrals: number;
   deadlineHours: number;
   countdownMinutes: number;
-  message: string;
+  promptText: string;
 }
 
 export class RestartRequestViewDto {
@@ -139,6 +139,14 @@ export class RestartRequestDto {
   maxDeferrals: number;
   deadlineHours: number;
   countdownMinutes: number;
+
+  /** Ab 0.9.1: der Text der Meldung mit Platzhaltern, die der Agent ersetzt. */
+  promptText: string;
+
+  /**
+   * Bis 0.9.0 ein Zusatz unter dem Grund. Seit dem Text der Meldung bleibt er
+   * leer; aeltere Agents zeigen dann nur noch den Grund.
+   */
   message: string | null;
 }
 

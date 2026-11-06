@@ -12,11 +12,11 @@ namespace WiUpMo.Agent.Restart;
 /// </summary>
 public sealed class PromptRequest
 {
-    /// <summary>Grund aus dem Auftrag; null fuer den Standardtext.</summary>
+    /// <summary>Grund aus dem Auftrag, fuer <c>{grund}</c>.</summary>
     public string? Reason { get; init; }
 
-    /// <summary>Zusaetzlicher Text der IT.</summary>
-    public string? Message { get; init; }
+    /// <summary>Text zwischen Ueberschrift und Frist, mit Platzhaltern (siehe <see cref="PromptTemplate"/>).</summary>
+    public string Template { get; init; } = PromptTemplate.Default;
 
     /// <summary>Spaetestens dann wird neu gestartet.</summary>
     public DateTimeOffset Deadline { get; init; }

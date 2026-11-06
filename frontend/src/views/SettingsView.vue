@@ -66,6 +66,7 @@ import GroupPicker from '@/components/GroupPicker.vue';
 import OuPicker from '@/components/OuPicker.vue';
 import { domainOfDn, formatDnPath } from '@/dn';
 import { durationLabel } from '@/format';
+import { PROMPT_PLACEHOLDERS, renderPromptText } from '@/restart-prompt';
 import {
   adjustPortForScheme,
   buildLdapUrl,
@@ -216,9 +217,17 @@ const restart = reactive<RestartSettings>({
   maxDeferrals: 3,
   deadlineHours: 24,
   countdownMinutes: 10,
-  message: '',
+  promptText: 'Grund: {grund}',
   expiryDays: 7,
 });
+
+/** Der Text, wie ihn der Benutzer sähe — mit Beispielwerten. */
+const promptPreview = computed(() =>
+  renderPromptText(
+    restart.promptText,
+    Object.fromEntries(PROMPT_PLACEHOLDERS.map((placeholder) => [placeholder.name, placeholder.example])),
+  ),
+);
 
 const probe = ref<AdProbeResult | null>(null);
 const probing = ref(false);
@@ -1388,14 +1397,30 @@ onMounted(load);
               </p>
 
               <div class="space-y-1.5">
-                <Label for="r-message">Zusätzlicher Text in der Meldung</Label>
-                <Textarea
-                  id="r-message"
-                  v-model="restart.message"
-                  maxlength="500"
-                  rows="2"
-                  placeholder="z. B. Fragen beantwortet der Service Desk unter 1234."
-                />
+                <Label for="r-prompt">Text der Meldung</Label>
+                <Textarea id="r-prompt" v-model="restart.promptText" maxlength="1000" rows="4" />
+                <p class="text-muted-foreground text-xs">
+                  Steht zwischen der Überschrift und „Bitte speichern Sie Ihre Arbeit …". Platzhalter:
+                  <template v-for="(placeholder, index) in PROMPT_PLACEHOLDERS" :key="placeholder.name">
+                    <code class="bg-muted rounded px-1">{{ '{' + placeholder.name + '}' }}</code>
+                    {{ placeholder.description }}{{ index < PROMPT_PLACEHOLDERS.length - 1 ? ',' : '.' }}
+                  </template>
+                  Eine Zeile, deren Platzhalter alle leer bleiben, fällt weg. Gilt ab Agent 0.9.1.
+                </p>
+              </div>
+
+              <!-- Wie die Meldung beim Benutzer ungefähr aussieht, mit Beispielwerten. -->
+              <div class="rounded-md border">
+                <div class="bg-primary h-1 rounded-t-md" />
+                <div class="space-y-2 px-4 py-3 text-sm">
+                  <p class="text-muted-foreground text-xs">Vorschau</p>
+                  <p class="text-base font-semibold">Ihr Computer muss neu gestartet werden</p>
+                  <p v-if="promptPreview" class="whitespace-pre-line">{{ promptPreview }}</p>
+                  <p>
+                    Bitte speichern Sie Ihre Arbeit. Spätestens <strong>heute um 14:00 Uhr</strong> wird
+                    der Computer neu gestartet.
+                  </p>
+                </div>
               </div>
             </CardContent>
 

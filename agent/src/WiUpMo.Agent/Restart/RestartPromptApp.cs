@@ -77,14 +77,14 @@ public static class RestartPromptApp
             MaxDeferrals = 3,
             DeadlineHours = 24,
             CountdownMinutes = 10,
-            Message = "Fragen beantwortet der Service Desk.",
+            PromptText = "Grund: {grund}\n\nFragen beantwortet der Service Desk.",
         };
 
         PromptAnswer? answer = Show(
             new PromptRequest
             {
                 Reason = request.Reason,
-                Message = request.Message,
+                Template = PromptTemplate.For(request),
                 Deadline = now.AddHours(request.DeadlineHours),
                 Final = final,
                 CountdownMinutes = request.CountdownMinutes,

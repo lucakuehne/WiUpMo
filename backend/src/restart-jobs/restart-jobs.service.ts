@@ -5,7 +5,7 @@ import { isVersionAtLeast } from '../common/agent-version.js';
 import { returnedRows } from '../common/query-result.js';
 import { DeviceStatus, RestartJobState } from '../database/enums.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { RestartSettings } from '../settings/settings.types.js';
+import { RestartSettings, promptTextFrom } from '../settings/settings.types.js';
 import {
   CreateRestartJobsDto,
   CreateRestartJobsResultDto,
@@ -165,7 +165,7 @@ export class RestartJobsService {
       items: rows.map((row) => ({
         id: row.id as string,
         reason: (row.reason as string | null) ?? null,
-        rules: row.settings as RestartRulesDto,
+        rules: rulesOf(row.settings as StoredRules),
         requestedDevices: Number(row.requested_devices),
         skipped: (row.skipped as CreateRestartJobsResultDto['skipped'] | null) ?? null,
         createdBy: row.created_by as string,
@@ -300,7 +300,7 @@ export class RestartJobsService {
       [deviceId],
     );
 
-    const rows: Array<{ id: string; reason: string | null; settings: RestartSettings }> = await this.dataSource.query(
+    const rows: Array<{ id: string; reason: string | null; settings: StoredRules }> = await this.dataSource.query(
       `SELECT j.id, r.reason, r.settings
          FROM restart_jobs j
          JOIN restart_requests r ON r.id = j.request_id
@@ -321,7 +321,8 @@ export class RestartJobsService {
       maxDeferrals: job.settings.maxDeferrals,
       deadlineHours: job.settings.deadlineHours,
       countdownMinutes: job.settings.countdownMinutes,
-      message: job.settings.message || null,
+      promptText: promptTextFrom(job.settings),
+      message: null,
     };
   }
 
@@ -398,6 +399,14 @@ export class RestartJobsService {
       [deviceId ?? null],
     );
   }
+}
+
+/** Die Regeln, wie sie mit einer Anfrage gespeichert wurden — vor 0.9.1 mit Zusatztext statt Text. */
+type StoredRules = Omit<RestartSettings, 'expiryDays' | 'promptText'> & { promptText?: string; message?: string };
+
+function rulesOf(stored: StoredRules): RestartRulesDto {
+  const { message: _legacy, ...rules } = stored;
+  return { ...rules, promptText: promptTextFrom(stored) };
 }
 
 function iso(value: unknown): string | null {

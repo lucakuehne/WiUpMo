@@ -293,7 +293,13 @@ public sealed class RestartRequest
 
     public int CountdownMinutes { get; init; } = 10;
 
-    /// <summary>Zusaetzlicher Text der IT, etwa ein Ansprechpartner.</summary>
+    /// <summary>
+    /// Text der Meldung mit Platzhaltern, aus den Einstellungen. Null bei einem
+    /// Backend bis 0.9.0 — dann der Grund und <see cref="Message"/>.
+    /// </summary>
+    public string? PromptText { get; init; }
+
+    /// <summary>Bis 0.9.0: Zusatztext der IT unter dem Grund.</summary>
     public string? Message { get; init; }
 }
 

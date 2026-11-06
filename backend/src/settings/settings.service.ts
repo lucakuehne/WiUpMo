@@ -18,6 +18,7 @@ import {
   DEFAULT_RESTART,
   InstallSettings,
   migrateAuthSettings,
+  promptTextFrom,
   RestartSettings,
   RetentionSettings,
   SETTING_KEYS,
@@ -105,7 +106,10 @@ export class SettingsService implements OnModuleInit {
   }
 
   async getRestart(): Promise<RestartSettings> {
-    return this.read(SETTING_KEYS.restart, DEFAULT_RESTART);
+    const row = await this.settings.findOne({ where: { key: SETTING_KEYS.restart } });
+    const stored = (row?.value ?? {}) as Partial<RestartSettings> & { message?: string };
+    const { message: _legacy, ...settings } = { ...DEFAULT_RESTART, ...stored };
+    return { ...settings, promptText: promptTextFrom(stored) };
   }
 
   /**
@@ -196,7 +200,7 @@ export class SettingsService implements OnModuleInit {
   async updateRestart(patch: Partial<RestartSettings>): Promise<RestartSettings> {
     const next = { ...(await this.getRestart()), ...definedOnly(patch) };
     next.deferralMinutes = [...new Set(next.deferralMinutes)].sort((a, b) => a - b);
-    next.message = next.message.trim();
+    next.promptText = next.promptText.replace(/\r\n/g, '\n').trim();
     await this.write(SETTING_KEYS.restart, next, 'Neustarts.');
     return next;
   }

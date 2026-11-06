@@ -424,6 +424,35 @@ meldet nur die Wahl; neu startet ausschliesslich der Dienst, über
 `shutdown.exe /r /t 30 /d p:2:17` mit einem Kommentar — im Ereignisprotokoll
 als Ereignis 1074 nachvollziehbar.
 
+### Die Meldung
+
+Überschrift, der Satz zur Frist und die Schaltflächen sind fest. Den Text
+dazwischen legt man unter Einstellungen → Betrieb fest (ab 0.9.1), mit
+Platzhaltern:
+
+| Platzhalter | Wird zu |
+|---|---|
+| `{grund}` | Grund aus dem Auftrag |
+| `{frist}` | „heute um 14:00 Uhr", „morgen um 08:00 Uhr" oder „am Fr., 07.11. um 14:00 Uhr" |
+| `{verschiebungen}` | wie oft noch verschoben werden darf |
+| `{computer}` | Computername |
+| `{benutzer}` | Anmeldename des Benutzers |
+
+Eine Zeile, deren Platzhalter alle leer bleiben — etwa `Grund: {grund}` ohne
+Grund —, fällt weg. Unbekannte Platzhalter bleiben stehen, wie sie sind.
+Agents vor 0.9.1 zeigen ihren festen Text.
+
+Die Meldung bleibt im Vordergrund und lässt sich weder schliessen noch
+minimieren, nimmt aber nicht den Fokus: Wer gerade tippt, würde sonst mit Leer-
+oder Eingabetaste ungewollt neu starten. Stattdessen blinkt sie in der
+Taskleiste, und nach dem Aktivieren zählen Tasten erst nach einer Sekunde. Der
+Fokus liegt auf der Auswahl zum Verschieben, nicht auf „Jetzt neu starten".
+Hell oder dunkel folgt der Einstellung für Apps; der letzte Countdown zeigt die
+Restzeit gross mit Balken, in der letzten Minute in Warnfarbe, und kündigt sich
+mit einem Signalton an.
+
+### Rückmeldungen
+
 Jeder Schritt geht ans Backend (`/restart-result`): gezeigt, verschoben bis wann
 und von wem, eingeleitet, gescheitert. Ob der Neustart geklappt hat, entscheidet
 das Backend am nächsten gemeldeten Systemstart. Wird der Auftrag im Backend

@@ -312,8 +312,12 @@ export interface RestartSettings {
   /** Der letzte Countdown, nicht mehr verschiebbar, in Minuten. */
   countdownMinutes: number;
 
-  /** Zusaetzlicher Text in der Meldung, etwa ein Ansprechpartner. Leer: keiner. */
-  message: string;
+  /**
+   * Der Text der Meldung zwischen Ueberschrift und Frist, mit Platzhaltern
+   * (siehe {@link RESTART_PROMPT_PLACEHOLDERS}). Eine Zeile, deren Platzhalter
+   * alle leer bleiben, faellt weg — so verschwindet „Grund: {grund}" ohne Grund.
+   */
+  promptText: string;
 
   /** Tage, bis ein nicht abgeholter Auftrag verfaellt. */
   expiryDays: number;
@@ -324,7 +328,7 @@ export const RESTART_LIMITS = {
   maxDeferrals: { min: 0, max: 10 },
   deadlineHours: { min: 1, max: 168 },
   countdownMinutes: { min: 1, max: 60 },
-  messageLength: 500,
+  promptTextLength: 1000,
   expiryDays: { min: 1, max: 30 },
 } as const;
 
@@ -338,9 +342,22 @@ export const DEFAULT_RESTART: RestartSettings = {
   maxDeferrals: 3,
   deadlineHours: 24,
   countdownMinutes: 10,
-  message: '',
+  promptText: 'Grund: {grund}',
   expiryDays: 7,
 };
+
+/** Was der Agent ab 0.9.1 im Text der Meldung ersetzt. */
+export const RESTART_PROMPT_PLACEHOLDERS = ['grund', 'frist', 'verschiebungen', 'computer', 'benutzer'] as const;
+
+/**
+ * Bis 0.9.0 gab es statt des Textes nur einen Zusatz unter dem Grund. Ein so
+ * gespeicherter Zusatz wandert einmalig unter die Zeile mit dem Grund.
+ */
+export function promptTextFrom(settings: { promptText?: string; message?: string }): string {
+  if (settings.promptText !== undefined) return settings.promptText;
+  const message = settings.message?.trim();
+  return message ? `${DEFAULT_RESTART.promptText}\n\n${message}` : DEFAULT_RESTART.promptText;
+}
 
 export const DEFAULT_RETENTION: RetentionSettings = {
   eventDays: 90,

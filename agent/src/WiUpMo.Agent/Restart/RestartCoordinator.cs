@@ -239,7 +239,7 @@ public sealed class RestartCoordinator(
         var prompt = new PromptRequest
         {
             Reason = state.Request.Reason,
-            Message = state.Request.Message,
+            Template = PromptTemplate.For(state.Request),
             Deadline = deadline,
             Final = final,
             CountdownMinutes = Countdown(state.Request),

@@ -289,10 +289,11 @@ export class RestartSettingsDto {
   @IsOptional()
   countdownMinutes?: number;
 
+  /** Mit Platzhaltern; leer zeigt die Meldung nur Ueberschrift und Frist. */
   @IsString()
-  @MaxLength(RESTART_LIMITS.messageLength)
+  @MaxLength(RESTART_LIMITS.promptTextLength)
   @IsOptional()
-  message?: string;
+  promptText?: string;
 
   @toInt()
   @IsInt()
@@ -308,7 +309,7 @@ export class RestartSettingsViewDto {
   maxDeferrals: number;
   deadlineHours: number;
   countdownMinutes: number;
-  message: string;
+  promptText: string;
   expiryDays: number;
 }
 

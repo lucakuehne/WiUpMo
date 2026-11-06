@@ -117,4 +117,31 @@ internal static class NativeMethods
 
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool CloseHandle(IntPtr handle);
+
+    // --- Fuer die Meldung selbst ---------------------------------------------------
+
+    public const uint FlashAll = 0x3;
+    public const uint FlashUntilForeground = 0xC;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct FlashInfo
+    {
+        public int Size;
+        public IntPtr Window;
+        public uint Flags;
+        public uint Count;
+        public uint Timeout;
+    }
+
+    /// <summary>Laesst die Schaltflaeche in der Taskleiste blinken, bis das Fenster vorn ist.</summary>
+    [DllImport("user32.dll")]
+    public static extern bool FlashWindowEx(ref FlashInfo info);
+
+    public const int DwmUseImmersiveDarkMode = 20;
+    public const int DwmWindowCornerPreference = 33;
+    public const int DwmCornerRound = 2;
+
+    /// <summary>Abgerundete Ecken und dunkle Titelleiste ab Windows 11; aeltere uebergehen es.</summary>
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
 }
