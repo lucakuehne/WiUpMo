@@ -35,6 +35,7 @@ import { SettingsService } from '../dist/src/settings/settings.service.js';
 import { ReportsController } from '../dist/src/reports/reports.controller.js';
 import { ReportsService } from '../dist/src/reports/reports.service.js';
 import {
+  AgentRolloutsController,
   AgentUpdateJobsController,
   ReleasesController,
 } from '../dist/src/releases/releases.controller.js';
@@ -43,6 +44,17 @@ import { AgentUpdateController } from '../dist/src/agent-api/agent-update.contro
 import { AgentInstallController } from '../dist/src/agent-api/install.controller.js';
 import { InstallJobsController } from '../dist/src/install-jobs/install-jobs.controller.js';
 import { InstallJobsService } from '../dist/src/install-jobs/install-jobs.service.js';
+import { InstallationsController } from '../dist/src/install-jobs/installations.controller.js';
+import { AgentRestartController } from '../dist/src/agent-api/restart.controller.js';
+import {
+  RestartJobsController,
+  RestartRequestsController,
+} from '../dist/src/restart-jobs/restart-jobs.controller.js';
+import { RestartJobsService } from '../dist/src/restart-jobs/restart-jobs.service.js';
+import { AgentProblemsController } from '../dist/src/agents/agent-problems.controller.js';
+import { AgentProblemsService } from '../dist/src/agents/agent-problems.service.js';
+import { PreferencesController } from '../dist/src/preferences/preferences.controller.js';
+import { PreferencesService } from '../dist/src/preferences/preferences.service.js';
 import { RetentionController } from '../dist/src/retention/retention.controller.js';
 import { RetentionService } from '../dist/src/retention/retention.service.js';
 import { HealthController } from '../dist/src/health/health.controller.js';
@@ -63,9 +75,16 @@ const moduleRef = await Test.createTestingModule({
     ReportsController,
     ReleasesController,
     AgentUpdateJobsController,
+    AgentRolloutsController,
     AgentUpdateController,
     AgentInstallController,
+    AgentRestartController,
     InstallJobsController,
+    InstallationsController,
+    RestartJobsController,
+    RestartRequestsController,
+    AgentProblemsController,
+    PreferencesController,
     RetentionController,
     HealthController,
   ],
@@ -82,6 +101,9 @@ const moduleRef = await Test.createTestingModule({
     { provide: ReleasesService, useValue: stub },
     { provide: RetentionService, useValue: stub },
     { provide: InstallJobsService, useValue: stub },
+    { provide: RestartJobsService, useValue: stub },
+    { provide: AgentProblemsService, useValue: stub },
+    { provide: PreferencesService, useValue: stub },
     // Guards werden von Nest ueber den Container erzeugt; ohne Attrappe
     // scheiterte schon das Zusammenbauen des Moduls.
     { provide: SessionGuard, useValue: { canActivate: () => true } },
