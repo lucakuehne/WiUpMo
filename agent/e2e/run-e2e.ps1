@@ -12,7 +12,10 @@
     1. Uebergang: die alte Fassung installieren, auf A heben (Dateitausch durch
        den alten Updater), dann auf B (Umstellen per binPath), dann auf die
        defekte C - die wird zurueckgenommen.
-    2. Neuinstallation von A direkt im Versionsverzeichnis, Deinstallation.
+    2. Neuinstallation von A direkt im Versionsverzeichnis.
+    3. Neustart auf Anforderung, simuliert.
+    4. Windows Update nicht lesbar: Der Check-in kommt ohne Update-Daten an.
+    Zum Schluss die Deinstallation.
 
   Bricht beim ersten Fehler ab. Protokolle und Zustand landen in -Artifacts.
 #>
@@ -320,6 +323,27 @@ try {
   Assert-That (Test-Path (Join-Path $Data 'restart-simulated.txt')) 'Simulierter Neustart abgelegt'
   Assert-That (-not (Test-Path (Join-Path $Data 'restart.json'))) 'Auftrag danach abgelegt'
   Save-Evidence '5-neustart'
+
+  # --- 4. Windows Update nicht lesbar ------------------------------------------
+  # Der Weg eines Geraets mit haengendem Update-Dienst: Der Check-in geht ohne
+  # Update-Daten hinaus. In 0.9.2 verwarf der Agent genau diesen Snapshot beim
+  # Lesen aus der Warteschlange und meldete nie.
+
+  Write-Step 'Windows Update nicht lesbar: Check-in ohne Update-Daten'
+  $file = Join-Path $Root 'appsettings.json'
+  $json = Get-Content $file -Raw | ConvertFrom-Json
+  $json.Agent | Add-Member -Force -NotePropertyName SimulateWindowsUpdateFailure -NotePropertyValue $true
+  $json | ConvertTo-Json -Depth 5 | Set-Content $file -Encoding utf8
+  $checkinsBefore = (Get-State).checkins
+  Restart-Agent
+  Wait-Until 'Check-in ohne Update-Daten' 180 {
+    $state = Get-State
+    $state.checkins -gt $checkinsBefore -and $state.lastCheckin.hasAvailableUpdates -eq $false
+  } | Out-Null
+  $agentLog = Get-ChildItem (Join-Path $Data 'logs') -Filter 'agent-*.log' | Get-Content -Raw
+  Assert-That ($agentLog -match 'Check-in ohne Update-Daten') 'Warnung im Protokoll'
+  Assert-That ($agentLog -notmatch 'unlesbaren Warteschlangeneintrag') 'Kein Snapshot verworfen'
+  Save-Evidence '6-ohne-update-daten'
 
   Write-Step 'Deinstallation'
   Uninstall-Agent

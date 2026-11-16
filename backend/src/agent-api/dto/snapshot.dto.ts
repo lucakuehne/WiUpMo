@@ -318,7 +318,7 @@ export class SnapshotDto {
    * ist, ohne installiert worden zu sein.
    *
    * Fehlt sie, war Windows Update auf dem Geraet nicht lesbar (Agents ab
-   * 0.9.2). Der Check-in zaehlt trotzdem; die Update-Zustaende bleiben, wie
+   * 0.9.3). Der Check-in zaehlt trotzdem; die Update-Zustaende bleiben, wie
    * sie waren — eine leere Liste hiesse dagegen „nichts mehr offen".
    */
   @IsArray()

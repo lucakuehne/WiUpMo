@@ -60,6 +60,8 @@ function recordCheckin(snapshots) {
       agentVersion: last.agentVersion,
       collectedAt: last.collectedAt,
       diagnostics: last.diagnostics ?? null,
+      // Fehlt die Liste, war Windows Update auf dem Geraet nicht lesbar.
+      hasAvailableUpdates: Array.isArray(last.availableUpdates),
     };
     log(`Check-in von ${last.agentVersion} (${snapshots.length} Snapshot(s))`);
   }

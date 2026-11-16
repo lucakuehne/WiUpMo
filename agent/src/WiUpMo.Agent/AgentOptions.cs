@@ -137,6 +137,13 @@ public sealed class AgentOptions
     public bool SimulateWindowsUpdate { get; set; }
 
     /// <summary>
+    /// Wie <see cref="SimulateWindowsUpdate"/>, nur dass Windows Update als
+    /// nicht lesbar gilt: Der Check-in geht ohne Update-Daten hinaus. Prueft den
+    /// Weg, den ein Geraet mit haengendem Update-Dienst nimmt. Im Betrieb nie setzen.
+    /// </summary>
+    public bool SimulateWindowsUpdateFailure { get; set; }
+
+    /// <summary>
     /// Startet nicht neu, sondern legt nur eine Datei ab, und behandelt das
     /// Geraet als Arbeitsplatz, an dem niemand angemeldet ist — der Runner ist
     /// ein Windows Server ohne Benutzer, dem sich eine Meldung zeigen liesse.

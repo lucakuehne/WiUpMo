@@ -34,9 +34,7 @@ public sealed partial class WindowsUpdateReader(AgentOptions options)
     private static partial Regex KbInTitle();
 
     public Task<IReadOnlyList<AvailableUpdate>> GetAvailableUpdatesAsync(CancellationToken ct) =>
-        options.SimulateWindowsUpdate
-            ? Task.FromResult<IReadOnlyList<AvailableUpdate>>([])
-            : RunWithTimeoutAsync(SearchAvailable, "Die Update-Suche", ct);
+        RunWithTimeoutAsync<IReadOnlyList<AvailableUpdate>>(SearchAvailable, [], "Die Update-Suche", ct);
 
     /// <summary>
     /// Die installierten Updates mit denselben Angaben wie die offenen — Typ,
@@ -49,25 +47,36 @@ public sealed partial class WindowsUpdateReader(AgentOptions options)
     /// Abgeloeste Versionen liefert sie nicht mehr.
     /// </summary>
     public Task<IReadOnlyList<AvailableUpdate>> GetInstalledUpdatesAsync(CancellationToken ct) =>
-        options.SimulateWindowsUpdate
-            ? Task.FromResult<IReadOnlyList<AvailableUpdate>>([])
-            : RunWithTimeoutAsync(SearchInstalled, "Die Suche nach installierten Updates", ct);
+        RunWithTimeoutAsync<IReadOnlyList<AvailableUpdate>>(
+            SearchInstalled, [], "Die Suche nach installierten Updates", ct);
 
     public Task<IReadOnlyList<HistoryEntry>> GetHistoryAsync(
         DateTimeOffset since,
         CancellationToken ct) =>
-        options.SimulateWindowsUpdate
-            ? Task.FromResult<IReadOnlyList<HistoryEntry>>([])
-            : RunWithTimeoutAsync(() => ReadHistory(since), "Die Abfrage der Historie", ct);
+        RunWithTimeoutAsync<IReadOnlyList<HistoryEntry>>(
+            () => ReadHistory(since), [], "Die Abfrage der Historie", ct);
 
     /// <summary>
     /// Kapselt einen COM-Aufruf mit Zeitlimit: Eine beschaedigte Update-Datenbank
     /// oder ein haengender Dienst kann eine Suche praktisch unbegrenzt
     /// blockieren, und der Agent darf daran nicht haengenbleiben. Haengt noch
     /// ein frueherer Aufruf, scheitert dieser sofort (siehe <see cref="HangGuard"/>).
+    ///
+    /// Im Ende-zu-Ende-Test liefert er stattdessen <paramref name="simulated"/>
+    /// oder scheitert absichtlich.
     /// </summary>
-    private Task<T> RunWithTimeoutAsync<T>(Func<T> work, string what, CancellationToken ct) =>
-        HangGuard.WindowsUpdate.RunAsync(work, TimeSpan.FromSeconds(options.ComTimeoutSeconds), what, ct);
+    private Task<T> RunWithTimeoutAsync<T>(Func<T> work, T simulated, string what, CancellationToken ct)
+    {
+        if (options.SimulateWindowsUpdateFailure)
+        {
+            return Task.FromException<T>(
+                new WindowsUpdateException($"{what} ist simuliert gescheitert (Ende-zu-Ende-Test)."));
+        }
+
+        return options.SimulateWindowsUpdate
+            ? Task.FromResult(simulated)
+            : HangGuard.WindowsUpdate.RunAsync(work, TimeSpan.FromSeconds(options.ComTimeoutSeconds), what, ct);
+    }
 
     // --- Verfuegbare Updates -------------------------------------------------
 

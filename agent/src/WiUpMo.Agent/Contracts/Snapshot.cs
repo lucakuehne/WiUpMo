@@ -201,9 +201,14 @@ public sealed class Snapshot
     /// Die vollstaendige Liste der offenen Updates. Null, wenn Windows Update
     /// nicht lesbar war: Der Check-in geht trotzdem hinaus, damit das Geraet
     /// samt Stoerung sichtbar bleibt, und das Backend laesst die Update-Zustaende
-    /// unberuehrt. Ab 0.9.2; ein Backend davor wiese den Snapshot ab.
+    /// unberuehrt. Ab 0.9.3; ein Backend vor 0.9.2 wiese den Snapshot ab.
+    ///
+    /// Nicht <c>required</c>: Null wird beim Schreiben weggelassen
+    /// (<see cref="AgentJson"/>), und ein Pflichtfeld, das fehlt, liess den
+    /// Snapshot beim Lesen aus der Warteschlange durchfallen — in 0.9.2 wurde
+    /// genau dieser Snapshot deshalb nie verschickt.
     /// </summary>
-    public required IReadOnlyList<AvailableUpdate>? AvailableUpdates { get; init; }
+    public IReadOnlyList<AvailableUpdate>? AvailableUpdates { get; init; }
 
     public required IReadOnlyList<HistoryEntry> History { get; init; }
 

@@ -142,6 +142,7 @@ Drei Quellen, die einander in dieser Reihenfolge überschreiben:
 | `Agent:InstallTimeoutMinutes` | — | 180 | Obergrenze für einen Installationsauftrag, Download und Installation zusammen. |
 | `Agent:UpdateVerificationMinutes` | — | 20 | Frist, in der sich eine neue Fassung bestätigen muss, sonst stellt der Updater zurück. |
 | `Agent:SimulateWindowsUpdate` | — | false | **Nur für den Ende-zu-Ende-Test:** fragt Windows Update nicht ab. Im Betrieb nie setzen. |
+| `Agent:SimulateWindowsUpdateFailure` | — | false | **Nur für den Ende-zu-Ende-Test:** Windows Update gilt als nicht lesbar, der Check-in geht ohne Update-Daten hinaus. Im Betrieb nie setzen. |
 | `Agent:SimulateRestart` | — | false | **Nur für den Ende-zu-Ende-Test:** startet nicht neu, sondern legt `restart-simulated.txt` ab, und behandelt das Gerät als Arbeitsplatz, an dem niemand angemeldet ist — der Runner ist ein Windows Server. Im Betrieb nie setzen. |
 | `Agent:InitialHistoryDays` | — | 90 | Rückblick beim allerersten Check-in. |
 | `Agent:LogRetentionDays` | — | 14 | Aufbewahrung der Protokolldateien. |
@@ -192,8 +193,9 @@ ohne Hinweis, und das Gerät meldete sich nie wieder. Ab 0.9.2:
 - Der Download einer neuen Fassung hat ein Zeitlimit über den ganzen Inhalt,
   nicht nur bis zur ersten Antwort.
 
-- Ist Windows Update nicht lesbar, geht der Check-in trotzdem hinaus, nur ohne
-  Update-Daten (`availableUpdates` fehlt). Das Backend lässt die Update-Zustände
+- Ist Windows Update nicht lesbar, geht der Check-in ab 0.9.3 trotzdem hinaus,
+  nur ohne Update-Daten (`availableUpdates` fehlt). 0.9.2 legte diesen Snapshot
+  zwar an, verwarf ihn aber beim Lesen aus der Warteschlange als unlesbar. Das Backend lässt die Update-Zustände
   dann, wie sie waren, und die Warnung „Update-Zustand nicht lesbar …“ steht
   ab dem nächsten Check-in unter „Agent-Zustand“ und bei den Störungen. Der
   Fortschritt der Historie bleibt stehen; der nächste vollständige Snapshot
@@ -382,6 +384,7 @@ ein Test-Backend (`e2e/fake-backend.mjs`) durch:
 | Update auf C (defekt) | bestätigt sich nicht, wird nach der Frist zurückgenommen, `failed` mit Begründung |
 | Deinstallation, Neuinstallation von A | gleich unter `versions\`, nichts am alten Ort, neue Registrierung |
 | Neustart auf Anforderung | simuliert: ohne angemeldeten Benutzer sofort, `restarting` gemeldet, Auftrag abgelegt |
+| Windows Update nicht lesbar | mit `SimulateWindowsUpdateFailure`: Check-in kommt ohne `availableUpdates` an, Warnung im Protokoll, kein Snapshot verworfen |
 
 Die Protokolle von Agent und Updater, `sc qc`, die Task-Definition und der
 Zustand des Test-Backends hängen am Lauf als Artefakt `agent-e2e`.
