@@ -14,6 +14,7 @@ import { constants, createReadStream } from 'node:fs';
 import { access, copyFile, mkdir, rename, rm, stat } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { DataSource } from 'typeorm';
+import { isSupersededTarget } from '../common/agent-version.js';
 import { returnedRows } from '../common/query-result.js';
 import { AgentUpdateJobState } from '../database/enums.js';
 import {
@@ -537,6 +538,7 @@ export class ReleasesService implements OnModuleInit {
     // Stunden nachweislich nicht vorankommt, ist er weg. Sonst bekaeme es
     // gleich denselben wieder.
     await this.abandonStalled(deviceId);
+    await this.closeSuperseded(deviceId);
 
     const result: unknown = await this.dataSource.query(
       `UPDATE agent_update_jobs j SET
@@ -674,6 +676,60 @@ export class ReleasesService implements OnModuleInit {
   }
 
   /**
+   * Schliesst offene Auftraege, die das Geraet schon ueberholt hat (siehe
+   * `isSupersededTarget`).
+   *
+   * Ein Auftrag kann wochenlang liegen, wenn sich ein Geraet nicht meldet.
+   * Kommt es danach mit einer neueren Fassung zurueck — etwa von Hand
+   * installiert —, setzte es das Abholen auf den alten Stand zurueck. Gezaehlt
+   * wird so ein Auftrag wie ein abgebrochener, nicht als gescheitert.
+   *
+   * Massgeblich ist die Version, mit der sich das Geraet gerade gemeldet hat:
+   * Der Check-in schreibt sie, bevor der Auftrag geholt wird.
+   */
+  private async closeSuperseded(deviceId: string): Promise<number> {
+    const open: Array<{
+      id: string;
+      target_version: string;
+      agent_version: string | null;
+      current_version: string | null;
+    }> = await this.dataSource.query(
+      `SELECT j.id, j.target_version, d.agent_version,
+              (SELECT r.version FROM agent_releases r WHERE r.is_current) AS current_version
+         FROM agent_update_jobs j
+         JOIN devices d ON d.id = j.device_id
+        WHERE j.device_id = $1 AND j.state IN ('pending', 'delivered')`,
+      [deviceId],
+    );
+
+    const superseded = open.filter((job) =>
+      isSupersededTarget(job.target_version, job.agent_version, job.current_version),
+    );
+    if (superseded.length === 0) {
+      return 0;
+    }
+
+    const running = superseded[0].agent_version ?? '';
+    const rows = returnedRows<{ id: string }>(
+      await this.dataSource.query(
+        `UPDATE agent_update_jobs SET state = 'failed', completed_at = now(), error = $2
+          WHERE id = ANY($1::uuid[]) AND state IN ('pending', 'delivered')
+          RETURNING id`,
+        [superseded.map((job) => job.id), `${SUPERSEDED_PREFIX} Das Gerät läuft bereits mit ${running}.`],
+      ),
+    );
+
+    if (rows.length > 0) {
+      this.logger.log(
+        `Geraet ${deviceId}: ${rows.length} ueberholte(r) Update-Auftrag/-Auftraege geschlossen, ` +
+          `es laeuft bereits mit ${running}.`,
+      );
+    }
+
+    return rows.length;
+  }
+
+  /**
    * Schliesst offene Auftraege, deren Zielversion es nicht mehr gibt.
    *
    * Ohne Geraeteangabe raeumt es alle auf — so beim Start, damit ein Bestand
@@ -779,15 +835,19 @@ export class ReleasesService implements OnModuleInit {
               count(j.id) FILTER (WHERE j.state = 'delivered')::int AS delivered,
               count(j.id) FILTER (WHERE j.state = 'installing')::int AS installing,
               count(j.id) FILTER (WHERE j.state = 'done')::int AS done,
-              count(j.id) FILTER (WHERE j.state = 'failed' AND j.error IS DISTINCT FROM $3)::int AS failed,
-              count(j.id) FILTER (WHERE j.state = 'failed' AND j.error = $3)::int AS cancelled,
+              count(j.id) FILTER (
+                WHERE j.state = 'failed' AND NOT (coalesce(j.error, '') = $3 OR coalesce(j.error, '') LIKE $4)
+              )::int AS failed,
+              count(j.id) FILTER (
+                WHERE j.state = 'failed' AND (j.error = $3 OR j.error LIKE $4)
+              )::int AS cancelled,
               max(j.completed_at) AS last_completed_at
          FROM agent_rollouts r
          LEFT JOIN agent_update_jobs j ON j.rollout_id = r.id
         GROUP BY r.id
         ORDER BY r.created_at DESC
         LIMIT $1 OFFSET $2`,
-      [limit, (page - 1) * limit, CANCELLED_ERROR],
+      [limit, (page - 1) * limit, CANCELLED_ERROR, `${SUPERSEDED_PREFIX}%`],
     );
 
     const totals: Array<{ total: number }> = await this.dataSource.query(
@@ -869,6 +929,12 @@ export class ReleasesService implements OnModuleInit {
  * getrennt gezaehlt: Abgebrochen ist nicht gescheitert.
  */
 const CANCELLED_ERROR = 'Von Hand abgebrochen.';
+
+/**
+ * So beginnt der Vermerk eines Auftrags, den das Geraet ueberholt hat. Er
+ * zaehlt wie ein abgebrochener; die Oberflaeche erkennt ihn am selben Anfang.
+ */
+const SUPERSEDED_PREFIX = 'Überholt:';
 
 function iso(value: unknown): string | null {
   return value instanceof Date ? value.toISOString() : null;

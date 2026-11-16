@@ -36,8 +36,12 @@ public sealed class BackendClient : IDisposable
     /// </summary>
     private readonly HttpClient _downloads;
 
+    private readonly TimeSpan _downloadTimeout;
+
     public BackendClient(AgentOptions options)
     {
+        _downloadTimeout = TimeSpan.FromMinutes(options.DownloadTimeoutMinutes);
+
         if (!Uri.TryCreate(options.BackendUrl, UriKind.Absolute, out Uri? baseUri)
             || (baseUri.Scheme != Uri.UriSchemeHttps && baseUri.Scheme != Uri.UriSchemeHttp))
         {
@@ -131,6 +135,11 @@ public sealed class BackendClient : IDisposable
     /// Ueber einen Datenstrom statt ueber ein Byte-Array: Das Binary ist rund
     /// 75 MB, und der Agent laeuft auf Geraeten, deren Arbeitsspeicher man
     /// nicht kennt.
+    ///
+    /// Das Zeitlimit des Clients endet mit den Kopfzeilen der Antwort
+    /// (<c>ResponseHeadersRead</c>). Fuer den Inhalt gilt deshalb ein eigenes
+    /// ueber den ganzen Download: Riss die Verbindung mittendrin ab, ohne dass
+    /// es eine Seite merkte, wartete der Durchlauf sonst ewig.
     /// </summary>
     public async Task DownloadAsync(
         DeviceIdentity identity,
@@ -138,25 +147,36 @@ public sealed class BackendClient : IDisposable
         string targetFile,
         CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, path.TrimStart('/'));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", identity.Token);
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(_downloadTimeout);
 
-        using HttpResponseMessage response = await _downloads
-            .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
-            .ConfigureAwait(false);
-
-        if (!response.IsSuccessStatusCode)
+        try
         {
-            throw new BackendException(
-                response.StatusCode,
-                $"Der Download endete mit {(int)response.StatusCode} {response.ReasonPhrase}.");
+            using var request = new HttpRequestMessage(HttpMethod.Get, path.TrimStart('/'));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", identity.Token);
+
+            using HttpResponseMessage response = await _downloads
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, limit.Token)
+                .ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new BackendException(
+                    response.StatusCode,
+                    $"Der Download endete mit {(int)response.StatusCode} {response.ReasonPhrase}.");
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(targetFile)!);
+
+            await using (FileStream file = File.Create(targetFile))
+            {
+                await response.Content.CopyToAsync(file, limit.Token).ConfigureAwait(false);
+            }
         }
-
-        Directory.CreateDirectory(Path.GetDirectoryName(targetFile)!);
-
-        await using (FileStream file = File.Create(targetFile))
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            await response.Content.CopyToAsync(file, ct).ConfigureAwait(false);
+            throw new HttpRequestException(
+                $"Der Download hat das Zeitlimit von {_downloadTimeout.TotalMinutes:0} min ueberschritten.");
         }
     }
 

@@ -28,3 +28,22 @@ export function isVersionAtLeast(version: string | null | undefined, minimum: st
 
   return true;
 }
+
+/**
+ * Ob ein offener Update-Auftrag ueberholt ist: Das Geraet meldet sich schon
+ * mit einer neueren Fassung als der Zielversion.
+ *
+ * Ausgenommen ist ein Auftrag auf die aktuelle Version — wer eine aeltere
+ * Fassung zur aktuellen macht und sie ausrollt, will bewusst zurueck.
+ */
+export function isSupersededTarget(
+  target: string,
+  reported: string | null | undefined,
+  current: string | null | undefined,
+): boolean {
+  if (!reported || target === current) {
+    return false;
+  }
+
+  return !isVersionAtLeast(target, reported);
+}

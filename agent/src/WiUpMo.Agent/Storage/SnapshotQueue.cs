@@ -70,9 +70,15 @@ public sealed class SnapshotQueue(AgentOptions options, ILogger<SnapshotQueue> l
 
     /// <summary>
     /// Legt den Snapshot ab und setzt den Fortschrittsmarker in einem Zug.
+    ///
+    /// Ein Snapshot ohne Update-Daten laesst den Marker stehen: Seine Historie
+    /// ist leer, weil Windows Update nicht lesbar war, nicht weil nichts
+    /// geschah. Der naechste vollstaendige Snapshot holt den Zeitraum nach.
     /// </summary>
     public void Enqueue(Snapshot snapshot)
     {
+        bool advanceHistory = snapshot.AvailableUpdates is not null;
+
         string payload = JsonSerializer.Serialize(snapshot, AgentJson.Options);
 
         using SqliteTransaction transaction = Connection.BeginTransaction();
@@ -90,8 +96,9 @@ public sealed class SnapshotQueue(AgentOptions options, ILogger<SnapshotQueue> l
             insert.ExecuteNonQuery();
         }
 
-        using (SqliteCommand marker = Connection.CreateCommand())
+        if (advanceHistory)
         {
+            using SqliteCommand marker = Connection.CreateCommand();
             marker.Transaction = transaction;
             marker.CommandText = """
                 INSERT INTO meta (key, value) VALUES ($key, $value)

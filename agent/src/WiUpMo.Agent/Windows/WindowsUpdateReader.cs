@@ -61,32 +61,13 @@ public sealed partial class WindowsUpdateReader(AgentOptions options)
             : RunWithTimeoutAsync(() => ReadHistory(since), "Die Abfrage der Historie", ct);
 
     /// <summary>
-    /// Kapselt einen COM-Aufruf mit Zeitlimit.
-    ///
-    /// Der Aufruf selbst laesst sich nicht abbrechen — nach Ablauf des
-    /// Zeitlimits arbeitet der Thread-Pool-Thread also weiter. Er ist ein
-    /// Hintergrund-Thread und haelt den Prozess beim Beenden nicht auf. Genau
-    /// dafuer ist die Kapselung da: eine beschaedigte Update-Datenbank kann
-    /// eine Suche praktisch unbegrenzt blockieren, und der Agent darf daran
-    /// nicht haengenbleiben.
+    /// Kapselt einen COM-Aufruf mit Zeitlimit: Eine beschaedigte Update-Datenbank
+    /// oder ein haengender Dienst kann eine Suche praktisch unbegrenzt
+    /// blockieren, und der Agent darf daran nicht haengenbleiben. Haengt noch
+    /// ein frueherer Aufruf, scheitert dieser sofort (siehe <see cref="HangGuard"/>).
     /// </summary>
-    private async Task<T> RunWithTimeoutAsync<T>(Func<T> work, string what, CancellationToken ct)
-    {
-        Task<T> task = Task.Run(work, CancellationToken.None);
-
-        try
-        {
-            return await task
-                .WaitAsync(TimeSpan.FromSeconds(options.ComTimeoutSeconds), ct)
-                .ConfigureAwait(false);
-        }
-        catch (TimeoutException)
-        {
-            throw new WindowsUpdateException(
-                $"{what} hat das Zeitlimit von {options.ComTimeoutSeconds} s ueberschritten. " +
-                "Das deutet auf eine beschaedigte Windows-Update-Datenbank hin.");
-        }
-    }
+    private Task<T> RunWithTimeoutAsync<T>(Func<T> work, string what, CancellationToken ct) =>
+        HangGuard.WindowsUpdate.RunAsync(work, TimeSpan.FromSeconds(options.ComTimeoutSeconds), what, ct);
 
     // --- Verfuegbare Updates -------------------------------------------------
 

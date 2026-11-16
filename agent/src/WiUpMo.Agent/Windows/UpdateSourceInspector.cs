@@ -181,6 +181,22 @@ public sealed class UpdateSourceInspector(ILogger<UpdateSourceInspector> logger)
 
     private RegisteredService[] ReadRegisteredServices()
     {
+        try
+        {
+            return HangGuard.WindowsUpdate.Run(
+                ReadRegisteredServicesNow, HangGuard.Quick, "Die Abfrage der registrierten Update-Dienste");
+        }
+        catch (WindowsUpdateException ex)
+        {
+            // Kein Abbruch: die Registry-Auswertung allein reicht fuer die
+            // Einordnung, die Dienstliste ist nur zusaetzlicher Kontext.
+            logger.LogWarning("Registrierte Update-Dienste nicht lesbar: {Fehler}", ex.Message);
+            return [];
+        }
+    }
+
+    private static RegisteredService[] ReadRegisteredServicesNow()
+    {
         object? manager = null;
 
         try
@@ -194,13 +210,6 @@ public sealed class UpdateSourceInspector(ILogger<UpdateSourceInspector> logger)
                     .Where(service => service is not null)
                     .Select(service => service!.Value)
             ];
-        }
-        catch (WindowsUpdateException ex)
-        {
-            // Kein Abbruch: die Registry-Auswertung allein reicht fuer die
-            // Einordnung, die Dienstliste ist nur zusaetzlicher Kontext.
-            logger.LogWarning("Registrierte Update-Dienste nicht lesbar: {Fehler}", ex.Message);
-            return [];
         }
         finally
         {

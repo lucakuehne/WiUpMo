@@ -149,8 +149,9 @@ export class AgentRolloutQueryDto {
 }
 
 /**
- * Auftraege je Zustand. `cancelled` sind die von Hand abgebrochenen; sie
- * stehen in der Tabelle als `failed`, zaehlen hier aber nicht als gescheitert.
+ * Auftraege je Zustand. `cancelled` sind die von Hand abgebrochenen und die,
+ * die das Geraet schon ueberholt hatte; sie stehen in der Tabelle als
+ * `failed`, zaehlen hier aber nicht als gescheitert.
  */
 export class AgentRolloutStatesDto {
   pending: number;

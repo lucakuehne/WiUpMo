@@ -316,12 +316,17 @@ export class SnapshotDto {
    * Vollstaendige Liste der offenen Updates. Bewusst vollstaendig und nicht
    * als Differenz: nur so laesst sich erkennen, dass ein Update verschwunden
    * ist, ohne installiert worden zu sein.
+   *
+   * Fehlt sie, war Windows Update auf dem Geraet nicht lesbar (Agents ab
+   * 0.9.2). Der Check-in zaehlt trotzdem; die Update-Zustaende bleiben, wie
+   * sie waren — eine leere Liste hiesse dagegen „nichts mehr offen".
    */
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AvailableUpdateDto)
   @ArrayMaxSize(2000)
-  availableUpdates: AvailableUpdateDto[];
+  @IsOptional()
+  availableUpdates?: AvailableUpdateDto[] | null;
 
   /** Installationshistorie seit dem letzten erfolgreichen Check-in. */
   @IsArray()

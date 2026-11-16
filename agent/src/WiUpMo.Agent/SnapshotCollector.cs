@@ -33,6 +33,11 @@ public sealed class SnapshotCollector(
     /// Startzeitpunkt gesetzt, faellt ein Historieneintrag, der waehrend der
     /// laufenden Erfassung entsteht, in das naechste Fenster — bei einem
     /// Endzeitpunkt fiele er dagegen durch beide Fenster und ginge verloren.
+    ///
+    /// Ist Windows Update nicht lesbar, entsteht ein Snapshot ohne Update-Daten
+    /// statt gar keiner. Frueher fiel der Durchlauf dann aus, und ein Geraet mit
+    /// haengendem Update-Dienst verschwand stumm aus der Ueberwachung — kein
+    /// Check-in, keine Stoerung, nur ein immer aelterer Zeitstempel.
     /// </summary>
     public async Task<Snapshot> CollectAsync(
         DateTimeOffset historySince,
@@ -45,12 +50,28 @@ public sealed class SnapshotCollector(
         UpdateSourceInfo source = updateSource.Read();
         bool pendingReboot = host.IsRebootPending();
 
-        IReadOnlyList<AvailableUpdate> available =
-            await updates.GetAvailableUpdatesAsync(ct).ConfigureAwait(false);
-        IReadOnlyList<HistoryEntry> history =
-            await updates.GetHistoryAsync(historySince, ct).ConfigureAwait(false);
-        IReadOnlyList<AvailableUpdate>? installed =
-            await ReadInstalledIfChangedAsync(history.Count > 0, collectedAt, ct).ConfigureAwait(false);
+        IReadOnlyList<AvailableUpdate>? available = null;
+        IReadOnlyList<HistoryEntry> history = [];
+        IReadOnlyList<AvailableUpdate>? installed = null;
+
+        try
+        {
+            available = await updates.GetAvailableUpdatesAsync(ct).ConfigureAwait(false);
+            history = await updates.GetHistoryAsync(historySince, ct).ConfigureAwait(false);
+            installed = await ReadInstalledIfChangedAsync(history.Count > 0, collectedAt, ct).ConfigureAwait(false);
+        }
+        catch (WindowsUpdateException ex)
+        {
+            // Ganz oder gar nicht: Offene Updates ohne die Historie dazu ergaeben
+            // im Backend falsche Uebergaenge.
+            available = null;
+            history = [];
+            installed = null;
+
+            // Kein Programmfehler, sondern ein Zustand des Geraets: als Warnung
+            // im Klartext, ohne Stapelspur.
+            logger.LogWarning("Update-Zustand nicht lesbar, Check-in ohne Update-Daten. {Meldung}", ex.Message);
+        }
 
         return new Snapshot
         {

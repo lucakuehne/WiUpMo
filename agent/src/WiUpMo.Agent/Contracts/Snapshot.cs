@@ -196,7 +196,15 @@ public sealed class Snapshot
     public required HostInfo Host { get; init; }
     public required UpdateSourceInfo UpdateSource { get; init; }
     public required bool PendingReboot { get; init; }
-    public required IReadOnlyList<AvailableUpdate> AvailableUpdates { get; init; }
+
+    /// <summary>
+    /// Die vollstaendige Liste der offenen Updates. Null, wenn Windows Update
+    /// nicht lesbar war: Der Check-in geht trotzdem hinaus, damit das Geraet
+    /// samt Stoerung sichtbar bleibt, und das Backend laesst die Update-Zustaende
+    /// unberuehrt. Ab 0.9.2; ein Backend davor wiese den Snapshot ab.
+    /// </summary>
+    public required IReadOnlyList<AvailableUpdate>? AvailableUpdates { get; init; }
+
     public required IReadOnlyList<HistoryEntry> History { get; init; }
 
     /// <summary>

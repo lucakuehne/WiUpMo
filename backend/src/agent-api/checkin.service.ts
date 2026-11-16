@@ -167,7 +167,7 @@ export class CheckinService {
       merged.set(update.updateId, this.catalogFromAvailable(update));
     }
 
-    for (const update of snapshot.availableUpdates) {
+    for (const update of snapshot.availableUpdates ?? []) {
       merged.set(update.updateId, this.catalogFromAvailable(update));
     }
 
@@ -294,6 +294,9 @@ export class CheckinService {
    *  2. Die Historie erklaert, *warum* etwas fehlt (installiert oder gescheitert).
    *  3. Bleibt nach beidem ein vorher offenes Update uebrig, ist es
    *     verschwunden, ohne installiert worden zu sein — also abgeloest.
+   *
+   * Ohne Verfuegbar-Liste (Windows Update auf dem Geraet nicht lesbar) gibt es
+   * weder 1. noch 3.: Was offen war, bleibt offen.
    */
   private computeTransitions(
     snapshot: SnapshotDto,
@@ -305,7 +308,7 @@ export class CheckinService {
     const events: PendingEvent[] = [];
 
     // --- 1. Alles, was aktuell offen ist ------------------------------------
-    for (const update of snapshot.availableUpdates) {
+    for (const update of snapshot.availableUpdates ?? []) {
       const id = catalogIds.get(update.updateId);
       if (!id) continue;
 
@@ -376,6 +379,10 @@ export class CheckinService {
     }
 
     // --- 3. Verschwunden ohne Erklaerung ------------------------------------
+    if (!snapshot.availableUpdates) {
+      return { targets, events };
+    }
+
     for (const [id, before] of existing) {
       if (before.state !== UpdateState.Available) continue;
       if (targets.has(id)) continue;
@@ -542,7 +549,7 @@ export class CheckinService {
 function withoutStoreApps(snapshot: SnapshotDto): SnapshotDto {
   return {
     ...snapshot,
-    availableUpdates: snapshot.availableUpdates.filter((update) => !isStoreApp(update.title)),
+    availableUpdates: snapshot.availableUpdates?.filter((update) => !isStoreApp(update.title)) ?? null,
     installedUpdates: snapshot.installedUpdates?.filter((update) => !isStoreApp(update.title)),
     history: snapshot.history.filter((entry) => !isStoreApp(entry.title)),
   };

@@ -968,6 +968,59 @@ await step('Neustart abgebrochen: die Meldung entfaellt beim naechsten Check-in'
   await api.put('/api/settings/restart', { maxDeferrals: 3, promptText: 'Grund: {grund}' });
 });
 
+// --- Agent ohne Windows Update, ueberholte Auftraege ----------------------------
+
+await step('Check-in ohne Update-Daten: Zustaende bleiben, Geraet gilt als gemeldet', async () => {
+  const blindHost = host(`NOWU-${RUN}`);
+  const blind = await enroll(agent, enrollmentToken, blindHost);
+  await checkin(agent, blind.token, snapshot({ hostInfo: blindHost, collectedAt: minutesAgo(5), available: [U.defender, U.late] }));
+
+  // Windows Update haengt: die Liste null oder ganz weggelassen, keine Historie.
+  const withNull = { ...snapshot({ hostInfo: blindHost, collectedAt: minutesAgo(2) }), availableUpdates: null };
+  const { availableUpdates: _omitted, ...without } = snapshot({ hostInfo: blindHost, collectedAt: minutesAgo(1) });
+  const res = await agent.post('/api/agent/v1/checkin/batch', { snapshots: [withNull, without] }, { token: blind.token });
+  assert.deepEqual(res.results.map((r) => r.outcome), ['accepted', 'accepted']);
+
+  const detail = await api.get(`/api/devices/${blind.deviceId}`);
+  const state = Object.fromEntries(detail.updates.map((u) => [u.kbArticle, u.state]));
+  assert.deepEqual(
+    [state[U.defender.kbArticle], state[U.late.kbArticle]],
+    ['available', 'available'],
+    'ohne Liste darf nichts als verschwunden gelten',
+  );
+  assert.equal(detail.checkins.length, 3);
+  assert.equal(new Date(detail.lastSeenAt).getTime(), new Date(without.collectedAt).getTime());
+});
+
+await step('Agent-Auftrag: einzeln abbrechen; auf die aktuelle Version bleibt er trotz neuerer Meldung', async () => {
+  const current = (await api.get('/api/agent-releases')).find((r) => r.isCurrent);
+  const newerHost = host(`NEWER-${RUN}`);
+  const newer = (
+    await agent.request('POST', '/api/agent/v1/enroll', {
+      body: { enrollmentToken, host: newerHost, agentVersion: '0.6.0' },
+    })
+  ).data;
+  const created = await api.post('/api/agent-update-jobs', { deviceIds: [newer.deviceId] });
+  assert.equal(created.created, 1);
+
+  // Meldet sich mit einer Fassung ueber der aktuellen. Ein Auftrag auf die
+  // aktuelle Version ist ein bewusstes Zurueck und bleibt deshalb stehen;
+  // ueberholt ist nur, was auf eine aeltere, nicht aktuelle Version zielt
+  // (Unit-Test agent-version).
+  const res = await checkin(agent, newer.token, {
+    ...snapshot({ hostInfo: newerHost, collectedAt: minutesAgo(1) }),
+    agentVersion: '99.0.0',
+  });
+  assert.equal(res.agentUpdate?.targetVersion, current.version);
+
+  const [job] = await api.get(`/api/agent-update-jobs?deviceId=${newer.deviceId}`);
+  assert.deepEqual(await api.post(`/api/agent-update-jobs/${job.id}/cancel`), { cancelled: 1 });
+  await api.request('POST', `/api/agent-update-jobs/${job.id}/cancel`, { expect: 404 });
+
+  const rollout = (await api.get('/api/agent-rollouts?limit=5')).items.find((r) => r.id === created.rolloutId);
+  assert.deepEqual([rollout.states.cancelled, rollout.states.failed], [1, 0]);
+});
+
 // --- Auslieferung des Frontends -------------------------------------------------
 
 await step('Frontend und API-Grenze', async () => {

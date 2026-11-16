@@ -98,12 +98,22 @@ public sealed class AgentCycle(
             .CollectAsync(since, health.Read(), ct)
             .ConfigureAwait(false);
 
-        logger.LogInformation(
-            "{Offen} offene Updates, {Historie} Historieneintraege, Quelle {Quelle}, Neustart ausstehend: {Reboot}.",
-            snapshot.AvailableUpdates.Count,
-            snapshot.History.Count,
-            snapshot.UpdateSource.Source,
-            snapshot.PendingReboot);
+        if (snapshot.AvailableUpdates is null)
+        {
+            logger.LogInformation(
+                "Ohne Update-Daten erfasst, Quelle {Quelle}, Neustart ausstehend: {Reboot}.",
+                snapshot.UpdateSource.Source,
+                snapshot.PendingReboot);
+        }
+        else
+        {
+            logger.LogInformation(
+                "{Offen} offene Updates, {Historie} Historieneintraege, Quelle {Quelle}, Neustart ausstehend: {Reboot}.",
+                snapshot.AvailableUpdates.Count,
+                snapshot.History.Count,
+                snapshot.UpdateSource.Source,
+                snapshot.PendingReboot);
+        }
 
         queue.Enqueue(snapshot);
 

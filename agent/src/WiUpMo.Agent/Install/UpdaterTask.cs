@@ -141,9 +141,22 @@ public static class UpdaterTask
     /// <summary>
     /// Zustand des Tasks ueber die COM-Schnittstelle der Aufgabenplanung — ohne
     /// <c>schtasks</c>-Ausgabe, die je nach Systemsprache anders aussieht.
-    /// <c>null</c>, wenn sich das nicht feststellen liess.
+    /// <c>null</c>, wenn sich das nicht feststellen liess — auch, wenn die
+    /// Aufgabenplanung nicht antwortet.
     /// </summary>
     public static UpdaterTaskStatus? ReadStatus()
+    {
+        try
+        {
+            return HangGuard.TaskScheduler.Run(ReadStatusNow, HangGuard.Quick, "Die Abfrage des Updater-Tasks");
+        }
+        catch (WindowsUpdateException)
+        {
+            return null;
+        }
+    }
+
+    private static UpdaterTaskStatus? ReadStatusNow()
     {
         object? service = null;
 

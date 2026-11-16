@@ -167,16 +167,25 @@ public sealed class HostInspector(ILogger<HostInspector> logger)
             return true;
         }
 
-        object? systemInfo = null;
         try
         {
-            systemInfo = Com.Create("Microsoft.Update.SystemInfo");
-            return Com.TryGetBool(systemInfo, "RebootRequired");
+            return HangGuard.WindowsUpdate.Run(
+                ReadRebootRequired, HangGuard.Quick, "Die Abfrage des Neustart-Status");
         }
         catch (WindowsUpdateException ex)
         {
             logger.LogWarning("Neustart-Status nicht ueber WUApi ermittelbar: {Fehler}", ex.Message);
             return false;
+        }
+    }
+
+    private static bool ReadRebootRequired()
+    {
+        object? systemInfo = null;
+        try
+        {
+            systemInfo = Com.Create("Microsoft.Update.SystemInfo");
+            return Com.TryGetBool(systemInfo, "RebootRequired");
         }
         finally
         {

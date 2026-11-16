@@ -44,7 +44,9 @@ public sealed class Worker(
         {
             try
             {
-                await cycle.RunAsync(stoppingToken).ConfigureAwait(false);
+                Task run = cycle.RunAsync(stoppingToken);
+                await WarnWhileRunningAsync(run, stoppingToken).ConfigureAwait(false);
+                await run.ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -75,6 +77,38 @@ public sealed class Worker(
         }
 
         logger.LogInformation("WiUpMo-Agent beendet.");
+    }
+
+    /// <summary>
+    /// Ein Durchlauf, der so lange braucht, haengt: Die Update-Suchen und der
+    /// Download haben eigene Zeitlimits, die zusammen deutlich darunter liegen.
+    /// </summary>
+    private static readonly TimeSpan SlowCycle = TimeSpan.FromMinutes(60);
+
+    /// <summary>
+    /// Meldet einen Durchlauf, der nicht fertig wird — einmal je
+    /// <see cref="SlowCycle"/>, solange er laeuft.
+    ///
+    /// Ein haengender Aufruf wirft nichts; er kommt einfach nicht zurueck. Ohne
+    /// diese Warnung endete das Protokoll dann mitten im Durchlauf, ohne Fehler
+    /// und ohne Hinweis, und das Geraet meldete sich nie wieder.
+    /// </summary>
+    private async Task WarnWhileRunningAsync(Task run, CancellationToken ct)
+    {
+        DateTimeOffset started = DateTimeOffset.UtcNow;
+
+        while (await Task.WhenAny(run, Task.Delay(SlowCycle, ct)).ConfigureAwait(false) != run)
+        {
+            if (ct.IsCancellationRequested)
+            {
+                return;
+            }
+
+            logger.LogError(
+                "Der Durchlauf seit {Start:u} ist nach {Minuten:0} Minuten nicht fertig und haengt vermutlich. " +
+                "Der letzte Eintrag davor zeigt, wo. Bis er zurueckkommt, meldet dieses Geraet nichts.",
+                started, (DateTimeOffset.UtcNow - started).TotalMinutes);
+        }
     }
 
     /// <summary>Liefert <c>false</c>, wenn waehrend des Wartens abgebrochen wurde.</summary>

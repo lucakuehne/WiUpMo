@@ -137,7 +137,8 @@ Drei Quellen, die einander in dieser Reihenfolge überschreiben:
 | `Agent:QueueMaxSnapshots` | — | 200 | Obergrenze der Warteschlange. |
 | `Agent:QueueMaxAgeDays` | — | 30 | Höchstalter in der Warteschlange. |
 | `Agent:SearchOnline` | `--search-online` | true | `false` liest nur den lokalen Zwischenspeicher. |
-| `Agent:ComTimeoutSeconds` | — | 300 | Obergrenze pro WUApi-Aufruf. |
+| `Agent:ComTimeoutSeconds` | — | 300 | Obergrenze pro Update-Suche und Abfrage der Historie. Kurze Abfragen an Windows Update und die Aufgabenplanung haben fest 60 s. |
+| `Agent:DownloadTimeoutMinutes` | — | 30 | Obergrenze für das Herunterladen einer neuen Fassung, Inhalt eingeschlossen. |
 | `Agent:InstallTimeoutMinutes` | — | 180 | Obergrenze für einen Installationsauftrag, Download und Installation zusammen. |
 | `Agent:UpdateVerificationMinutes` | — | 20 | Frist, in der sich eine neue Fassung bestätigen muss, sonst stellt der Updater zurück. |
 | `Agent:SimulateWindowsUpdate` | — | false | **Nur für den Ende-zu-Ende-Test:** fragt Windows Update nicht ab. Im Betrieb nie setzen. |
@@ -176,6 +177,31 @@ Dienstbetrieb **Warnungen und Fehler** ins Windows-Anwendungsprotokoll (Quelle
 ein Administrator nachsieht, der vom Agent nichts weiss — mit jedem
 Vier-Stunden-Durchlauf vollgeschrieben wäre es dafür wertlos.
 
+### Wenn Windows nicht antwortet
+
+Ein hängender Aufruf wirft keinen Fehler, er kommt einfach nicht zurück. Bis
+0.9.1 endete das Protokoll dann nach „Erfasse Update-Zustand", ohne Fehler und
+ohne Hinweis, und das Gerät meldete sich nie wieder. Ab 0.9.2:
+
+- Jeder COM-Aufruf an Windows Update und an die Aufgabenplanung hat ein
+  Zeitlimit. Hängt einer, scheitern weitere an denselben Dienst sofort, mit
+  einer Warnung, seit wann. Antwortet der Dienst wieder, geht es ohne Neustart
+  des Agents weiter.
+- Ein Durchlauf, der nach 60 Minuten nicht fertig ist, schreibt einen Fehler
+  ins Protokoll, einmal pro Stunde, solange er läuft.
+- Der Download einer neuen Fassung hat ein Zeitlimit über den ganzen Inhalt,
+  nicht nur bis zur ersten Antwort.
+
+- Ist Windows Update nicht lesbar, geht der Check-in trotzdem hinaus, nur ohne
+  Update-Daten (`availableUpdates` fehlt). Das Backend lässt die Update-Zustände
+  dann, wie sie waren, und die Warnung „Update-Zustand nicht lesbar …“ steht
+  ab dem nächsten Check-in unter „Agent-Zustand“ und bei den Störungen. Der
+  Fortschritt der Historie bleibt stehen; der nächste vollständige Snapshot
+  holt den Zeitraum nach.
+
+Abhilfe auf dem Gerät: den Dienst `wuauserv` neu starten, sonst den Rechner.
+Hilft beides nicht, die Windows-Update-Komponenten zurücksetzen.
+
 ## Rückgabewerte
 
 | Wert | Bedeutung |
@@ -197,6 +223,7 @@ Vier-Stunden-Durchlauf vollgeschrieben wäre es dafür wertlos.
 | `Storage/DeviceIdentityStore.cs` | Identität (DPAPI) |
 | `Install/ServiceInstaller.cs` | `--install` / `--uninstall` |
 | `Windows/Com.cs` | Späte Bindung an COM über IDispatch |
+| `Windows/HangGuard.cs` | Zeitlimit für COM-Aufrufe an Windows-Dienste, höchstens ein hängender je Dienst |
 | `Windows/WindowsUpdateReader.cs` | Offene Updates und Installationshistorie |
 | `Windows/WindowsUpdateInstaller.cs` | Suchen, Lizenz annehmen, herunterladen, installieren |
 | `Installation/InstallJobRunner.cs` | Installationsaufträge annehmen, im Hintergrund ausführen, melden |

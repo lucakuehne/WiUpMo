@@ -44,6 +44,12 @@ const REFRESH_MS = 30_000;
 /** So vermerkt das Backend einen von Hand abgebrochenen Auftrag. */
 const CANCELLED_ERROR = 'Von Hand abgebrochen.';
 
+/**
+ * So beginnt der Vermerk, wenn das Gerät den Auftrag schon überholt hatte: Es
+ * meldete sich mit einer neueren Fassung, bevor es ihn abholte.
+ */
+const SUPERSEDED_PREFIX = 'Überholt:';
+
 type RolloutState = keyof AgentRollout['states'];
 
 /** Abgeschlossenes zuerst, dann was läuft, dann was noch wartet; Abgebrochenes zuletzt. */
@@ -77,7 +83,7 @@ function segments(rollout: AgentRollout) {
   return ORDER.map((state) => ({
     key: state,
     count: rollout.states[state],
-    label: state === 'cancelled' ? 'abgebrochen' : JOB_STATE_LABELS[state],
+    label: state === 'cancelled' ? 'abgebrochen oder überholt' : JOB_STATE_LABELS[state],
     class: SEGMENT_CLASS[state],
   }));
 }
@@ -97,6 +103,36 @@ function scopeLabel(rollout: AgentRollout): string {
 
 function isCancelled(job: AgentUpdateJobView): boolean {
   return job.state === 'failed' && job.error === CANCELLED_ERROR;
+}
+
+function isSuperseded(job: AgentUpdateJobView): boolean {
+  return job.state === 'failed' && (job.error?.startsWith(SUPERSEDED_PREFIX) ?? false);
+}
+
+/** Abgebrochen oder überholt: beendet, aber nicht gescheitert. */
+function isClosed(job: AgentUpdateJobView): boolean {
+  return isCancelled(job) || isSuperseded(job);
+}
+
+function isOpenJob(job: AgentUpdateJobView): boolean {
+  return job.state === 'pending' || job.state === 'delivered' || job.state === 'installing';
+}
+
+const cancellingJob = ref<string | null>(null);
+
+async function cancelJob(rollout: AgentRollout, job: AgentUpdateJobView): Promise<void> {
+  cancellingJob.value = job.id;
+  try {
+    await post<{ cancelled: number }>(`/api/agent-update-jobs/${job.id}/cancel`);
+    toast.success(`Auftrag für ${job.hostname} abgebrochen.`, {
+      description: 'Das Gerät lässt sich danach wieder beauftragen.',
+    });
+    await Promise.all([load(true), loadJobs(rollout.id)]);
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Der Auftrag konnte nicht abgebrochen werden.';
+  } finally {
+    cancellingJob.value = null;
+  }
 }
 
 async function load(quiet = false): Promise<void> {
@@ -310,12 +346,13 @@ onBeforeUnmount(() => clearInterval(timer));
                         <TableHead class="w-40">Status</TableHead>
                         <TableHead class="w-40">Abgeschlossen</TableHead>
                         <TableHead>Fehler</TableHead>
+                        <TableHead class="w-28" />
                       </TableRow>
                     </TableHeader>
 
                     <TableBody>
                       <TableRow v-if="jobs[rollout.id]!.length === 0">
-                        <TableCell :colspan="4" class="text-muted-foreground py-6 text-center">
+                        <TableCell :colspan="5" class="text-muted-foreground py-6 text-center">
                           Die Geräte dieses Ausrollens gibt es nicht mehr.
                         </TableCell>
                       </TableRow>
@@ -331,11 +368,11 @@ onBeforeUnmount(() => clearInterval(timer));
                         </TableCell>
                         <TableCell>
                           <Badge
-                            v-if="isCancelled(job)"
+                            v-if="isClosed(job)"
                             variant="outline"
                             class="bg-muted text-muted-foreground border-transparent"
                           >
-                            abgebrochen
+                            {{ isSuperseded(job) ? 'überholt' : 'abgebrochen' }}
                           </Badge>
                           <Badge v-else variant="outline" :class="jobBadgeClass(job.state)">
                             {{ JOB_STATE_LABELS[job.state] }}
@@ -344,9 +381,26 @@ onBeforeUnmount(() => clearInterval(timer));
                         <TableCell>{{ formatDateTime(job.completedAt) }}</TableCell>
                         <TableCell
                           class="text-xs"
-                          :class="isCancelled(job) ? 'text-muted-foreground' : 'text-destructive'"
+                          :class="isClosed(job) ? 'text-muted-foreground' : 'text-destructive'"
                         >
-                          {{ isCancelled(job) ? '' : (job.error ?? '') }}
+                          <template v-if="isSuperseded(job)">
+                            {{ job.error!.slice(SUPERSEDED_PREFIX.length).trim() }}
+                          </template>
+                          <template v-else-if="!isCancelled(job)">{{ job.error ?? '' }}</template>
+                        </TableCell>
+                        <TableCell class="text-right">
+                          <Button
+                            v-if="isOpenJob(job)"
+                            size="sm"
+                            variant="ghost"
+                            :disabled="cancellingJob !== null"
+                            :aria-label="`Auftrag für ${job.hostname} abbrechen`"
+                            @click="cancelJob(rollout, job)"
+                          >
+                            <Loader2 v-if="cancellingJob === job.id" class="size-4 animate-spin" />
+                            <XCircle v-else class="size-4" />
+                            Abbrechen
+                          </Button>
                         </TableCell>
                       </TableRow>
                     </TableBody>
