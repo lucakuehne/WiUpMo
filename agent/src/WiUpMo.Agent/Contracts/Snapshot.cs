@@ -225,6 +225,13 @@ public sealed class Snapshot
     /// deshalb weg, solange es leer ist.
     /// </summary>
     public AgentDiagnostics? Diagnostics { get; init; }
+
+    /// <summary>
+    /// Hardware des Geraets; nur wenn sich etwas geaendert hat oder einmal am
+    /// Tag, sonst weggelassen. Ab 0.10.0 — ein Backend davor wiese den Snapshot
+    /// mit dem Feld ab.
+    /// </summary>
+    public HardwareInfo? Hardware { get; init; }
 }
 
 public sealed class BatchCheckinRequest

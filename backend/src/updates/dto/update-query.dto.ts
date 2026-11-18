@@ -132,6 +132,8 @@ export class UpdateDeviceDto {
   hresult: number | null;
   /** Eingespielt, wartet aber auf den Neustart (0x80242014). */
   awaitingReboot: boolean;
+  /** Vor dem letzten Neustart eingespielt und danach weiter angeboten (siehe `notCompletedByRebootSql`). */
+  notCompletedByReboot: boolean;
   lastSeenAt: string | null;
 }
 

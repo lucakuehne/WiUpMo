@@ -96,6 +96,9 @@ const units = ref<DeviceOu[]>([]);
 const agentVersion = ref<string | null>(null);
 const agentVersions = ref<AgentVersionCount[]>([]);
 const staleDays = ref<number | null>(null);
+
+/** Letzter Neustart länger her als so viele Tage. Geräte ohne bekannten Neustart fallen heraus. */
+const notRebootedDays = ref<number | null>(null);
 const hasOpenSecurity = ref(false);
 
 /**
@@ -116,6 +119,13 @@ const staleOptions = [
   { value: '7', label: 'seit 7 Tagen' },
   { value: '14', label: 'seit 14 Tagen' },
   { value: '30', label: 'seit 30 Tagen' },
+];
+
+const rebootOptions = [
+  { value: '7', label: 'seit 7 Tagen' },
+  { value: '14', label: 'seit 14 Tagen' },
+  { value: '30', label: 'seit 30 Tagen' },
+  { value: '60', label: 'seit 60 Tagen' },
 ];
 
 /**
@@ -178,6 +188,11 @@ function onStaleChange(value: unknown): void {
   onFilterChange();
 }
 
+function onRebootChange(value: unknown): void {
+  notRebootedDays.value = value === ANY || !value ? null : Number(value);
+  onFilterChange();
+}
+
 /**
  * Wie bei den Umschaltern über den Namen statt über die Referenz — in der
  * Vorlage werden Refs entpackt und liessen sich nicht mehr setzen.
@@ -209,6 +224,7 @@ function filterParams(): Record<string, unknown> {
     agentVersion: agentVersion.value ?? undefined,
     updateSource: updateSource.value ?? undefined,
     staleDays: staleDays.value ?? undefined,
+    notRebootedDays: notRebootedDays.value ?? undefined,
     hasOpenSecurity: hasOpenSecurity.value || undefined,
     // Hier bewusst `??` statt `||`: `false` ist ein Filter, kein leerer Wert.
     pendingReboot: pendingReboot.value ?? undefined,
@@ -423,6 +439,7 @@ function resetFilters(): void {
   agentVersion.value = null;
   updateSource.value = null;
   staleDays.value = null;
+  notRebootedDays.value = null;
   hasOpenSecurity.value = false;
   pendingReboot.value = null;
   hasAgent.value = null;
@@ -460,6 +477,9 @@ function applyQueryFilters(): void {
   }
   if (typeof query.staleDays === 'string') {
     staleDays.value = Number(query.staleDays);
+  }
+  if (typeof query.notRebootedDays === 'string') {
+    notRebootedDays.value = Number(query.notRebootedDays);
   }
   if (query.hasOpenSecurity === '1') {
     hasOpenSecurity.value = true;
@@ -561,6 +581,21 @@ onMounted(() => {
           <SelectItem :value="ANY">Egal</SelectItem>
           <SelectItem v-for="option in staleOptions" :key="option.value" :value="option.value">
             {{ option.label }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+
+      <Select
+        :model-value="notRebootedDays === null ? '' : String(notRebootedDays)"
+        @update:model-value="onRebootChange"
+      >
+        <SelectTrigger class="w-44" title="Letzter Neustart länger her als … — Geräte ohne bekannten Neustart fallen heraus">
+          <SelectValue placeholder="Kein Neustart" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem :value="ANY">Egal</SelectItem>
+          <SelectItem v-for="option in rebootOptions" :key="option.value" :value="option.value">
+            Kein Neustart {{ option.label }}
           </SelectItem>
         </SelectContent>
       </Select>
@@ -721,16 +756,8 @@ onMounted(() => {
                   Offen
                 </SortHead>
                 <SortHead
-                  field="openSecurityUpdates"
-                  numeric
-                  :sort-by="sortBy"
-                  :sort-dir="sortDir"
-                  @sort="onSort"
-                >
-                  davon Sicherheit
-                </SortHead>
-                <SortHead
                   field="patchAgeDays"
+                  class="whitespace-normal"
                   numeric
                   :sort-by="sortBy"
                   :sort-dir="sortDir"
@@ -738,8 +765,17 @@ onMounted(() => {
                 >
                   Patch-Alter
                 </SortHead>
-                <SortHead field="lastSeenAt" :sort-by="sortBy" :sort-dir="sortDir" @sort="onSort">
-                  Letzter Check-in
+                <!-- Die langen Köpfe dürfen umbrechen: Sonst bestimmten sie die
+                     Spaltenbreite, und die Tabelle lief rechts aus dem Bild. -->
+                <SortHead
+                  field="lastSeenAt"
+                  class="whitespace-normal"
+                  :sort-by="sortBy"
+                  :sort-dir="sortDir"
+                  @sort="onSort"
+                >
+                  <!-- Geschützter Bindestrich: umbrechen nach „Letzter“, nicht in „Check-in“. -->
+                  Letzter Check&#8209;in
                 </SortHead>
                 <SortHead
                   field="agentVersion"
@@ -750,21 +786,29 @@ onMounted(() => {
                 >
                   Agent
                 </SortHead>
-                <TableHead class="w-20">Neustart</TableHead>
+                <SortHead
+                  field="lastBootAt"
+                  class="whitespace-normal"
+                  :sort-by="sortBy"
+                  :sort-dir="sortDir"
+                  @sort="onSort"
+                >
+                  Letzter Neustart
+                </SortHead>
               </TableRow>
             </TableHeader>
 
             <TableBody>
               <template v-if="loading">
                 <TableRow v-for="n in 6" :key="n">
-                  <TableCell v-for="column in 11" :key="column">
+                  <TableCell v-for="column in 10" :key="column">
                     <Skeleton class="h-4 w-full" />
                   </TableCell>
                 </TableRow>
               </template>
 
               <TableRow v-else-if="rows.length === 0">
-                <TableCell :colspan="11" class="text-muted-foreground py-8 text-center">
+                <TableCell :colspan="10" class="text-muted-foreground py-8 text-center">
                   Keine Geräte gefunden.
                 </TableCell>
               </TableRow>
@@ -818,9 +862,12 @@ onMounted(() => {
                   <span v-else class="text-muted-foreground">—</span>
                 </TableCell>
 
-                <TableCell>
+                <!-- Darf umbrechen: „Windows Server 2022 Standard“ machte die Spalte
+                     sonst so breit, dass „Letzter Neustart“ aus dem Bild lief. -->
+                <TableCell class="min-w-32 whitespace-normal">
                   <div>{{ row.osName ?? '—' }}</div>
-                  <div class="text-muted-foreground text-xs">
+                  <!-- Version und Build bleiben auf einer Zeile; umbrechen darf nur der Name. -->
+                  <div class="text-muted-foreground text-xs whitespace-nowrap">
                     {{ row.osVersion ?? '' }}
                     <template v-if="row.osBuild">({{ row.osBuild }})</template>
                   </div>
@@ -833,12 +880,6 @@ onMounted(() => {
                 </TableCell>
 
                 <TableCell class="tabular text-right">{{ row.openUpdates }}</TableCell>
-
-                <TableCell class="tabular text-right">
-                  <span :class="row.openSecurityUpdates > 0 ? 'text-destructive font-semibold' : ''">
-                    {{ row.openSecurityUpdates }}
-                  </span>
-                </TableCell>
 
                 <TableCell class="tabular text-right">
                   <template v-if="row.patchAgeDays === null">—</template>
@@ -868,11 +909,22 @@ onMounted(() => {
                   </div>
                 </TableCell>
 
-                <TableCell
-                  :title="row.lastBootAt ? `Letzter Neustart: ${formatDateTime(row.lastBootAt)}` : undefined"
-                >
-                  <AlertTriangle v-if="row.pendingReboot" class="text-warning size-4" />
-                  <span v-else class="text-muted-foreground">—</span>
+                <!-- Wann zuletzt, und ob Windows schon wieder einen verlangt. -->
+                <TableCell class="whitespace-nowrap">
+                  <span class="inline-flex items-center gap-1.5">
+                    <span v-if="row.lastBootAt" :title="formatDateTime(row.lastBootAt)">
+                      {{ formatRelative(row.lastBootAt) }}
+                    </span>
+                    <span v-else class="text-muted-foreground" title="Erst ab Agent 0.8.0 bekannt">—</span>
+                    <span
+                      v-if="row.pendingReboot"
+                      title="Neustart ausstehend"
+                      aria-label="Neustart ausstehend"
+                      class="inline-flex"
+                    >
+                      <AlertTriangle class="text-warning size-4" />
+                    </span>
+                  </span>
                 </TableCell>
               </TableRow>
             </TableBody>

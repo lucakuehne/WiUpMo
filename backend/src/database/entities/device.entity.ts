@@ -74,6 +74,14 @@ export class Device {
   @Column({ type: 'timestamptz', name: 'last_boot_at', nullable: true })
   lastBootAt: Date | null;
 
+  /** Letzte Hardware-Angaben des Agents (ab 0.10.0), am Stueck. */
+  @Column({ type: 'jsonb', name: 'hardware', nullable: true })
+  hardware: Record<string, unknown> | null;
+
+  /** Wann der Agent sie zuletzt geschickt hat — bei Aenderung und einmal am Tag. */
+  @Column({ type: 'timestamptz', name: 'hardware_reported_at', nullable: true })
+  hardwareReportedAt: Date | null;
+
   @Column({
     type: 'enum',
     enum: DeviceStatus,

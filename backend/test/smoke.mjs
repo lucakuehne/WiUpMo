@@ -221,6 +221,17 @@ await step('Benutzer und letzter Neustart: neuester Snapshot zaehlt, Suche finde
 
   const found = await api.get(`/api/devices?search=${encodeURIComponent(`Lena ${RUN}`)}`);
   assert.deepEqual(found.items.map((d) => [d.hostname, d.lastLogonUser]), [[name, 'TEST\\lena']]);
+  assert.equal(found.items[0].lastBootAt, boot);
+
+  // Kein Neustart seit N Tagen: drei Tage her, also bei 2 dabei, bei 5 nicht.
+  // Ohne bekannten Neustart (das Testgeraet oben) nie.
+  const notRebooted = async (days, search) =>
+    (await api.get(`/api/devices?search=${encodeURIComponent(search)}&notRebootedDays=${days}`)).total;
+  assert.equal(await notRebooted(2, name), 1);
+  assert.equal(await notRebooted(5, name), 0);
+  assert.equal(await notRebooted(0, HOST), 0);
+  const byBoot = await api.get('/api/devices?sortBy=lastBootAt&sortDir=asc&limit=200');
+  assert.ok(byBoot.items.some((d) => d.hostname === name), 'nach letztem Neustart sortiert fehlt das Geraet');
 
   const csv = await api.request('GET', `/api/devices/export?search=${encodeURIComponent(`Lena ${RUN}`)}`, { raw: true });
   assert.match(csv.data, /Zuletzt angemeldet/);
@@ -810,6 +821,46 @@ await step('Installationsauftrag: Eingespieltes wartet auf den Neustart', async 
   await api.post(`/api/install-jobs/${due.installRequest.jobId}/cancel`);
 });
 
+await step('Eingespielt, Neustart, weiter angeboten: der Neustart schliesst es nicht ab', async () => {
+  // Wie ein Funktionsupdate, das Windows-Setup beim Neustart zuruecknimmt:
+  // eingespielt, neu gestartet, und danach bietet Windows es wieder an.
+  const loopName = `LOOP-${RUN}`;
+  const loopDevice = await enroll(agent, enrollmentToken, host(loopName));
+  const bootedAt = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const loopHost = (bootMinutesAgo) => host(loopName, { lastBootAt: bootedAt(bootMinutesAgo) });
+  const loopUpdate = async () => {
+    const detail = await api.get(`/api/devices/${loopDevice.deviceId}`);
+    return detail.updates.find((u) => u.kbArticle === U.late.kbArticle);
+  };
+
+  // Eingespielt nach dem damaligen Start: wartet einfach auf den Neustart.
+  await checkin(agent, loopDevice.token, snapshot({
+    hostInfo: loopHost(3 * 24 * 60),
+    collectedAt: minutesAgo(30),
+    available: [U.late],
+    entries: [history(U.late, { resultCode: 1, hresult: HRESULT_POST_REBOOT, occurredAt: minutesAgo(31) })],
+    pendingReboot: true,
+  }));
+  let late = await loopUpdate();
+  assert.deepEqual([late.awaitingReboot, late.notCompletedByReboot], [true, false]);
+  assert.deepEqual(late.attempts.map((a) => [a.succeeded, a.staged]), [[true, true]], 'eingespielt, nicht installiert');
+
+  // Neu gestartet, aber ohne Update-Daten gemeldet: Das Angebot ist nicht bestaetigt.
+  await checkin(agent, loopDevice.token, {
+    ...snapshot({ hostInfo: loopHost(20), collectedAt: minutesAgo(10) }),
+    availableUpdates: null,
+  });
+  assert.equal((await loopUpdate()).notCompletedByReboot, false, 'ohne Update-Daten nichts behaupten');
+
+  // Nach dem Neustart weiter angeboten: der Abschluss beim Neustart ist gescheitert.
+  await checkin(agent, loopDevice.token, snapshot({ hostInfo: loopHost(20), collectedAt: minutesAgo(5), available: [U.late] }));
+  late = await loopUpdate();
+  assert.equal(late.notCompletedByReboot, true);
+
+  const affected = await api.get(`/api/updates/${lateCatalogId}/devices`);
+  assert.equal(affected.items.find((d) => d.hostname === loopName)?.notCompletedByReboot, true);
+});
+
 await step('Agent-Zustand: Protokoll ueber zwei Check-ins (fuer ui-smoke)', async () => {
   // In den Agent-Zustand gehoert nur die neue Warnung: Die alte stammt von vor
   // dem vorletzten Check-in, die gescheiterte Uebermittlung hat der Check-in
@@ -1019,6 +1070,58 @@ await step('Agent-Auftrag: einzeln abbrechen; auf die aktuelle Version bleibt er
 
   const rollout = (await api.get('/api/agent-rollouts?limit=5')).items.find((r) => r.id === created.rolloutId);
   assert.deepEqual([rollout.states.cancelled, rollout.states.failed], [1, 0]);
+});
+
+// --- Hardware -------------------------------------------------------------------
+
+await step('Hardware: gemeldet, bleibt ohne neue Angaben stehen, Unbekanntes abgelehnt', async () => {
+  const hwHost = host(`HW-${RUN}`);
+  const hwDevice = await enroll(agent, enrollmentToken, hwHost);
+  const hardware = {
+    manufacturer: 'LENOVO',
+    model: '21HD003LMZ',
+    family: 'ThinkPad T14 Gen 4',
+    serialNumber: `PF${RUN}`,
+    chassis: 'notebook',
+    firmware: 'uefi',
+    biosVersion: 'R2FET60W (1.40 )',
+    biosDate: '2025-03-12T00:00:00+00:00',
+    processor: { name: '13th Gen Intel(R) Core(TM) i7-1365U', cores: 10, logicalProcessors: 12, maxClockMhz: 1800, count: 1 },
+    memoryBytes: 34359738368,
+    memoryModules: [
+      { slot: 'DIMM A', type: 'DDR5', capacityBytes: 17179869184, speedMhz: 5200, manufacturer: 'Samsung', partNumber: 'M425R2GA3BB0-CWMOD' },
+      { slot: 'DIMM B', type: 'DDR5', capacityBytes: 17179869184, speedMhz: 5200, manufacturer: 'Samsung', partNumber: 'M425R2GA3BB0-CWMOD' },
+    ],
+    disks: [{ model: 'SAMSUNG MZVL21T0HCLR', sizeBytes: 1024209543168, mediaType: 'ssd', busType: 'NVMe' }],
+    volumes: [{ drive: 'C:', label: 'Windows', fileSystem: 'NTFS', sizeBytes: 1023000000000, freeBytes: 412000000000, bitLocker: 'on' }],
+    tpm: { present: true, version: '2.0', enabled: true, activated: true, manufacturer: 'INTC' },
+    secureBoot: true,
+    graphics: [{ name: 'Intel(R) Iris(R) Xe Graphics', driverVersion: '31.0.101.5186' }],
+    networkAdapters: [{ name: 'Intel(R) Wi-Fi 6E AX211 160MHz', connection: 'WLAN', macAddress: 'AA-BB-CC-DD-EE-FF', kind: 'wifi', connected: true, speedBitsPerSecond: 2402000000 }],
+    monitors: [{ manufacturer: 'DEL', name: 'DELL U2722D', serialNumber: 'ABC123', year: 2022, internal: false }],
+    battery: { name: '5B10W51867', manufacturer: 'SMP', designCapacityMwh: 52500, fullChargeCapacityMwh: 47100, cycleCount: 112 },
+  };
+
+  const first = snapshot({ hostInfo: hwHost, collectedAt: minutesAgo(10) });
+  await checkin(agent, hwDevice.token, { ...first, hardware });
+  let detail = await api.get(`/api/devices/${hwDevice.deviceId}`);
+  assert.deepEqual(
+    [detail.hardware?.family, detail.hardware?.volumes?.[0]?.bitLocker, detail.hardware?.tpm?.version, detail.hardware?.battery?.cycleCount],
+    ['ThinkPad T14 Gen 4', 'on', '2.0', 112],
+  );
+  assert.deepEqual(detail.hardware?.memoryModules?.map((m) => [m.slot, m.type]), [['DIMM A', 'DDR5'], ['DIMM B', 'DDR5']]);
+  assert.equal(new Date(detail.hardwareReportedAt).getTime(), new Date(first.collectedAt).getTime());
+
+  // Der naechste Check-in ohne Hardware: Die bisherige bleibt, samt Zeitpunkt.
+  await checkin(agent, hwDevice.token, snapshot({ hostInfo: hwHost, collectedAt: minutesAgo(5) }));
+  detail = await api.get(`/api/devices/${hwDevice.deviceId}`);
+  assert.equal(detail.hardware?.serialNumber, `PF${RUN}`);
+  assert.equal(new Date(detail.hardwareReportedAt).getTime(), new Date(first.collectedAt).getTime());
+
+  // Unbekannte Felder und Werte lehnt das Backend ab, wie im Rest des Snapshots.
+  const later = () => snapshot({ hostInfo: hwHost, collectedAt: minutesAgo(1) });
+  await checkin(agent, hwDevice.token, { ...later(), hardware: { ...hardware, unbekannt: 1 } }, 400);
+  await checkin(agent, hwDevice.token, { ...later(), hardware: { ...hardware, chassis: 'toaster' } }, 400);
 });
 
 // --- Auslieferung des Frontends -------------------------------------------------

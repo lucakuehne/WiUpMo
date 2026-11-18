@@ -15,6 +15,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { UpdateSource } from '../../database/enums.js';
+import { HardwareInfoDto } from './hardware.dto.js';
 
 /**
  * Ergebniscode der Windows-Update-API (`OperationResultCode`).
@@ -358,4 +359,13 @@ export class SnapshotDto {
   @Type(() => AgentDiagnosticsDto)
   @IsOptional()
   diagnostics?: AgentDiagnosticsDto;
+
+  /**
+   * Hardware des Geraets, ab Agent 0.10.0 — nur wenn sich etwas geaendert hat
+   * und sonst einmal am Tag. Fehlt sie, bleibt die zuletzt gemeldete stehen.
+   */
+  @ValidateNested()
+  @Type(() => HardwareInfoDto)
+  @IsOptional()
+  hardware?: HardwareInfoDto;
 }

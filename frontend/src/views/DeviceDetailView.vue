@@ -20,6 +20,7 @@ import type {
   CreateUpdateJobsResult,
   DeviceDetail,
   DeviceUpdate,
+  InstallAttempt,
   InstallJob,
   RestartJob,
   Timeline,
@@ -48,6 +49,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import HardwareTab from '@/components/devices/HardwareTab.vue';
+import { CHASSIS_LABELS, deviceName } from '@/hardware';
 import HresultCell from '@/components/HresultCell.vue';
 import InstallDialog from '@/components/InstallDialog.vue';
 import RestartDialog from '@/components/RestartDialog.vue';
@@ -61,6 +64,8 @@ import {
   EVENT_TYPE_LABELS,
   INSTALL_JOB_STATE_LABELS,
   JOB_STATE_LABELS,
+  NOT_COMPLETED_BY_REBOOT_HINT,
+  NOT_COMPLETED_BY_REBOOT_LABEL,
   RESTART_JOB_STATE_LABELS,
   UPDATE_SOURCE_LABELS,
   eventBadgeClass,
@@ -127,11 +132,36 @@ function toggleAttempts(updateId: string): void {
   expandedUpdates.value = next;
 }
 
+/**
+ * Eingespielt ist nicht installiert: Bei `0x80242014` steht der Abschluss beim
+ * Neustart aus. Als „installiert“ gezählt sah ein Funktionsupdate, das nach
+ * jedem Neustart erneut eingespielt wird, nach lauter Erfolgen aus.
+ */
 function attemptSummary(update: DeviceUpdate): string {
-  const failed = update.attempts.filter((attempt) => !attempt.succeeded).length;
   const count = update.attempts.length;
+  const staged = update.attempts.filter((attempt) => attempt.staged).length;
+  const failed = update.attempts.filter((attempt) => !attempt.succeeded).length;
+  const installed = count - staged - failed;
   const noun = count === 1 ? 'Versuch' : 'Versuche';
-  return failed === count ? `${count} ${noun} gescheitert` : `${count} ${noun}, ${failed} gescheitert`;
+
+  if (failed === count) return `${count} ${noun} gescheitert`;
+  const parts = [
+    staged > 0 ? `${staged} eingespielt` : '',
+    installed > 0 ? `${installed} installiert` : '',
+    failed > 0 ? `${failed} gescheitert` : '',
+  ].filter(Boolean);
+  return `${count} ${noun}: ${parts.join(', ')}`;
+}
+
+function attemptLabel(attempt: InstallAttempt): string {
+  if (!attempt.succeeded) return 'gescheitert';
+  return attempt.staged ? 'eingespielt' : 'installiert';
+}
+
+function attemptBadgeClass(attempt: InstallAttempt): string {
+  if (!attempt.succeeded) return 'bg-destructive/15 text-destructive border-destructive/30';
+  if (attempt.staged) return 'bg-warning/15 text-warning-foreground border-warning/40 dark:text-warning';
+  return 'bg-success/15 text-success border-success/30';
 }
 
 const pagedUpdates = computed(() =>
@@ -500,6 +530,16 @@ onMounted(load);
               <dd>{{ device.osName ?? '—' }}</dd>
             </div>
             <div>
+              <!-- Vom Agent ab 0.10.0; Einzelheiten im Tab „Hardware“. -->
+              <dt class="text-muted-foreground text-xs">Gerät</dt>
+              <dd class="truncate" :title="device.hardware?.serialNumber ? `S/N ${device.hardware.serialNumber}` : undefined">
+                {{ deviceName(device.hardware) ?? '—' }}
+                <span v-if="device.hardware?.chassis" class="text-muted-foreground text-xs">
+                  {{ CHASSIS_LABELS[device.hardware.chassis] }}
+                </span>
+              </dd>
+            </div>
+            <div>
               <dt class="text-muted-foreground text-xs">Version / Build</dt>
               <dd class="tabular">{{ device.osVersion ?? '—' }} · {{ device.osBuild ?? '—' }}</dd>
             </div>
@@ -609,6 +649,7 @@ onMounted(load);
           <TabsTrigger value="checkins">Check-ins ({{ device.checkins.length }})</TabsTrigger>
           <TabsTrigger value="agent">Agent-Updates ({{ jobs.length }})</TabsTrigger>
           <TabsTrigger value="log">Agent-Protokoll ({{ agentLogs.length }})</TabsTrigger>
+          <TabsTrigger value="hardware">Hardware</TabsTrigger>
         </TabsList>
 
         <!-- ===================== Updates ===================== -->
@@ -722,7 +763,15 @@ onMounted(load);
                       <div>
                         {{ update.title }}
                         <Badge
-                          v-if="update.awaitingReboot"
+                          v-if="update.notCompletedByReboot"
+                          variant="outline"
+                          class="bg-destructive/15 text-destructive border-destructive/30 ml-1"
+                          :title="NOT_COMPLETED_BY_REBOOT_HINT"
+                        >
+                          {{ NOT_COMPLETED_BY_REBOOT_LABEL }}
+                        </Badge>
+                        <Badge
+                          v-else-if="update.awaitingReboot"
                           variant="outline"
                           class="bg-warning/15 text-warning-foreground border-warning/40 dark:text-warning ml-1"
                         >
@@ -776,6 +825,15 @@ onMounted(load);
                     class="bg-muted/30 hover:bg-muted/30"
                   >
                     <TableCell :colspan="7" class="py-2">
+                      <p
+                        v-if="update.notCompletedByReboot"
+                        class="text-destructive mb-2 pl-6 text-xs whitespace-normal"
+                      >
+                        {{ NOT_COMPLETED_BY_REBOOT_HINT }}
+                        <template v-if="device?.lastBootAt">
+                          Letzter Neustart: {{ formatDateTime(device.lastBootAt) }}.
+                        </template>
+                      </p>
                       <ul class="space-y-1.5 pl-6 text-sm">
                         <li
                           v-for="attempt in update.attempts"
@@ -783,16 +841,12 @@ onMounted(load);
                           class="flex flex-wrap items-center gap-x-3 gap-y-1"
                         >
                           <span class="tabular w-40 shrink-0">{{ formatDateTime(attempt.occurredAt) }}</span>
-                          <Badge
-                            variant="outline"
-                            :class="
-                              attempt.succeeded
-                                ? 'bg-success/15 text-success border-success/30'
-                                : 'bg-destructive/15 text-destructive border-destructive/30'
-                            "
-                          >
-                            {{ attempt.succeeded ? 'installiert' : 'gescheitert' }}
+                          <Badge variant="outline" :class="attemptBadgeClass(attempt)">
+                            {{ attemptLabel(attempt) }}
                           </Badge>
+                          <span v-if="attempt.staged" class="text-muted-foreground text-xs">
+                            Abschluss beim Neustart
+                          </span>
                           <HresultCell v-if="!attempt.succeeded" :value="attempt.hresult" />
                         </li>
                       </ul>
@@ -1159,6 +1213,11 @@ onMounted(load);
               </TableBody>
             </Table>
           </div>
+        </TabsContent>
+
+        <!-- ===================== Hardware ===================== -->
+        <TabsContent value="hardware">
+          <HardwareTab :hardware="device.hardware" :reported-at="device.hardwareReportedAt" />
         </TabsContent>
       </Tabs>
 

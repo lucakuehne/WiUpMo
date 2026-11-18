@@ -526,6 +526,18 @@ export class CheckinService {
            THEN $11::timestamptz
            ELSE last_boot_at
          END,
+         -- Kommt nur bei Aenderung und einmal am Tag mit; fehlt sie, bleibt die
+         -- bisherige. Ebenfalls nur vom neuesten Snapshot.
+         hardware = CASE
+           WHEN $12::jsonb IS NOT NULL AND (last_seen_at IS NULL OR last_seen_at <= $2)
+           THEN $12::jsonb
+           ELSE hardware
+         END,
+         hardware_reported_at = CASE
+           WHEN $12::jsonb IS NOT NULL AND (last_seen_at IS NULL OR last_seen_at <= $2)
+           THEN $2
+           ELSE hardware_reported_at
+         END,
          updated_at    = now()
        WHERE id = $1`,
       [
@@ -540,6 +552,7 @@ export class CheckinService {
         snapshot.host.lastLogonUser ?? null,
         snapshot.host.lastLogonDisplayName ?? null,
         snapshot.host.lastBootAt ?? null,
+        snapshot.hardware ? JSON.stringify(snapshot.hardware) : null,
       ],
     );
   }

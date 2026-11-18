@@ -12,6 +12,7 @@ public sealed class SnapshotCollector(
     WindowsUpdateReader updates,
     HostInspector host,
     UpdateSourceInspector updateSource,
+    HardwareReporter hardware,
     SnapshotQueue queue,
     ILogger<SnapshotCollector> logger)
 {
@@ -50,6 +51,9 @@ public sealed class SnapshotCollector(
         UpdateSourceInfo source = updateSource.Read();
         bool pendingReboot = host.IsRebootPending();
 
+        // Unabhaengig von Windows Update: Haengt das, kommt die Hardware trotzdem.
+        HardwareInfo? hardwareInfo = hardware.ReadIfDue(collectedAt);
+
         IReadOnlyList<AvailableUpdate>? available = null;
         IReadOnlyList<HistoryEntry> history = [];
         IReadOnlyList<AvailableUpdate>? installed = null;
@@ -85,6 +89,7 @@ public sealed class SnapshotCollector(
             History = history,
             InstalledUpdates = installed,
             Diagnostics = diagnostics,
+            Hardware = hardwareInfo,
         };
     }
 

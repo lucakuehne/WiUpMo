@@ -35,6 +35,8 @@ import TablePager from '@/components/TablePager.vue';
 import ClassificationNavigator from '@/components/updates/ClassificationNavigator.vue';
 import SeverityBadge from '@/components/updates/SeverityBadge.vue';
 import {
+  NOT_COMPLETED_BY_REBOOT_HINT,
+  NOT_COMPLETED_BY_REBOOT_LABEL,
   UPDATE_CLASSIFICATION_LABELS,
   UPDATE_STATE_LABELS,
   formatBytes,
@@ -401,7 +403,14 @@ onMounted(() => {
                               <Badge variant="outline" :class="stateBadgeClass(device.state)">
                                 {{ UPDATE_STATE_LABELS[device.state] }}
                               </Badge>
-                              <span v-if="device.awaitingReboot" class="text-muted-foreground ml-2 text-xs">
+                              <span
+                                v-if="device.notCompletedByReboot"
+                                class="text-destructive ml-2 text-xs"
+                                :title="NOT_COMPLETED_BY_REBOOT_HINT"
+                              >
+                                {{ NOT_COMPLETED_BY_REBOOT_LABEL }}
+                              </span>
+                              <span v-else-if="device.awaitingReboot" class="text-muted-foreground ml-2 text-xs">
                                 wartet auf Neustart
                               </span>
                             </TableCell>

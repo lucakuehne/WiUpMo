@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { isPostRebootPending } from '../common/post-reboot.js';
+import { isPostRebootPending, notCompletedByRebootSql } from '../common/post-reboot.js';
 import { returnedRows } from '../common/query-result.js';
 import { SqlParams, toCsv } from '../common/sql-params.js';
 import { DeviceStatus, PG_ENUM, UpdateEventType, UpdateSource, UpdateState } from '../database/enums.js';
@@ -44,6 +44,7 @@ const SORT_COLUMNS: Record<string, { column: string; invert?: boolean }> = {
   agentVersion: { column: 'd.agent_version' },
   // Nach dem Namen, wie er in der Liste steht; ohne Anzeigename nach dem Konto.
   lastLogonUser: { column: 'coalesce(d.last_logon_display_name, d.last_logon_user)' },
+  lastBootAt: { column: 'd.last_boot_at' },
 };
 
 interface DeviceRow {
@@ -303,6 +304,11 @@ export class DevicesService {
       );
     }
 
+    if (query.notRebootedDays !== undefined) {
+      const days = params.add(query.notRebootedDays);
+      conditions.push(`d.last_boot_at < now() - make_interval(days => ${days})`);
+    }
+
     if (query.pendingReboot !== undefined) {
       conditions.push(`coalesce(c.pending_reboot, false) = ${params.add(query.pendingReboot)}`);
     }
@@ -348,7 +354,8 @@ export class DevicesService {
     const devices: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT id, hostname, ad_dn, ad_ou, ad_object_guid, os_name, os_version, os_build,
               status, agent_version, enrolled_at, last_seen_at, archived_at, archived_reason,
-              last_logon_user, last_logon_display_name, last_boot_at, agent_diagnostics
+              last_logon_user, last_logon_display_name, last_boot_at, agent_diagnostics,
+              hardware, hardware_reported_at
          FROM devices WHERE id = $1`,
       [id],
     );
@@ -382,6 +389,8 @@ export class DevicesService {
       lastLogonDisplayName: (device.last_logon_display_name as string | null) ?? null,
       lastBootAt: toIso(device.last_boot_at),
       agentDiagnostics: (device.agent_diagnostics as DeviceDetailDto['agentDiagnostics']) ?? null,
+      hardware: (device.hardware as DeviceDetailDto['hardware']) ?? null,
+      hardwareReportedAt: toIso(device.hardware_reported_at),
       updates,
       checkins,
     };
@@ -392,9 +401,11 @@ export class DevicesService {
       `SELECT u.id, u.update_id, u.kb_article, u.title, u.severity, u.categories,
               u.is_security, u.size_bytes, u.support_url,
               s.state, s.first_available_at, s.installed_at, s.result_code, s.hresult,
-              s.reboot_required, s.last_reported_at
+              s.reboot_required, s.last_reported_at,
+              ${notCompletedByRebootSql('s', 'd')} AS not_completed_by_reboot
          FROM device_update_states s
          JOIN updates u ON u.id = s.update_id
+         JOIN devices d ON d.id = s.device_id
         WHERE s.device_id = $1
         ORDER BY
           -- Offenes zuerst, danach Gescheitertes: das ist die Reihenfolge, in
@@ -432,6 +443,7 @@ export class DevicesService {
       lastReportedAt: toIso(row.last_reported_at) ?? '',
       awaitingReboot:
         row.state === UpdateState.Available && isPostRebootPending(row.hresult as number | null),
+      notCompletedByReboot: row.not_completed_by_reboot === true,
       attempts: attempts.get(row.id as string) ?? [],
     }));
   }
@@ -459,11 +471,14 @@ export class DevicesService {
     for (const row of rows) {
       const details = (row.details as Record<string, unknown> | null) ?? {};
       const list = byUpdate.get(row.update_id as string) ?? [];
+      const succeeded = row.event_type === UpdateEventType.Installed;
+      const hresult = typeof details.hresult === 'number' ? details.hresult : null;
       list.push({
         occurredAt: toIso(row.occurred_at) ?? '',
-        succeeded: row.event_type === UpdateEventType.Installed,
+        succeeded,
+        staged: succeeded && isPostRebootPending(hresult),
         resultCode: typeof details.resultCode === 'number' ? details.resultCode : null,
-        hresult: typeof details.hresult === 'number' ? details.hresult : null,
+        hresult,
       });
       byUpdate.set(row.update_id as string, list);
     }

@@ -287,3 +287,15 @@ export function eventBadgeClass(type: UpdateEventType): string {
   }
 }
 
+
+/**
+ * Für ein Update, das vor dem letzten Neustart eingespielt war und danach
+ * weiter angeboten wird. Im Verlauf sieht diese Schleife sonst nach lauter
+ * Erfolgen aus.
+ */
+export const NOT_COMPLETED_BY_REBOOT_LABEL = 'Neustart schliesst nicht ab';
+
+export const NOT_COMPLETED_BY_REBOOT_HINT =
+  'Vor dem letzten Neustart eingespielt und danach weiter angeboten: Windows schliesst die ' +
+  'Installation beim Neustart nicht ab und spielt sie erneut ein. Bei Funktionsupdates meist ein ' +
+  'Rückbau durch Windows-Setup; die Ursache zeigt SetupDiag auf dem Gerät.';

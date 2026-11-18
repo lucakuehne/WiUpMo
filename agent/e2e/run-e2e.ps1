@@ -296,6 +296,7 @@ try {
 
   Write-Step "Neuinstallation von $versionA"
   $enrolledBefore = (Get-State).enrollments
+  $hardwareBefore = (Get-State).hardwareReports
   & $A --install --backend-url $Backend --enrollment-token $Token | Out-Host
   Set-TestSettings
   Restart-Agent
@@ -306,6 +307,13 @@ try {
     $state = Get-State
     $state.enrollments -gt $enrolledBefore -and $state.lastCheckin.agentVersion -eq $versionA
   } | Out-Null
+  # Ohne Datenverzeichnis kennt der Agent keinen gesendeten Stand: Die Hardware
+  # geht mit dem ersten Check-in hinaus.
+  Wait-Until 'Hardware gemeldet' 120 { (Get-State).hardwareReports -gt $hardwareBefore } | Out-Null
+  $hardware = (Get-State).hardware
+  Assert-That (-not [string]::IsNullOrEmpty($hardware.processor.name)) "Prozessor gemeldet: $($hardware.processor.name)"
+  Assert-That ($hardware.memoryBytes -gt 0) 'Arbeitsspeicher gemeldet'
+  Assert-That (@($hardware.volumes).Count -gt 0) 'Laufwerke gemeldet'
   Save-Evidence '4-neu-installiert'
 
   # --- 3. Neustart auf Anforderung ---------------------------------------------

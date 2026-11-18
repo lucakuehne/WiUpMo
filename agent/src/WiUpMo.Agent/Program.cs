@@ -212,6 +212,8 @@ internal static class Program
         builder.Services.AddSingleton(options);
         builder.Services.AddSingleton<HostInspector>();
         builder.Services.AddSingleton<UpdateSourceInspector>();
+        builder.Services.AddSingleton<HardwareInspector>();
+        builder.Services.AddSingleton<HardwareReporter>();
         builder.Services.AddSingleton<WindowsUpdateReader>();
         builder.Services.AddSingleton<SnapshotCollector>();
         builder.Services.AddSingleton(_ => new DeviceIdentityStore(options.DataDirectory));

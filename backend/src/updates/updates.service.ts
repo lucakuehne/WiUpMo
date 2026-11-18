@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { isPostRebootPending } from '../common/post-reboot.js';
+import { isPostRebootPending, notCompletedByRebootSql } from '../common/post-reboot.js';
 import { SqlParams, toCsv } from '../common/sql-params.js';
 import {
   UPDATE_CLASSIFICATIONS,
@@ -278,7 +278,8 @@ export class UpdatesService {
 
     const rows: Array<Record<string, unknown>> = await this.dataSource.query(
       `SELECT d.id AS device_id, d.hostname, d.ad_ou, d.last_seen_at,
-              s.state, s.first_available_at, s.installed_at, s.hresult
+              s.state, s.first_available_at, s.installed_at, s.hresult,
+              ${notCompletedByRebootSql('s', 'd')} AS not_completed_by_reboot
          FROM device_update_states s
          JOIN devices d ON d.id = s.device_id
         WHERE s.update_id = $1 AND d.status = 'active'
@@ -309,6 +310,7 @@ export class UpdatesService {
       installedAt: toIso(row.installed_at),
       hresult: (row.hresult as number | null) ?? null,
       awaitingReboot: row.state === UpdateState.Available && isPostRebootPending(row.hresult as number | null),
+      notCompletedByReboot: row.not_completed_by_reboot === true,
       lastSeenAt: toIso(row.last_seen_at),
     }));
 

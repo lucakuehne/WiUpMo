@@ -84,6 +84,8 @@ export interface DeviceUpdate {
   lastReportedAt: string;
   /** Eingespielt, wartet auf den Neustart (`0x80242014`). Wird angeboten, ist aber nicht installierbar. */
   awaitingReboot: boolean;
+  /** Vor dem letzten Neustart eingespielt und danach weiter angeboten: Der Neustart schliesst es nicht ab. */
+  notCompletedByReboot: boolean;
   /** Bisherige Installationsversuche, neueste zuerst — nur bei offenen Updates. */
   attempts: InstallAttempt[];
 }
@@ -91,6 +93,8 @@ export interface DeviceUpdate {
 export interface InstallAttempt {
   occurredAt: string;
   succeeded: boolean;
+  /** Nur eingespielt, Abschluss beim Neustart (`0x80242014`); zählt zu `succeeded`. */
+  staged: boolean;
   resultCode: number | null;
   hresult: number | null;
 }
@@ -148,8 +152,72 @@ export interface DeviceDetail {
   lastLogonDisplayName: string | null;
   lastBootAt: string | null;
   agentDiagnostics: AgentDiagnostics | null;
+  /** Hardware laut Agent (ab 0.10.0); `null`, solange keine gemeldet wurde. */
+  hardware: HardwareInfo | null;
+  /** Wann der Agent sie zuletzt geschickt hat — bei Änderung und einmal am Tag. */
+  hardwareReportedAt: string | null;
   updates: DeviceUpdate[];
   checkins: DeviceCheckin[];
+}
+
+/** Hardware eines Geräts. Alles optional: Was sich nicht lesen liess, fehlt. */
+export interface HardwareInfo {
+  manufacturer?: string;
+  /** Modellbezeichnung laut Hersteller, bei Lenovo die Maschinentyp-Nummer. */
+  model?: string;
+  /** Produktfamilie, bei Lenovo der lesbare Name. */
+  family?: string;
+  sku?: string;
+  serialNumber?: string;
+  chassis?: 'notebook' | 'desktop' | 'tablet' | 'server' | 'virtual' | 'other';
+  firmware?: 'uefi' | 'bios';
+  biosVendor?: string;
+  biosVersion?: string;
+  biosDate?: string;
+  processor?: {
+    name?: string;
+    cores?: number;
+    logicalProcessors?: number;
+    maxClockMhz?: number;
+    count?: number;
+  };
+  memoryBytes?: number;
+  memoryModules?: Array<{
+    slot?: string;
+    type?: string;
+    capacityBytes?: number;
+    speedMhz?: number;
+    manufacturer?: string;
+    partNumber?: string;
+  }>;
+  disks?: Array<{ model?: string; sizeBytes?: number; mediaType?: 'ssd' | 'hdd' | 'scm' | 'unknown'; busType?: string }>;
+  volumes?: Array<{
+    drive?: string;
+    label?: string;
+    fileSystem?: string;
+    sizeBytes?: number;
+    freeBytes?: number;
+    bitLocker?: 'on' | 'off' | 'suspended' | 'encrypting' | 'decrypting';
+  }>;
+  tpm?: { present?: boolean; version?: string; enabled?: boolean; activated?: boolean; manufacturer?: string };
+  secureBoot?: boolean;
+  graphics?: Array<{ name?: string; driverVersion?: string }>;
+  networkAdapters?: Array<{
+    name?: string;
+    connection?: string;
+    macAddress?: string;
+    kind?: 'wifi' | 'ethernet' | 'bluetooth' | 'mobile' | 'other';
+    connected?: boolean;
+    speedBitsPerSecond?: number;
+  }>;
+  monitors?: Array<{ manufacturer?: string; name?: string; serialNumber?: string; year?: number; internal?: boolean }>;
+  battery?: {
+    name?: string;
+    manufacturer?: string;
+    designCapacityMwh?: number;
+    fullChargeCapacityMwh?: number;
+    cycleCount?: number;
+  };
 }
 
 export interface TimelineEntry {
@@ -196,6 +264,8 @@ export interface UpdateDevice {
   hresult: number | null;
   /** Eingespielt, wartet aber auf den Neustart. */
   awaitingReboot: boolean;
+  /** Vor dem letzten Neustart eingespielt und danach weiter angeboten. */
+  notCompletedByReboot: boolean;
   lastSeenAt: string | null;
 }
 

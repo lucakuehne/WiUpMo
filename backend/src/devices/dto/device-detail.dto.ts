@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { HardwareInfoDto } from '../../agent-api/dto/hardware.dto.js';
 import { AgentDiagnosticsDto } from '../../agent-api/dto/snapshot.dto.js';
 import { DeviceStatus, UpdateEventType, UpdateSource, UpdateState } from '../../database/enums.js';
 
@@ -11,6 +12,13 @@ export class InstallAttemptDto {
 
   /** Installiert — bei einem weiter offenen Update meist eine fruehere Revision. */
   succeeded: boolean;
+
+  /**
+   * Nur eingespielt, der Abschluss steht beim Neustart aus (`0x80242014`).
+   * Zaehlt zu `succeeded`, ist aber noch nicht fertig — bei Funktionsupdates
+   * die Regel: Das eigentliche Upgrade laeuft erst waehrend des Neustarts.
+   */
+  staged: boolean;
 
   resultCode: number | null;
   hresult: number | null;
@@ -39,6 +47,12 @@ export class DeviceUpdateDto {
    * Windows bietet es bis dahin weiter an; installieren laesst es sich nicht.
    */
   awaitingReboot: boolean;
+
+  /**
+   * Vor dem letzten Neustart eingespielt und danach weiter angeboten: Der
+   * Neustart hat es nicht abgeschlossen (siehe `notCompletedByRebootSql`).
+   */
+  notCompletedByReboot: boolean;
 
   /**
    * Bisherige Installationsversuche, neueste zuerst — nur bei offenen
@@ -87,6 +101,13 @@ export class DeviceDetailDto {
    */
   @ApiProperty({ type: () => AgentDiagnosticsDto, nullable: true, required: false })
   agentDiagnostics: AgentDiagnosticsDto | null;
+
+  /** Hardware laut Agent (ab 0.10.0); `null`, solange keine gemeldet wurde. */
+  @ApiProperty({ type: () => HardwareInfoDto, nullable: true, required: false })
+  hardware: HardwareInfoDto | null;
+
+  /** Wann der Agent sie zuletzt geschickt hat — bei Aenderung und einmal am Tag. */
+  hardwareReportedAt: string | null;
 
   /** Alle aktuellen Zustaende, offene zuerst. */
   updates: DeviceUpdateDto[];

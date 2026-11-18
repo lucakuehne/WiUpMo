@@ -7,7 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>WiUpMo.Agent</RootNamespace>
     <AssemblyName>wiupmo-agent</AssemblyName>
-    <Version>0.9.3</Version>
+    <Version>0.10.0</Version>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
     <!--
@@ -84,6 +84,8 @@
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageReference Include="Serilog.Sinks.EventLog" Version="4.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <!-- Fuer die Hardware-Angaben (WMI); laeuft mit Zeitlimit wie die Update-Suche. -->
+    <PackageReference Include="System.Management" Version="10.0.11" />
   </ItemGroup>
 
 </Project>

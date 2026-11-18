@@ -109,14 +109,37 @@ Ereignissen, und ohne Mindestabstand liefe der Agent mehrfach hintereinander los
 4. Update-Quelle, Richtlinien, Neustart-Status und zuletzt angemeldeten Benutzer
    erfassen (`LogonUI\LastLoggedOnUser` in der Registry, ab 0.7.1), dazu den
    letzten Neustart (Laufzeit seit dem Systemstart, ab 0.8.0)
-5. Snapshot mit `snapshotId` und `collectedAt` (UTC) in die SQLite-Warteschlange
-6. Gesamte Warteschlange per `/checkin/batch` senden
-7. Quittierte Snapshots löschen — auch abgelehnte, die werden durch Wiederholen
+5. Ab 0.10.0 höchstens einmal pro Stunde die Hardware lesen (siehe unten); sie
+   geht mit, wenn sich etwas geändert hat, und sonst einmal am Tag
+6. Snapshot mit `snapshotId` und `collectedAt` (UTC) in die SQLite-Warteschlange
+7. Gesamte Warteschlange per `/checkin/batch` senden
+8. Quittierte Snapshots löschen — auch abgelehnte, die werden durch Wiederholen
    nicht besser und blockierten die Warteschlange sonst dauerhaft
 
-Erfassen und Senden sind getrennt. Nach Schritt 5 liegt der Snapshot dauerhaft
+Erfassen und Senden sind getrennt. Nach Schritt 6 liegt der Snapshot dauerhaft
 vor; ob das Backend gerade erreichbar ist, spielt für die Erfassung keine Rolle
 mehr. Genau das macht den Offline-Betrieb aus.
+
+### Hardware
+
+Ab 0.10.0, über WMI und die Registry. Jeder Bereich für sich: Was sich nicht
+lesen lässt — auf einer VM etwa das TPM —, fehlt einfach. Die Abfrage läuft mit
+Zeitlimit (`HangGuard`), ein hängender WMI-Anbieter hält den Durchlauf nicht auf.
+
+| Bereich | Quelle |
+|---|---|
+| Gerät | `Win32_ComputerSystem`, `Win32_BIOS`, `Win32_SystemEnclosure`: Hersteller, Modell, Produktfamilie, SKU, Seriennummer, Gerätetyp, BIOS-Version und -Datum |
+| Leistung | `Win32_Processor`, `Win32_PhysicalMemory`: Prozessor mit Kernen, Threads und Takt, Arbeitsspeicher mit Modulen |
+| Datenträger | `MSFT_PhysicalDisk` (ohne USB, SD und virtuelle Platten), feste Laufwerke mit Grösse und freiem Platz, BitLocker aus `Win32_EncryptableVolume` |
+| Sicherheit | `Win32_Tpm`, Secure Boot aus der Registry, Firmware-Typ über `GetFirmwareType` |
+| Weiteres | `Win32_VideoController`, `MSFT_NetAdapter` (nur echte Adapter, ohne VPN und virtuelle), `WmiMonitorID`, Akku aus `BatteryStaticData` und `BatteryFullChargedCapacity` |
+
+Gelesen wird höchstens einmal pro Stunde. Mitgeschickt wird die Hardware, wenn
+sich ihr Fingerabdruck geändert hat, und sonst einmal am Tag. Der Fingerabdruck
+lässt den freien Platz, den Verbindungszustand und die Geschwindigkeit der
+Netzwerkadapter aus — die wechseln ständig. Der tägliche Versand bringt den
+freien Platz trotzdem nach. Externe Monitore stehen nur drin, wenn sie beim
+Erfassen angeschlossen waren.
 
 ## Konfiguration
 
@@ -232,6 +255,8 @@ Hilft beides nicht, die Windows-Update-Komponenten zurücksetzen.
 | `Installation/InstallMarker.cs` | Stand eines Auftrags in `install.json` |
 | `Windows/UpdateSourceInspector.cs` | WSUS / Microsoft Update / Intune / Dual Scan |
 | `Windows/HostInspector.cs` | Stammdaten und Neustart-Status |
+| `Windows/HardwareInspector.cs` | Hardware über WMI und Registry |
+| `HardwareReporter.cs` | Wann die Hardware mitgeht: bei Änderung und einmal am Tag |
 | `Backend/BackendClient.cs` | HTTP gegen `/api/agent/v1/...` |
 | `Contracts/` | Gegenstücke zu den Backend-DTOs, gemeinsame JSON-Einstellungen |
 
@@ -385,6 +410,7 @@ ein Test-Backend (`e2e/fake-backend.mjs`) durch:
 | Deinstallation, Neuinstallation von A | gleich unter `versions\`, nichts am alten Ort, neue Registrierung |
 | Neustart auf Anforderung | simuliert: ohne angemeldeten Benutzer sofort, `restarting` gemeldet, Auftrag abgelegt |
 | Windows Update nicht lesbar | mit `SimulateWindowsUpdateFailure`: Check-in kommt ohne `availableUpdates` an, Warnung im Protokoll, kein Snapshot verworfen |
+| Hardware | nach der Neuinstallation mit dem ersten Check-in: Prozessor, Arbeitsspeicher, Laufwerke |
 
 Die Protokolle von Agent und Updater, `sc qc`, die Task-Definition und der
 Zustand des Test-Backends hängen am Lauf als Artefakt `agent-e2e`.

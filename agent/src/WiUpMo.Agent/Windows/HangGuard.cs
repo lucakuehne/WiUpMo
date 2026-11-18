@@ -21,6 +21,7 @@ public sealed class HangGuard(string service)
 {
     public static readonly HangGuard WindowsUpdate = new("Windows Update");
     public static readonly HangGuard TaskScheduler = new("Die Aufgabenplanung");
+    public static readonly HangGuard Wmi = new("WMI");
 
     /// <summary>Fuer Abfragen, die sonst nach Sekundenbruchteilen zurueck sind.</summary>
     public static readonly TimeSpan Quick = TimeSpan.FromSeconds(60);

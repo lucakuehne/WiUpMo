@@ -38,6 +38,7 @@ export const DEVICE_SORT_FIELDS = [
   'updateSource',
   'agentVersion',
   'lastLogonUser',
+  'lastBootAt',
 ] as const;
 
 export type DeviceSortField = (typeof DEVICE_SORT_FIELDS)[number];
@@ -103,6 +104,18 @@ export class DeviceQueryDto {
   @Max(3650)
   @IsOptional()
   staleDays?: number;
+
+  /**
+   * Nur Geraete, deren letzter Neustart laenger als N Tage zurueckliegt.
+   * Geraete ohne bekannten Neustart (Agents vor 0.8.0) fallen heraus: Von
+   * ihnen laesst sich das nicht sagen.
+   */
+  @toInt()
+  @IsInt()
+  @Min(0)
+  @Max(3650)
+  @IsOptional()
+  notRebootedDays?: number;
 
   /** `true` nur mit ausstehendem Neustart, `false` nur ohne, weggelassen: egal. */
   @toBool()

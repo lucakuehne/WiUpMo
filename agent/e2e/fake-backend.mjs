@@ -32,6 +32,9 @@ const state = {
   restart: null,
   /** Alle Rueckmeldungen zu Neustarts, in Reihenfolge. */
   restartReports: [],
+  /** Wie oft die Hardware mitkam, und die zuletzt gemeldete. */
+  hardwareReports: 0,
+  hardware: null,
 };
 
 function log(message) {
@@ -53,6 +56,12 @@ function json(response, status, body) {
 
 function recordCheckin(snapshots) {
   state.checkins += snapshots.length;
+  for (const snapshot of snapshots) {
+    if (snapshot.hardware) {
+      state.hardwareReports++;
+      state.hardware = snapshot.hardware;
+    }
+  }
   const last = snapshots.at(-1);
   if (last) {
     state.lastCheckin = {

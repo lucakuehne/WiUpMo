@@ -215,6 +215,37 @@ await step('Eingespieltes Update wartet auf den Neustart', async () => {
   await capture(page, 'geraet-wartet-auf-neustart');
 });
 
+await step('Eingespielt, aber vom Neustart nicht abgeschlossen: Hinweis und Versuche', async () => {
+  const list = await (await page.request.get(`${base}/api/devices?search=LOOP-&limit=1`)).json();
+  if (list.items.length === 0) throw new Error('kein LOOP-Geraet - lief smoke.mjs vorher?');
+  await page.goto(`${base}/devices/${list.items[0].id}`);
+  await page.getByText('Neustart schliesst nicht ab').first().waitFor({ timeout: 15_000 });
+
+  await page.getByRole('button', { name: /Versuch/ }).first().click();
+  await page.getByText('eingespielt', { exact: true }).first().waitFor({ timeout: 5_000 });
+  if ((await page.getByText('installiert', { exact: true }).count()) > 0) {
+    throw new Error('ein eingespielter Versuch steht als installiert da');
+  }
+  await capture(page, 'geraet-neustart-schliesst-nicht-ab');
+});
+
+await step('Hardware am Geraet', async () => {
+  const list = await (await page.request.get(`${base}/api/devices?search=HW-&limit=1`)).json();
+  if (list.items.length === 0) throw new Error('kein HW-Geraet - lief smoke.mjs vorher?');
+  await page.goto(`${base}/devices/${list.items[0].id}`);
+  await page.getByText('Lenovo ThinkPad T14 Gen 4').first().waitFor({ timeout: 15_000 });
+
+  await page.getByRole('tab', { name: 'Hardware' }).click();
+  for (const text of ['Version 2.0', 'verschlüsselt', 'NVMe', 'DIMM A', 'DIMM B', 'Intel(R) Wi-Fi 6E AX211 160MHz', 'DELL U2722D']) {
+    await page.getByText(text).first().waitFor({ timeout: 5_000 });
+  }
+  // Die Partitionen stehen bewusst nicht auf der Seite, nur BitLocker unter „Sicherheit“.
+  if ((await page.getByRole('columnheader', { name: 'Partition' }).count()) > 0) {
+    throw new Error('die Partitionen werden angezeigt');
+  }
+  await capture(page, 'geraet-hardware');
+});
+
 await step('Agent-Zustand zeigt nur Stoerungen aus dem juengsten Durchlauf', async () => {
   const list = await (await page.request.get(`${base}/api/devices?search=AGENTLOG-&limit=1`)).json();
   if (list.items.length === 0) throw new Error('kein AGENTLOG-Geraet - lief smoke.mjs vorher?');
