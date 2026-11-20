@@ -16,6 +16,13 @@ namespace WiUpMo.Agent.Windows;
 /// Ausserhalb der Update-Suche fehlte das Zeitlimit frueher ganz: Hing der
 /// Windows-Update-Dienst, blieb der Durchlauf beim Lesen des Neustart-Status
 /// stehen — ohne eine Zeile im Protokoll und ohne je wieder zu melden.
+///
+/// Nach einer halben Stunde darf trotzdem ein neuer Aufruf los: Ein Aufruf
+/// kann fuer immer haengen, waehrend der Dienst neue laengst wieder
+/// beantwortet. In 0.9.2 bis 0.10.0 sperrte ein einziger solcher Aufruf die
+/// Update-Suche bis zum naechsten Neustart des Agents. Hoechstens drei duerfen
+/// so liegen bleiben; die Update-Suche selbst laeuft inzwischen ohnehin in
+/// einem eigenen Prozess (<see cref="UpdateScanner"/>).
 /// </summary>
 public sealed class HangGuard(string service)
 {
@@ -26,10 +33,14 @@ public sealed class HangGuard(string service)
     /// <summary>Fuer Abfragen, die sonst nach Sekundenbruchteilen zurueck sind.</summary>
     public static readonly TimeSpan Quick = TimeSpan.FromSeconds(60);
 
+    /// <summary>So lange nach dem Beginn des juengsten haengenden Aufrufs darf ein neuer los.</summary>
+    public static readonly TimeSpan RetryAfter = TimeSpan.FromMinutes(30);
+
+    /// <summary>Mehr haengende Aufrufe je Dienst laesst die Wache nicht zu.</summary>
+    public const int MaxHanging = 3;
+
     private readonly Lock _sync = new();
-    private Task? _hanging;
-    private string? _hangingCall;
-    private DateTimeOffset _hangingSince;
+    private readonly List<(Task Task, string Call, DateTimeOffset Since)> _hanging = [];
 
     public async Task<T> RunAsync<T>(Func<T> work, TimeSpan limit, string what, CancellationToken ct)
     {
@@ -72,14 +83,18 @@ public sealed class HangGuard(string service)
     {
         lock (_sync)
         {
-            if (_hanging is { IsCompleted: false })
-            {
-                throw new WindowsUpdateException(string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"{what} uebersprungen: {service} antwortet nicht. {_hangingCall} haengt seit {_hangingSince:u}."));
-            }
+            _hanging.RemoveAll(hanging => hanging.Task.IsCompleted);
 
-            _hanging = null;
+            if (_hanging.Count > 0)
+            {
+                (_, string call, DateTimeOffset since) = _hanging[^1];
+                if (_hanging.Count >= MaxHanging || DateTimeOffset.UtcNow - since < RetryAfter)
+                {
+                    throw new WindowsUpdateException(string.Create(
+                        CultureInfo.InvariantCulture,
+                        $"{what} uebersprungen: {service} antwortet nicht. {call} haengt seit {since:u}."));
+                }
+            }
         }
 
         return Task.Run(work, CancellationToken.None);
@@ -89,9 +104,7 @@ public sealed class HangGuard(string service)
     {
         lock (_sync)
         {
-            _hanging = task;
-            _hangingCall = what;
-            _hangingSince = DateTimeOffset.UtcNow - limit;
+            _hanging.Add((task, what, DateTimeOffset.UtcNow - limit));
         }
 
         // Scheitert der Aufruf spaeter doch noch, fragt niemand mehr nach dem

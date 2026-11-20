@@ -4,11 +4,23 @@ import { IsIn, IsOptional } from 'class-validator';
 /** Zeitraeume, ueber die die Stoerungen zusammengefasst werden, in Tagen. */
 export const AGENT_PROBLEM_DAYS = [1, 7] as const;
 
+/**
+ * Dasselbe in Stunden, dazu die letzte Stunde: Ob eine Stoerung gerade
+ * anhaelt oder schon vorbei ist, zeigt erst ein kurzer Zeitraum.
+ */
+export const AGENT_PROBLEM_HOURS = [1, 24, 168] as const;
+
 export class AgentProblemQueryDto {
   @Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)))
   @IsIn(AGENT_PROBLEM_DAYS)
   @IsOptional()
   days: number = 1;
+
+  /** Geht `days` vor, wenn beides kommt. */
+  @Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)))
+  @IsIn(AGENT_PROBLEM_HOURS)
+  @IsOptional()
+  hours?: number;
 }
 
 /** Ein Geraet mit einer Stoerung: die juengste Meldung und wie oft sie kam. */

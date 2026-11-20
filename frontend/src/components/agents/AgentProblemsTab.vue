@@ -35,7 +35,8 @@ import { formatDateTime, formatRelative } from '@/format';
 const rows = ref<AgentProblem[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
-const days = ref('1');
+/** In Stunden: die letzte Stunde zeigt, ob eine Störung gerade noch anhält. */
+const hours = ref('24');
 
 const expanded = ref(new Set<string>());
 
@@ -44,7 +45,7 @@ async function load(): Promise<void> {
   error.value = null;
 
   try {
-    rows.value = await get<AgentProblem[]>('/api/agent-problems', { days: days.value });
+    rows.value = await get<AgentProblem[]>('/api/agent-problems', { hours: hours.value });
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Die Störungen konnten nicht geladen werden.';
   } finally {
@@ -58,8 +59,8 @@ function toggle(problem: AgentProblem): void {
   expanded.value = next;
 }
 
-function onDaysChange(value: unknown): void {
-  days.value = String(value);
+function onRangeChange(value: unknown): void {
+  hours.value = String(value);
   void load();
 }
 
@@ -75,11 +76,12 @@ onMounted(load);
         Übermittlungsfehler fehlen: Der Check-in, der sie mitbringt, ist selbst angekommen.
       </p>
       <div class="ml-auto flex items-center gap-2">
-        <Select :model-value="days" @update:model-value="onDaysChange">
+        <Select :model-value="hours" @update:model-value="onRangeChange">
           <SelectTrigger class="w-44" aria-label="Zeitraum"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="1">Letzte 24 Stunden</SelectItem>
-            <SelectItem value="7">Letzte 7 Tage</SelectItem>
+            <SelectItem value="1">Letzte Stunde</SelectItem>
+            <SelectItem value="24">Letzte 24 Stunden</SelectItem>
+            <SelectItem value="168">Letzte 7 Tage</SelectItem>
           </SelectContent>
         </Select>
         <Button variant="outline" size="sm" :disabled="loading" @click="load">

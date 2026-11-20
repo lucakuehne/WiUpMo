@@ -27,6 +27,12 @@ public sealed class AgentOptions
     /// </summary>
     public int ComTimeoutSeconds { get; set; } = 300;
 
+    /// <summary>
+    /// Abstand der Online-Suche nach Updates, solange das Backend keinen
+    /// vorgibt (ab 0.10.1). Die Vorgabe aus den Einstellungen geht vor.
+    /// </summary>
+    public int SearchIntervalMinutes { get; set; } = 60;
+
     public int HttpTimeoutSeconds { get; set; } = 120;
 
     /// <summary>

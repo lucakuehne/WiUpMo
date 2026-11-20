@@ -17,6 +17,8 @@ import {
   MAX_CHECK_INTERVAL_MINUTES,
   MAX_INSTALL_EXPIRY_DAYS,
   MIN_CHECK_INTERVAL_MINUTES,
+  MIN_SEARCH_INTERVAL_MINUTES,
+  MAX_SEARCH_INTERVAL_MINUTES,
   MIN_INSTALL_EXPIRY_DAYS,
   RESTART_LIMITS,
 } from '../settings.types.js';
@@ -44,6 +46,14 @@ export class AgentSettingsDto {
   @Max(MAX_CHECK_INTERVAL_MINUTES)
   @IsOptional()
   checkIntervalMinutes?: number;
+
+  /** In Minuten, ganzzahlig — von fuenf Minuten bis zu einem Tag. */
+  @toInt()
+  @IsInt()
+  @Min(MIN_SEARCH_INTERVAL_MINUTES)
+  @Max(MAX_SEARCH_INTERVAL_MINUTES)
+  @IsOptional()
+  searchIntervalMinutes?: number;
 }
 
 export class AgentSettingsViewDto {
@@ -54,6 +64,9 @@ export class AgentSettingsViewDto {
   enrollmentToken: string;
 
   checkIntervalMinutes: number;
+
+  /** Wie oft ein Agent online nach Updates sucht (ab 0.10.1). */
+  searchIntervalMinutes: number;
 }
 
 export class AuthSettingsDto {

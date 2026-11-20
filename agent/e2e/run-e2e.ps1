@@ -15,6 +15,7 @@
     2. Neuinstallation von A direkt im Versionsverzeichnis.
     3. Neustart auf Anforderung, simuliert.
     4. Windows Update nicht lesbar: Der Check-in kommt ohne Update-Daten an.
+    5. Suchprozess: --wu-search antwortet mit JSON.
     Zum Schluss die Deinstallation.
 
   Bricht beim ersten Fehler ab. Protokolle und Zustand landen in -Artifacts.
@@ -352,6 +353,26 @@ try {
   Assert-That ($agentLog -match 'Check-in ohne Update-Daten') 'Warnung im Protokoll'
   Assert-That ($agentLog -notmatch 'unlesbaren Warteschlangeneintrag') 'Kein Snapshot verworfen'
   Save-Evidence '6-ohne-update-daten'
+
+  # --- 5. Suchprozess ------------------------------------------------------------
+  # Die Update-Suche laeuft ab 0.10.1 in einem eigenen Prozess, den der Dienst
+  # notfalls beendet. Die Tests oben simulieren Windows Update; hier laeuft der
+  # Suchprozess einmal echt, oertlich ohne Update-Quelle. Ob der Runner dabei
+  # Updates kennt, zaehlt nicht - nur, dass Aufruf und Antwort zusammenpassen.
+
+  Write-Step 'Suchprozess: --wu-search antwortet mit JSON'
+  $searchOut = Join-Path $Artifacts 'wu-search.json'
+  $since = (Get-Date).AddDays(-7).ToUniversalTime().ToString('o')
+  $search = Start-Process -FilePath $A -ArgumentList @('--wu-search', '--since', $since, '--offline') `
+    -RedirectStandardOutput $searchOut -PassThru -NoNewWindow
+  if (-not $search.WaitForExit(600000)) {
+    $search.Kill()
+    throw 'Der Suchprozess endete nicht innert 10 Minuten.'
+  }
+  $searchResult = Get-Content $searchOut -Raw | ConvertFrom-Json
+  $searchOk = $search.ExitCode -eq 0 -and $null -ne $searchResult.available
+  $searchFailedCleanly = $search.ExitCode -eq 3 -and -not [string]::IsNullOrEmpty($searchResult.error)
+  Assert-That ($searchOk -or $searchFailedCleanly) "Exit-Code $($search.ExitCode), Fehler: $($searchResult.error)"
 
   Write-Step 'Deinstallation'
   Uninstall-Agent

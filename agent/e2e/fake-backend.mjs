@@ -92,6 +92,7 @@ function recordCheckin(snapshots) {
     results: snapshots.map((snapshot) => ({ snapshotId: snapshot.snapshotId, outcome: 'accepted' })),
     agentUpdate,
     checkIntervalMinutes: 5,
+    searchIntervalMinutes: 60,
     installRequest: null,
     // Wie im echten Backend: bis der Neustart eingeleitet oder gescheitert ist.
     restartRequest:

@@ -25,6 +25,7 @@ public sealed class InstallJobRunner(
     BackendClient backend,
     WindowsUpdateInstaller installer,
     CheckinTrigger trigger,
+    UpdateSearchSchedule searches,
     ILogger<InstallJobRunner> logger)
 {
     private readonly Lock _gate = new();
@@ -259,6 +260,8 @@ public sealed class InstallJobRunner(
 
         // Der neue Stand soll sofort im Backend stehen, nicht erst nach dem
         // naechsten Intervall — und waehrend der Installation wurde nicht gesucht.
+        // Der Durchlauf sucht dann auch, unabhaengig vom Abstand der Update-Suche.
+        searches.Request("Installation abgeschlossen");
         trigger.RequestRun("Installation abgeschlossen");
     }
 

@@ -25,7 +25,8 @@ interface LogRow {
 export class AgentProblemsService {
   constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-  async list(days: number): Promise<AgentProblemDto[]> {
+  /** Was in den letzten `hours` Stunden gemeldet wurde. */
+  async list(hours: number): Promise<AgentProblemDto[]> {
     // Agents vor 0.6.0 melden keine Liste, nur die juengste Stoerung.
     const rows: LogRow[] = await this.dataSource.query(
       `SELECT d.id AS device_id, d.hostname, l.at, l.level, l.message
@@ -42,9 +43,9 @@ export class AgentProblemsService {
         WHERE d.status = 'active'
           AND d.enrolled_at IS NOT NULL
           AND l.message IS NOT NULL
-          AND l.at >= now() - make_interval(days => $1)
+          AND l.at >= now() - make_interval(hours => $1)
         ORDER BY l.at DESC`,
-      [days],
+      [hours],
     );
 
     const problems = new Map<string, { problem: AgentProblemDto; byDevice: Map<string, AgentProblemDeviceDto> }>();

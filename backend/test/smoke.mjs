@@ -430,6 +430,24 @@ await step('Melde-Intervall: Vorgabe 5 Minuten, geht mit dem Check-in an den Age
   await api.request('PUT', '/api/settings/agent', { body: { checkIntervalMinutes: 1 }, expect: 400 });
 });
 
+await step('Update-Suche: Vorgabe stuendlich, eigener Wert, geht mit dem Check-in an den Agent', async () => {
+  const settings = (await api.get('/api/settings')).agent;
+  assert.equal(settings.searchIntervalMinutes, 60, 'Vorgabe der Update-Suche');
+  const current = () => snapshot({ hostInfo, collectedAt: minutesAgo(5), available: [U.defender, U.late], pendingReboot: true });
+  assert.equal((await checkin(agent, device.token, current())).searchIntervalMinutes, 60);
+
+  // Nur die Suche aendern: Das Melde-Intervall bleibt, wie es war.
+  await api.put('/api/settings/agent', { searchIntervalMinutes: 240 });
+  const after = (await api.get('/api/settings')).agent;
+  assert.deepEqual([after.searchIntervalMinutes, after.checkIntervalMinutes], [240, settings.checkIntervalMinutes]);
+  assert.equal((await checkin(agent, device.token, current())).searchIntervalMinutes, 240);
+
+  for (const invalid of [4, 1441]) {
+    await api.request('PUT', '/api/settings/agent', { body: { searchIntervalMinutes: invalid }, expect: 400 });
+  }
+  await api.put('/api/settings/agent', { searchIntervalMinutes: 60 });
+});
+
 await step('Gemerkter Zeitraum des Dashboards, je Benutzer', async () => {
   assert.deepEqual(await api.get('/api/preferences'), { dashboard: null });
 
@@ -899,6 +917,17 @@ await step('Stoerungen der Agents, nach Meldung zusammengefasst', async () => {
   assert.ok(!problems.some((p) => p.key.startsWith('Uebermittlung fehlgeschlagen')), 'Uebermittlungsfehler als Stoerung');
 
   await api.request('GET', '/api/agent-problems?days=3', { expect: 400 });
+
+  // Die letzte Stunde: Die Testeintraege tragen den Zeitpunkt ihres Snapshots
+  // und sind frisch, also dabei. 24 Stunden meinen dasselbe wie ein Tag.
+  const lastHour = await api.get('/api/agent-problems?hours=1');
+  assert.ok(lastHour.some((p) => p.key === 'Testeintrag aus dem Smoke-Test'), 'frischer Eintrag fehlt in der letzten Stunde');
+  assert.deepEqual(
+    (await api.get('/api/agent-problems?hours=24')).map((p) => p.key).sort(),
+    problems.map((p) => p.key).sort(),
+    'hours=24 und days=1 meinen dasselbe',
+  );
+  await api.request('GET', '/api/agent-problems?hours=2', { expect: 400 });
 });
 
 // --- Neustarts -------------------------------------------------------------------

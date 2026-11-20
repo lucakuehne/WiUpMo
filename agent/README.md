@@ -100,12 +100,17 @@ Ereignissen, und ohne Mindestabstand liefe der Agent mehrfach hintereinander los
 
 ## Ablauf eines Durchlaufs
 
-1. WUApi-Suche `IsInstalled=0 and IsHidden=0`
-2. `QueryHistory` seit dem letzten gemeldeten Zeitstempel
-3. Ab 0.8.2, nur wenn die Historie Neues meldet oder es einen Tag her ist:
-   WUApi-Suche `IsInstalled=1` ohne Verbindung zur Update-Quelle. Die
-   installierten Updates gehen mit Typ und Einstufung mit, sofern sich ihre
-   Menge geändert hat — die Historie selbst nennt nur das Produkt
+1. Ist die Update-Suche fällig (siehe unten), startet der Dienst den
+   Suchprozess `wiupmo-agent.exe --wu-search`. Der sucht über WUApi nach
+   `IsInstalled=0 and IsHidden=0`, liest per `QueryHistory` die Historie seit
+   dem letzten gemeldeten Zeitstempel und sucht ohne Verbindung zur
+   Update-Quelle nach `IsInstalled=1`. Das Ergebnis kommt als JSON zurück.
+   Ist die Suche nicht fällig, geht der Snapshot ohne Update-Daten hinaus
+2. Die installierten Updates gehen mit Typ und Einstufung mit, wenn die
+   Historie Neues meldet oder es einen Tag her ist und sich ihre Menge
+   geändert hat (ab 0.8.2) — die Historie selbst nennt nur das Produkt
+3. Hängt der Suchprozess, beendet ihn der Dienst nach `ComTimeoutSeconds` plus
+   zwei Minuten; der nächste Versuch startet frisch
 4. Update-Quelle, Richtlinien, Neustart-Status und zuletzt angemeldeten Benutzer
    erfassen (`LogonUI\LastLoggedOnUser` in der Registry, ab 0.7.1), dazu den
    letzten Neustart (Laufzeit seit dem Systemstart, ab 0.8.0)
@@ -115,6 +120,19 @@ Ereignissen, und ohne Mindestabstand liefe der Agent mehrfach hintereinander los
 7. Gesamte Warteschlange per `/checkin/batch` senden
 8. Quittierte Snapshots löschen — auch abgelehnte, die werden durch Wiederholen
    nicht besser und blockierten die Warteschlange sonst dauerhaft
+
+### Wann gesucht wird
+
+Ab 0.10.1 nicht mehr bei jedem Check-in. Der Abstand steht unter
+Einstellungen → Betrieb → „Update-Suche alle (Minuten)“ (Vorgabe 60, von 5
+Minuten bis zu einem Tag) und kommt mit jeder Check-in-Antwort. Sofort gesucht
+wird nach dem Start des Agents — also nach jedem Neustart des Geräts — und
+nach einer Installation. Scheitert eine Suche, folgt der nächste Versuch nach
+einer Viertelstunde. Die Check-ins dazwischen tragen keine Update-Liste; das
+Backend behält den letzten Stand.
+
+Bis 0.10.0 suchte jeder Agent bei jedem Durchlauf online, bei fünf Minuten
+Melde-Intervall also zwölfmal pro Stunde und Gerät.
 
 Erfassen und Senden sind getrennt. Nach Schritt 6 liegt der Snapshot dauerhaft
 vor; ob das Backend gerade erreichbar ist, spielt für die Erfassung keine Rolle
@@ -160,7 +178,8 @@ Drei Quellen, die einander in dieser Reihenfolge überschreiben:
 | `Agent:QueueMaxSnapshots` | — | 200 | Obergrenze der Warteschlange. |
 | `Agent:QueueMaxAgeDays` | — | 30 | Höchstalter in der Warteschlange. |
 | `Agent:SearchOnline` | `--search-online` | true | `false` liest nur den lokalen Zwischenspeicher. |
-| `Agent:ComTimeoutSeconds` | — | 300 | Obergrenze pro Update-Suche und Abfrage der Historie. Kurze Abfragen an Windows Update und die Aufgabenplanung haben fest 60 s. |
+| `Agent:ComTimeoutSeconds` | — | 300 | Obergrenze der Update-Suche; der Suchprozess bekommt zwei Minuten dazu für Historie und installierte Updates. Kurze Abfragen an Windows Update und die Aufgabenplanung haben fest 60 s. |
+| `Agent:SearchIntervalMinutes` | — | 60 | Abstand der Update-Suche, solange das Backend keinen vorgibt (ab 0.10.1). |
 | `Agent:DownloadTimeoutMinutes` | — | 30 | Obergrenze für das Herunterladen einer neuen Fassung, Inhalt eingeschlossen. |
 | `Agent:InstallTimeoutMinutes` | — | 180 | Obergrenze für einen Installationsauftrag, Download und Installation zusammen. |
 | `Agent:UpdateVerificationMinutes` | — | 20 | Frist, in der sich eine neue Fassung bestätigen muss, sonst stellt der Updater zurück. |
@@ -207,10 +226,15 @@ Ein hängender Aufruf wirft keinen Fehler, er kommt einfach nicht zurück. Bis
 0.9.1 endete das Protokoll dann nach „Erfasse Update-Zustand", ohne Fehler und
 ohne Hinweis, und das Gerät meldete sich nie wieder. Ab 0.9.2:
 
-- Jeder COM-Aufruf an Windows Update und an die Aufgabenplanung hat ein
-  Zeitlimit. Hängt einer, scheitern weitere an denselben Dienst sofort, mit
-  einer Warnung, seit wann. Antwortet der Dienst wieder, geht es ohne Neustart
-  des Agents weiter.
+- Die Update-Suche läuft ab 0.10.1 in einem eigenen Prozess, den der Dienst
+  nach dem Zeitlimit beendet. Jede Suche beginnt frisch. In 0.9.2 bis 0.10.0
+  lief sie im Dienst, und ein einziger Aufruf, der nie zurückkam, sperrte jede
+  weitere Suche bis zum Neustart des Agents — obwohl Windows Update neue
+  Anfragen längst wieder beantwortete.
+- Die kurzen Abfragen im Dienst (Neustart-Status, registrierte Update-Dienste,
+  Aufgabenplanung, WMI) haben ein Zeitlimit von 60 s. Hängt eine, scheitern
+  weitere an denselben Dienst sofort, mit einer Warnung, seit wann; nach einer
+  halben Stunde darf ein neuer Versuch los, höchstens drei bleiben hängen.
 - Ein Durchlauf, der nach 60 Minuten nicht fertig ist, schreibt einen Fehler
   ins Protokoll, einmal pro Stunde, solange er läuft.
 - Der Download einer neuen Fassung hat ein Zeitlimit über den ganzen Inhalt,
@@ -249,7 +273,10 @@ Hilft beides nicht, die Windows-Update-Komponenten zurücksetzen.
 | `Install/ServiceInstaller.cs` | `--install` / `--uninstall` |
 | `Windows/Com.cs` | Späte Bindung an COM über IDispatch |
 | `Windows/HangGuard.cs` | Zeitlimit für COM-Aufrufe an Windows-Dienste, höchstens ein hängender je Dienst |
-| `Windows/WindowsUpdateReader.cs` | Offene Updates und Installationshistorie |
+| `Windows/WindowsUpdateReader.cs` | Offene Updates und Installationshistorie, über WUApi |
+| `Windows/UpdateSearchProcess.cs` | Der Suchprozess `--wu-search`: sucht und antwortet als JSON |
+| `Windows/UpdateScanner.cs` | Startet den Suchprozess, wartet und beendet ihn notfalls |
+| `UpdateSearchSchedule.cs` | Wann gesucht wird: Abstand aus dem Backend, sofort nach Start und Installation |
 | `Windows/WindowsUpdateInstaller.cs` | Suchen, Lizenz annehmen, herunterladen, installieren |
 | `Installation/InstallJobRunner.cs` | Installationsaufträge annehmen, im Hintergrund ausführen, melden |
 | `Installation/InstallMarker.cs` | Stand eines Auftrags in `install.json` |
@@ -411,6 +438,7 @@ ein Test-Backend (`e2e/fake-backend.mjs`) durch:
 | Neustart auf Anforderung | simuliert: ohne angemeldeten Benutzer sofort, `restarting` gemeldet, Auftrag abgelegt |
 | Windows Update nicht lesbar | mit `SimulateWindowsUpdateFailure`: Check-in kommt ohne `availableUpdates` an, Warnung im Protokoll, kein Snapshot verworfen |
 | Hardware | nach der Neuinstallation mit dem ersten Check-in: Prozessor, Arbeitsspeicher, Laufwerke |
+| Suchprozess | `--wu-search --offline` echt auf dem Runner: Antwort als JSON, mit Liste oder mit Fehlermeldung |
 
 Die Protokolle von Agent und Updater, `sc qc`, die Task-Definition und der
 Zustand des Test-Backends hängen am Lauf als Artefakt `agent-e2e`.

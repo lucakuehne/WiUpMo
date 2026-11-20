@@ -28,6 +28,7 @@ public sealed class AgentCycle(
     InstallJobRunner installs,
     RestartCoordinator restarts,
     CheckinSchedule schedule,
+    UpdateSearchSchedule searches,
     AgentHealth health,
     ILogger<AgentCycle> logger)
 {
@@ -176,6 +177,7 @@ public sealed class AgentCycle(
 
                 Settle(schub, response);
                 schedule.Apply(response.CheckIntervalMinutes);
+                searches.Apply(response.SearchIntervalMinutes);
                 verbleibend -= schub.Count;
                 letzte = response;
             }

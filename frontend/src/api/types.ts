@@ -745,6 +745,9 @@ export interface AgentSettingsView {
 
   /** Abstand zwischen zwei regulären Meldungen, in Minuten. */
   checkIntervalMinutes: number;
+
+  /** Wie oft ein Agent online nach Updates sucht, in Minuten (ab Agent 0.10.1). */
+  searchIntervalMinutes: number;
 }
 
 export interface AdGroup {

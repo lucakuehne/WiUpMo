@@ -42,6 +42,7 @@ export class CheckinController {
       results: [result],
       agentUpdate: await this.releases.claimJob(device.id),
       checkIntervalMinutes: await this.checkInterval(snapshot.agentVersion),
+      searchIntervalMinutes: (await this.settings.getAgent()).searchIntervalMinutes,
       installRequest: await this.installJobs.claim(device.id, device.agentVersion),
       restartRequest: await this.restartJobs.claim(device.id, snapshot.agentVersion),
     };
@@ -76,6 +77,7 @@ export class CheckinController {
       results,
       agentUpdate: await this.releases.claimJob(device.id),
       checkIntervalMinutes: await this.checkInterval(ordered.at(-1)?.agentVersion),
+      searchIntervalMinutes: (await this.settings.getAgent()).searchIntervalMinutes,
       installRequest: await this.installJobs.claim(device.id, device.agentVersion),
       restartRequest: await this.restartJobs.claim(device.id, ordered.at(-1)?.agentVersion),
     };

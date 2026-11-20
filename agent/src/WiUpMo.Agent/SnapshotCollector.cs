@@ -9,7 +9,8 @@ using WiUpMo.Agent.Windows;
 namespace WiUpMo.Agent;
 
 public sealed class SnapshotCollector(
-    WindowsUpdateReader updates,
+    UpdateScanner scanner,
+    UpdateSearchSchedule searches,
     HostInspector host,
     UpdateSourceInspector updateSource,
     HardwareReporter hardware,
@@ -39,6 +40,10 @@ public sealed class SnapshotCollector(
     /// statt gar keiner. Frueher fiel der Durchlauf dann aus, und ein Geraet mit
     /// haengendem Update-Dienst verschwand stumm aus der Ueberwachung — kein
     /// Check-in, keine Stoerung, nur ein immer aelterer Zeitstempel.
+    ///
+    /// Ab 0.10.1 wird nur gesucht, wenn es <see cref="UpdateSearchSchedule"/>
+    /// sagt; dazwischen geht der Snapshot ebenfalls ohne Update-Daten hinaus,
+    /// dann aber ohne Warnung — das ist kein Fehler, sondern der Takt.
     /// </summary>
     public async Task<Snapshot> CollectAsync(
         DateTimeOffset historySince,
@@ -58,23 +63,36 @@ public sealed class SnapshotCollector(
         IReadOnlyList<HistoryEntry> history = [];
         IReadOnlyList<AvailableUpdate>? installed = null;
 
-        try
+        if (searches.Due(collectedAt) is { } reason)
         {
-            available = await updates.GetAvailableUpdatesAsync(ct).ConfigureAwait(false);
-            history = await updates.GetHistoryAsync(historySince, ct).ConfigureAwait(false);
-            installed = await ReadInstalledIfChangedAsync(history.Count > 0, collectedAt, ct).ConfigureAwait(false);
-        }
-        catch (WindowsUpdateException ex)
-        {
-            // Ganz oder gar nicht: Offene Updates ohne die Historie dazu ergaeben
-            // im Backend falsche Uebergaenge.
-            available = null;
-            history = [];
-            installed = null;
+            logger.LogInformation("Suche nach Updates ({Anlass}).", reason);
+            try
+            {
+                UpdateScanResult scan = await scanner.ScanAsync(historySince, ct).ConfigureAwait(false);
+                available = scan.Available;
+                history = scan.History;
+                installed = SelectInstalled(scan.Installed, history.Count > 0, collectedAt);
+                searches.Succeeded(collectedAt);
+            }
+            catch (WindowsUpdateException ex)
+            {
+                // Ganz oder gar nicht: Offene Updates ohne die Historie dazu
+                // ergaeben im Backend falsche Uebergaenge.
+                available = null;
+                history = [];
+                installed = null;
+                searches.Failed(collectedAt);
 
-            // Kein Programmfehler, sondern ein Zustand des Geraets: als Warnung
-            // im Klartext, ohne Stapelspur.
-            logger.LogWarning("Update-Zustand nicht lesbar, Check-in ohne Update-Daten. {Meldung}", ex.Message);
+                // Kein Programmfehler, sondern ein Zustand des Geraets: als
+                // Warnung im Klartext, ohne Stapelspur.
+                logger.LogWarning("Update-Zustand nicht lesbar, Check-in ohne Update-Daten. {Meldung}", ex.Message);
+            }
+        }
+        else
+        {
+            logger.LogInformation(
+                "Update-Suche nicht faellig, die naechste ab {Ab:HH:mm} Uhr.",
+                searches.NextAt?.ToLocalTime());
         }
 
         return new Snapshot
@@ -98,16 +116,16 @@ public sealed class SnapshotCollector(
     /// geaendert haben — sonst null, und der Snapshot bleibt so klein wie
     /// bisher.
     ///
-    /// Gesucht wird nur, wenn die Historie Neues meldet oder das letzte
+    /// Mitgeschickt wird nur, wenn die Historie Neues meldet oder das letzte
     /// Mitsenden einen Tag her ist: Ohne Installation oder Deinstallation
-    /// aendert sich die Menge nicht. Scheitert die Suche, fehlt die Liste in
-    /// diesem Snapshot. Sie dient nur dem Katalog und ist kein Grund, den
+    /// aendert sich die Menge nicht. Liess sich die Liste nicht lesen, fehlt sie
+    /// in diesem Snapshot. Sie dient nur dem Katalog und ist kein Grund, den
     /// Durchlauf aufzugeben.
     /// </summary>
-    private async Task<IReadOnlyList<AvailableUpdate>?> ReadInstalledIfChangedAsync(
+    private IReadOnlyList<AvailableUpdate>? SelectInstalled(
+        IReadOnlyList<AvailableUpdate>? installed,
         bool historyChanged,
-        DateTimeOffset now,
-        CancellationToken ct)
+        DateTimeOffset now)
     {
         bool sentRecently = DateTimeOffset.TryParse(
                                 queue.GetMeta(InstalledSentAtKey),
@@ -120,18 +138,7 @@ public sealed class SnapshotCollector(
             return null;
         }
 
-        IReadOnlyList<AvailableUpdate> installed;
-        try
-        {
-            installed = await updates.GetInstalledUpdatesAsync(ct).ConfigureAwait(false);
-        }
-        catch (WindowsUpdateException ex)
-        {
-            logger.LogWarning("Die installierten Updates liessen sich nicht lesen. {Meldung}", ex.Message);
-            return null;
-        }
-
-        if (installed.Count == 0)
+        if (installed is not { Count: > 0 })
         {
             return null;
         }

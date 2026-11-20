@@ -148,7 +148,7 @@ const bindPassword = ref('');
 
 const url = reactive<LdapUrlParts>({ host: '', port: LDAPS_PORT, secure: true });
 
-const agent = reactive<AgentSettingsView>({ enrollmentToken: '', checkIntervalMinutes: 5 });
+const agent = reactive<AgentSettingsView>({ enrollmentToken: '', checkIntervalMinutes: 5, searchIntervalMinutes: 60 });
 const authSettings = reactive<AuthSettings>({
   localEnabled: true,
   ldapEnabled: false,
@@ -348,9 +348,10 @@ const saveAd = () => void save('ad', savingAd, currentAdPayload());
  * „= 4 Stunden" neben dem Feld. Minuten sind der genauere Wert, aber bei 720
  * rechnet niemand gern im Kopf nach, was das in Tagen ist.
  */
-const intervalHint = computed(() => {
-  const minutes = agent.checkIntervalMinutes;
+const intervalHint = computed(() => minutesHint(agent.checkIntervalMinutes));
+const searchHint = computed(() => minutesHint(agent.searchIntervalMinutes));
 
+function minutesHint(minutes: number): string {
   if (!Number.isFinite(minutes) || minutes < 60) {
     return '';
   }
@@ -361,6 +362,12 @@ const intervalHint = computed(() => {
   }
 
   return `= ${formatNumber(hours / 24)} Tage`;
+}
+
+/** Suchen pro Gerät und Tag — damit sich die Last auf WSUS abschätzen lässt. */
+const searchesPerDay = computed(() => {
+  const minutes = agent.searchIntervalMinutes;
+  return Number.isFinite(minutes) && minutes > 0 ? Math.round(1440 / minutes) : null;
 });
 
 function formatNumber(value: number): string {
@@ -369,7 +376,10 @@ function formatNumber(value: number): string {
 
 // Nur das Intervall: Das Token hat einen eigenen Weg, der auch eines erzeugen kann.
 const saveAgent = () =>
-  void save('agent', savingAgent, { checkIntervalMinutes: agent.checkIntervalMinutes });
+  void save('agent', savingAgent, {
+    checkIntervalMinutes: agent.checkIntervalMinutes,
+    searchIntervalMinutes: agent.searchIntervalMinutes,
+  });
 const saveAuth = () => void save('auth', savingAuth, { ...authSettings });
 const saveThresholds = () => void save('thresholds', savingThresholds, { ...thresholds });
 const saveRetention = () => void save('retention', savingRetention, { ...retention });
@@ -1248,16 +1258,17 @@ onMounted(load);
         >
           <Card>
             <CardHeader>
-              <CardTitle>Melde-Intervall</CardTitle>
+              <CardTitle>Melde-Intervall und Update-Suche</CardTitle>
               <CardDescription>
-                Abstand zwischen zwei regulären Durchläufen. Zusätzlich meldet sich ein Agent,
-                sobald sich am Netzwerk etwas ändert — beim VPN-Aufbau also sofort.
+                Wie oft sich die Agents melden und wie oft sie dabei nach Updates suchen. Zusätzlich
+                meldet sich ein Agent, sobald sich am Netzwerk etwas ändert — beim VPN-Aufbau also
+                sofort.
               </CardDescription>
             </CardHeader>
 
             <CardContent>
               <div class="space-y-1.5">
-                <Label for="interval">Minuten</Label>
+                <Label for="interval">Melde-Intervall (Minuten)</Label>
                 <div class="flex items-center gap-3">
                   <Input
                     id="interval"
@@ -1276,10 +1287,33 @@ onMounted(load);
                   erst beim nächsten Durchlauf, im ungünstigsten Fall also nach dem bisherigen
                   Abstand. Agents vor Version 0.8.1 melden sich höchstens alle 5 Minuten.
                 </p>
+              </div>
+
+              <div class="mt-5 space-y-1.5">
+                <Label for="search-interval">Update-Suche alle (Minuten)</Label>
+                <div class="flex items-center gap-3">
+                  <Input
+                    id="search-interval"
+                    v-model.number="agent.searchIntervalMinutes"
+                    type="number"
+                    min="5"
+                    max="1440"
+                    step="5"
+                    class="w-40"
+                  />
+                  <span class="text-muted-foreground text-sm">
+                    {{ searchHint }}
+                    <template v-if="searchesPerDay !== null">
+                      · {{ searchesPerDay }} {{ searchesPerDay === 1 ? 'Suche' : 'Suchen' }} pro Gerät und Tag
+                    </template>
+                  </span>
+                </div>
                 <p class="text-muted-foreground text-xs">
-                  Jeder Durchlauf sucht bei WSUS bzw. Microsoft Update nach Updates. Bei wenigen
-                  Minuten Abstand summiert sich das über alle Geräte: 2 Minuten sind 30 Suchen pro
-                  Stunde und Gerät.
+                  Zwischen 5 Minuten und einem Tag. So oft fragt ein Agent WSUS bzw. Microsoft Update
+                  nach offenen Updates; die Check-ins dazwischen gehen ohne Update-Liste hinaus, und
+                  der letzte Stand bleibt stehen. Sofort gesucht wird nach dem Start des Agents — also
+                  nach jedem Neustart — und nach einer Installation. Windows selbst sucht etwa einmal
+                  am Tag. Gilt ab Agent 0.10.1; ältere suchen bei jedem Durchlauf.
                 </p>
               </div>
             </CardContent>

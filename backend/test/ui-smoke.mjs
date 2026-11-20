@@ -359,10 +359,15 @@ await step('Einstellungen: Schwellwerte und Aufbewahrung stehen unter Betrieb', 
   // Alte Lesezeichen auf die frueheren Abschnitte landen dort.
   for (const old of ['thresholds', 'retention']) {
     await page.goto(`${base}/settings/${old}`);
-    for (const title of ['Melde-Intervall', 'Installationsaufträge', 'Neustarts', 'Schwellwerte', 'Aufbewahrung']) {
+    for (const title of ['Melde-Intervall und Update-Suche', 'Installationsaufträge', 'Neustarts', 'Schwellwerte', 'Aufbewahrung']) {
       await page.getByRole('heading', { name: title, exact: true }).waitFor({ timeout: 10_000 });
     }
   }
+
+  // Der Abstand der Update-Suche steht neben dem Melde-Intervall, mit der Vorgabe.
+  const search = page.getByLabel('Update-Suche alle (Minuten)');
+  if ((await search.inputValue()) !== '60') throw new Error('die Update-Suche steht nicht auf der Vorgabe 60');
+  await page.getByText('24 Suchen pro Gerät und Tag').waitFor({ timeout: 5_000 });
 });
 
 await step('Dunkles Farbschema', async () => {

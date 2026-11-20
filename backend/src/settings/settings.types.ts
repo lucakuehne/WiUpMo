@@ -112,6 +112,18 @@ export interface AgentSettings {
    * umgekehrt.
    */
   checkIntervalMinutes: number;
+
+  /**
+   * Wie oft ein Agent online nach Updates sucht, in Minuten (ab 0.10.1).
+   *
+   * Unabhaengig vom Melde-Intervall: Check-ins alle paar Minuten halten
+   * Auftraege und Neustarts zuegig, eine Suche bei WSUS bzw. Microsoft Update
+   * braucht es so oft nicht — Windows selbst sucht etwa einmal am Tag. Zwischen
+   * zwei Suchen geht der Check-in ohne Update-Liste hinaus, das Backend behaelt
+   * den letzten Stand. Sofort gesucht wird trotzdem nach dem Start des Agents
+   * (also nach jedem Neustart) und nach einer Installation.
+   */
+  searchIntervalMinutes: number;
 }
 
 /** Untergrenze, damit hier nicht versehentlich "test" landet. */
@@ -139,6 +151,13 @@ export const SHORT_INTERVAL_AGENT_VERSION = '0.8.1';
 export const LEGACY_MIN_CHECK_INTERVAL_MINUTES = 5;
 
 /**
+ * Grenzen der Update-Suche, in Minuten: von fuenf Minuten — dann sucht ein
+ * Agent praktisch bei jedem Check-in, wie vor 0.10.1 — bis zu einem Tag.
+ */
+export const MIN_SEARCH_INTERVAL_MINUTES = 5;
+export const MAX_SEARCH_INTERVAL_MINUTES = 1440;
+
+/**
  * 5 Minuten wie die eigene Vorgabe des Agents: So steht ein Geraet, das einen
  * Neustart hinter sich oder ein Update installiert hat, nach wenigen Minuten
  * richtig in der Oberflaeche.
@@ -149,6 +168,9 @@ export const LEGACY_MIN_CHECK_INTERVAL_MINUTES = 5;
 export const DEFAULT_AGENT: AgentSettings = {
   enrollmentToken: '',
   checkIntervalMinutes: 5,
+  // Stuendlich: Bis 0.10.0 suchte jeder Agent bei jedem Check-in, bei 5 Minuten
+  // also zwoelfmal so oft — und haeufte bei WSUS zehntausende Suchen am Tag an.
+  searchIntervalMinutes: 60,
 };
 
 export interface AdSettings {

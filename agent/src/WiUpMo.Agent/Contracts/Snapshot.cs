@@ -364,6 +364,12 @@ public sealed class CheckinResponse
     /// dann gilt weiter die oertliche Einstellung.
     /// </summary>
     public int? CheckIntervalMinutes { get; init; }
+
+    /// <summary>
+    /// Abstand der Online-Suche nach Updates, in Minuten (Backend ab dem Stand
+    /// zu Agent 0.10.1). <c>null</c> bei einem aelteren Backend.
+    /// </summary>
+    public int? SearchIntervalMinutes { get; init; }
 }
 
 /// <summary>Ergebnis eines Updates aus einem Installationsauftrag.</summary>

@@ -13,6 +13,6 @@ export class AgentProblemsController {
   @Get()
   @ApiOperation({ summary: 'Warnungen und Fehler der Agents, nach Meldung zusammengefasst.' })
   list(@Query() query: AgentProblemQueryDto): Promise<AgentProblemDto[]> {
-    return this.problems.list(query.days);
+    return this.problems.list(query.hours ?? query.days * 24);
   }
 }

@@ -6,8 +6,13 @@ namespace WiUpMo.Agent.Windows;
 
 /// <summary>
 /// Liest die offenen Updates und die Installationshistorie ueber WUApi.
+///
+/// Ab 0.10.1 nur noch im Suchprozess (<see cref="UpdateSearchProcess"/>): Ein
+/// COM-Aufruf an Windows Update laesst sich nicht abbrechen, ein Prozess schon.
+/// Deshalb hier weder Zeitlimit noch Wache — beides liegt beim Dienst, der den
+/// Suchprozess startet und notfalls beendet (<see cref="UpdateScanner"/>).
 /// </summary>
-public sealed partial class WindowsUpdateReader(AgentOptions options)
+public static partial class WindowsUpdateReader
 {
     /// <summary>Werte aus <c>OperationResultCode</c>.</summary>
     private const int ResultSucceeded = 2;
@@ -33,8 +38,14 @@ public sealed partial class WindowsUpdateReader(AgentOptions options)
     [GeneratedRegex(@"KB(\d{6,10})", RegexOptions.IgnoreCase)]
     private static partial Regex KbInTitle();
 
-    public Task<IReadOnlyList<AvailableUpdate>> GetAvailableUpdatesAsync(CancellationToken ct) =>
-        RunWithTimeoutAsync<IReadOnlyList<AvailableUpdate>>(SearchAvailable, [], "Die Update-Suche", ct);
+    // --- Verfuegbare Updates -------------------------------------------------
+
+    /// <summary>
+    /// Die offenen Updates. <paramref name="online"/> befragt die Update-Quelle
+    /// (WSUS, Microsoft Update), sonst nur den oertlichen Zwischenspeicher.
+    /// </summary>
+    public static IReadOnlyList<AvailableUpdate> SearchAvailable(bool online) =>
+        Search("IsInstalled=0 and IsHidden=0", online);
 
     /// <summary>
     /// Die installierten Updates mit denselben Angaben wie die offenen — Typ,
@@ -46,44 +57,7 @@ public sealed partial class WindowsUpdateReader(AgentOptions options)
     /// kennt Windows selbst, und die Suche dauert so Sekunden statt Minuten.
     /// Abgeloeste Versionen liefert sie nicht mehr.
     /// </summary>
-    public Task<IReadOnlyList<AvailableUpdate>> GetInstalledUpdatesAsync(CancellationToken ct) =>
-        RunWithTimeoutAsync<IReadOnlyList<AvailableUpdate>>(
-            SearchInstalled, [], "Die Suche nach installierten Updates", ct);
-
-    public Task<IReadOnlyList<HistoryEntry>> GetHistoryAsync(
-        DateTimeOffset since,
-        CancellationToken ct) =>
-        RunWithTimeoutAsync<IReadOnlyList<HistoryEntry>>(
-            () => ReadHistory(since), [], "Die Abfrage der Historie", ct);
-
-    /// <summary>
-    /// Kapselt einen COM-Aufruf mit Zeitlimit: Eine beschaedigte Update-Datenbank
-    /// oder ein haengender Dienst kann eine Suche praktisch unbegrenzt
-    /// blockieren, und der Agent darf daran nicht haengenbleiben. Haengt noch
-    /// ein frueherer Aufruf, scheitert dieser sofort (siehe <see cref="HangGuard"/>).
-    ///
-    /// Im Ende-zu-Ende-Test liefert er stattdessen <paramref name="simulated"/>
-    /// oder scheitert absichtlich.
-    /// </summary>
-    private Task<T> RunWithTimeoutAsync<T>(Func<T> work, T simulated, string what, CancellationToken ct)
-    {
-        if (options.SimulateWindowsUpdateFailure)
-        {
-            return Task.FromException<T>(
-                new WindowsUpdateException($"{what} ist simuliert gescheitert (Ende-zu-Ende-Test)."));
-        }
-
-        return options.SimulateWindowsUpdate
-            ? Task.FromResult(simulated)
-            : HangGuard.WindowsUpdate.RunAsync(work, TimeSpan.FromSeconds(options.ComTimeoutSeconds), what, ct);
-    }
-
-    // --- Verfuegbare Updates -------------------------------------------------
-
-    private IReadOnlyList<AvailableUpdate> SearchAvailable() =>
-        Search("IsInstalled=0 and IsHidden=0", options.SearchOnline);
-
-    private IReadOnlyList<AvailableUpdate> SearchInstalled() => Search("IsInstalled=1", online: false);
+    public static IReadOnlyList<AvailableUpdate> SearchInstalled() => Search("IsInstalled=1", online: false);
 
     private static IReadOnlyList<AvailableUpdate> Search(string criteria, bool online)
     {
@@ -213,7 +187,8 @@ public sealed partial class WindowsUpdateReader(AgentOptions options)
 
     // --- Historie ------------------------------------------------------------
 
-    private IReadOnlyList<HistoryEntry> ReadHistory(DateTimeOffset since)
+    /// <summary>Installationshistorie nach <paramref name="since"/>, aelteste zuerst.</summary>
+    public static IReadOnlyList<HistoryEntry> ReadHistory(DateTimeOffset since)
     {
         object session = Com.Create("Microsoft.Update.Session");
 

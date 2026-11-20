@@ -67,6 +67,13 @@ internal static class Program
             return RestartPromptApp.Preview(final: HasFlag(args, "--final"));
         }
 
+        // Der Suchprozess, vom Dienst fuer jede Update-Suche gestartet: liest nur
+        // Windows Update und schreibt JSON. Ohne Konfiguration und Protokoll.
+        if (HasFlag(args, UpdateSearchProcess.Flag))
+        {
+            return UpdateSearchProcess.Run(args);
+        }
+
         AgentOptions options = LoadOptions(args);
 
         // Einrichtung laeuft ohne Host und ohne Serilog: sie schreibt auf die
@@ -214,7 +221,8 @@ internal static class Program
         builder.Services.AddSingleton<UpdateSourceInspector>();
         builder.Services.AddSingleton<HardwareInspector>();
         builder.Services.AddSingleton<HardwareReporter>();
-        builder.Services.AddSingleton<WindowsUpdateReader>();
+        builder.Services.AddSingleton<UpdateScanner>();
+        builder.Services.AddSingleton<UpdateSearchSchedule>();
         builder.Services.AddSingleton<SnapshotCollector>();
         builder.Services.AddSingleton(_ => new DeviceIdentityStore(options.DataDirectory));
         builder.Services.AddSingleton<SnapshotQueue>();

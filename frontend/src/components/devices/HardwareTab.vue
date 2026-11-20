@@ -26,6 +26,9 @@ import {
  * zuletzt gemeldet hat. Er schickt die Angaben bei jeder Änderung und sonst
  * einmal am Tag. Freien Platz und Verbindungszustand meldet er mit, gezeigt
  * werden sie bewusst nicht: Sie sind Momentaufnahmen und hier nicht gefragt.
+ *
+ * Eine Karte je Bereich, zwei nebeneinander. Ein Desktop ohne Akku lässt
+ * dessen Karte aus; die übrigen rücken nach.
  */
 const props = defineProps<{
   hardware: HardwareInfo | null;
@@ -85,32 +88,41 @@ function yesNo(value: boolean | undefined, yes = 'ja', no = 'nein'): string {
         </CardContent>
       </Card>
 
-      <!-- ===================== Leistung ===================== -->
+      <!-- ===================== Prozessor ===================== -->
       <Card>
-        <CardHeader><CardTitle class="text-base">Prozessor und Arbeitsspeicher</CardTitle></CardHeader>
+        <CardHeader><CardTitle class="text-base">Prozessor</CardTitle></CardHeader>
         <CardContent>
           <dl class="grid grid-cols-[9rem_1fr] gap-x-4 gap-y-2 text-sm">
-            <dt class="text-muted-foreground">Prozessor</dt>
-            <dd>
-              {{ hw.processor?.name ?? '—' }}
-              <div v-if="hw.processor?.cores" class="text-muted-foreground text-xs">
-                <template v-if="(hw.processor.count ?? 1) > 1">{{ hw.processor.count }} × </template>
-                {{ hw.processor.cores }} Kerne, {{ hw.processor.logicalProcessors ?? '?' }} Threads
-                <template v-if="hw.processor.maxClockMhz">
-                  · {{ (hw.processor.maxClockMhz / 1000).toFixed(1) }} GHz
-                </template>
-              </div>
+            <dt class="text-muted-foreground">Modell</dt>
+            <dd>{{ hw.processor?.name ?? '—' }}</dd>
+            <dt class="text-muted-foreground">Kerne</dt>
+            <dd class="tabular">{{ hw.processor?.cores ?? '—' }}</dd>
+            <dt class="text-muted-foreground">Threads</dt>
+            <dd class="tabular">{{ hw.processor?.logicalProcessors ?? '—' }}</dd>
+            <dt class="text-muted-foreground">Takt</dt>
+            <dd class="tabular">
+              {{ hw.processor?.maxClockMhz ? `${(hw.processor.maxClockMhz / 1000).toFixed(1)} GHz` : '—' }}
             </dd>
-            <dt class="text-muted-foreground">Arbeitsspeicher</dt>
-            <dd>
-              {{ formatCapacity(hw.memoryBytes) }}
-              <span v-if="hw.memoryModules?.length" class="text-muted-foreground text-xs">
-                in {{ hw.memoryModules.length }} {{ hw.memoryModules.length === 1 ? 'Modul' : 'Modulen' }}
-              </span>
-            </dd>
+            <template v-if="(hw.processor?.count ?? 1) > 1">
+              <dt class="text-muted-foreground">Anzahl</dt>
+              <dd class="tabular">{{ hw.processor?.count }}</dd>
+            </template>
           </dl>
+        </CardContent>
+      </Card>
 
-          <div v-if="hw.memoryModules?.length" class="mt-4 rounded-md border">
+      <!-- ===================== Arbeitsspeicher ===================== -->
+      <Card>
+        <CardHeader><CardTitle class="text-base">Arbeitsspeicher</CardTitle></CardHeader>
+        <CardContent>
+          <p class="text-sm">
+            {{ formatCapacity(hw.memoryBytes) }}
+            <span v-if="hw.memoryModules?.length" class="text-muted-foreground text-xs">
+              in {{ hw.memoryModules.length }} {{ hw.memoryModules.length === 1 ? 'Modul' : 'Modulen' }}
+            </span>
+          </p>
+
+          <div v-if="hw.memoryModules?.length" class="mt-3 rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -134,6 +146,34 @@ function yesNo(value: boolean | undefined, yes = 'ja', no = 'nein'): string {
               </TableBody>
             </Table>
           </div>
+        </CardContent>
+      </Card>
+
+      <!-- ===================== Datenträger ===================== -->
+      <Card>
+        <CardHeader><CardTitle class="text-base">Datenträger</CardTitle></CardHeader>
+        <CardContent>
+          <div v-if="hw.disks?.length" class="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Laufwerk</TableHead>
+                  <TableHead class="text-right">Grösse</TableHead>
+                  <TableHead>Typ</TableHead>
+                  <TableHead>Anschluss</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="(disk, index) in hw.disks" :key="index">
+                  <TableCell class="whitespace-normal">{{ disk.model ?? '—' }}</TableCell>
+                  <TableCell class="tabular text-right">{{ formatCapacity(disk.sizeBytes) }}</TableCell>
+                  <TableCell>{{ disk.mediaType && disk.mediaType !== 'unknown' ? disk.mediaType.toUpperCase() : '—' }}</TableCell>
+                  <TableCell>{{ disk.busType ?? '—' }}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+          <p v-else class="text-muted-foreground text-sm">Keine Angaben.</p>
         </CardContent>
       </Card>
 
@@ -197,66 +237,23 @@ function yesNo(value: boolean | undefined, yes = 'ja', no = 'nein'): string {
           </dl>
         </CardContent>
       </Card>
-    </div>
 
-    <!-- ===================== Datenträger ===================== -->
-    <Card>
-      <CardHeader><CardTitle class="text-base">Datenträger</CardTitle></CardHeader>
-      <CardContent class="space-y-4">
-        <div v-if="hw.disks?.length" class="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Laufwerk</TableHead>
-                <TableHead class="w-28 text-right">Grösse</TableHead>
-                <TableHead class="w-24">Typ</TableHead>
-                <TableHead class="w-28">Anschluss</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-for="(disk, index) in hw.disks" :key="index">
-                <TableCell>{{ disk.model ?? '—' }}</TableCell>
-                <TableCell class="tabular text-right">{{ formatCapacity(disk.sizeBytes) }}</TableCell>
-                <TableCell>{{ disk.mediaType && disk.mediaType !== 'unknown' ? disk.mediaType.toUpperCase() : '—' }}</TableCell>
-                <TableCell>{{ disk.busType ?? '—' }}</TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </div>
-
-        <p v-if="!hw.disks?.length" class="text-muted-foreground text-sm">Keine Angaben.</p>
-      </CardContent>
-    </Card>
-
-    <!-- ===================== Weitere Komponenten ===================== -->
-    <Card>
-      <CardHeader><CardTitle class="text-base">Weitere Komponenten</CardTitle></CardHeader>
-      <CardContent class="space-y-4 text-sm">
-        <div>
-          <h3 class="text-muted-foreground mb-1 text-xs font-medium tracking-wide uppercase">Grafik</h3>
-          <ul v-if="hw.graphics?.length" class="space-y-0.5">
-            <li v-for="(card, index) in hw.graphics" :key="index">
-              {{ card.name ?? '—' }}
-              <span v-if="card.driverVersion" class="text-muted-foreground text-xs">Treiber {{ card.driverVersion }}</span>
-            </li>
-          </ul>
-          <p v-else class="text-muted-foreground">—</p>
-        </div>
-
-        <div>
-          <h3 class="text-muted-foreground mb-1 text-xs font-medium tracking-wide uppercase">Netzwerk</h3>
+      <!-- ===================== Netzwerkadapter ===================== -->
+      <Card>
+        <CardHeader><CardTitle class="text-base">Netzwerkadapter</CardTitle></CardHeader>
+        <CardContent>
           <div v-if="hw.networkAdapters?.length" class="rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Adapter</TableHead>
-                  <TableHead class="w-28">Art</TableHead>
-                  <TableHead class="w-44">MAC-Adresse</TableHead>
+                  <TableHead>Art</TableHead>
+                  <TableHead>MAC-Adresse</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 <TableRow v-for="(adapter, index) in hw.networkAdapters" :key="index">
-                  <TableCell>
+                  <TableCell class="whitespace-normal">
                     {{ adapter.name ?? '—' }}
                     <div v-if="adapter.connection" class="text-muted-foreground text-xs">{{ adapter.connection }}</div>
                   </TableCell>
@@ -266,32 +263,49 @@ function yesNo(value: boolean | undefined, yes = 'ja', no = 'nein'): string {
               </TableBody>
             </Table>
           </div>
-          <p v-else class="text-muted-foreground">—</p>
-        </div>
+          <p v-else class="text-muted-foreground text-sm">Keine Angaben.</p>
+        </CardContent>
+      </Card>
 
-        <div>
-          <h3 class="text-muted-foreground mb-1 text-xs font-medium tracking-wide uppercase">Monitore</h3>
-          <ul v-if="hw.monitors?.length" class="space-y-0.5">
-            <li v-for="(monitor, index) in hw.monitors" :key="index">
-              {{ monitor.name ?? (monitor.internal ? 'Eingebautes Display' : 'Monitor') }}
-              <span class="text-muted-foreground text-xs">
-                {{
-                  [
-                    monitor.internal ? 'intern' : 'extern',
-                    monitor.manufacturer,
-                    monitor.year ? `Baujahr ${monitor.year}` : null,
-                    monitor.serialNumber ? `S/N ${monitor.serialNumber}` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')
-                }}
-              </span>
-            </li>
-          </ul>
-          <p v-else class="text-muted-foreground">—</p>
-          <p class="text-muted-foreground mt-1 text-xs">Externe Monitore nur, wenn sie beim Erfassen angeschlossen waren.</p>
-        </div>
-      </CardContent>
-    </Card>
+      <!-- ===================== Grafik und Monitore ===================== -->
+      <Card>
+        <CardHeader><CardTitle class="text-base">Grafik und Monitore</CardTitle></CardHeader>
+        <CardContent class="space-y-4 text-sm">
+          <div>
+            <h3 class="text-muted-foreground mb-1 text-xs font-medium tracking-wide uppercase">Grafik</h3>
+            <ul v-if="hw.graphics?.length" class="space-y-0.5">
+              <li v-for="(card, index) in hw.graphics" :key="index">
+                {{ card.name ?? '—' }}
+                <span v-if="card.driverVersion" class="text-muted-foreground text-xs">Treiber {{ card.driverVersion }}</span>
+              </li>
+            </ul>
+            <p v-else class="text-muted-foreground">—</p>
+          </div>
+
+          <div>
+            <h3 class="text-muted-foreground mb-1 text-xs font-medium tracking-wide uppercase">Monitore</h3>
+            <ul v-if="hw.monitors?.length" class="space-y-0.5">
+              <li v-for="(monitor, index) in hw.monitors" :key="index">
+                {{ monitor.name ?? (monitor.internal ? 'Eingebautes Display' : 'Monitor') }}
+                <span class="text-muted-foreground text-xs">
+                  {{
+                    [
+                      monitor.internal ? 'intern' : 'extern',
+                      monitor.manufacturer,
+                      monitor.year ? `Baujahr ${monitor.year}` : null,
+                      monitor.serialNumber ? `S/N ${monitor.serialNumber}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
+                  }}
+                </span>
+              </li>
+            </ul>
+            <p v-else class="text-muted-foreground">—</p>
+            <p class="text-muted-foreground mt-1 text-xs">Externe Monitore nur, wenn sie beim Erfassen angeschlossen waren.</p>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   </div>
 </template>

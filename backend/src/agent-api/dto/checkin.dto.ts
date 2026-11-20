@@ -66,6 +66,12 @@ export class CheckinResponseDto {
   checkIntervalMinutes: number;
 
   /**
+   * Wie oft der Agent online nach Updates suchen soll, in Minuten. Ab 0.10.1;
+   * aeltere Agents ignorieren das Feld und suchen bei jedem Durchlauf.
+   */
+  searchIntervalMinutes: number;
+
+  /**
    * Faelliger Installationsauftrag, sonst null. Nur fuer Agents ab 0.7.0;
    * aeltere bekommen immer null und uebergehen das Feld ohnehin.
    *
