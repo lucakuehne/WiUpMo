@@ -94,7 +94,13 @@ export function get<T>(path: string, params?: Record<string, unknown>): Promise<
   const query = new URLSearchParams();
 
   for (const [key, value] of Object.entries(params ?? {})) {
-    if (value !== undefined && value !== null && value !== '') {
+    // Eine Liste als wiederholter Parameter: `?ou=a&ou=b`. Kommas taugen nicht
+    // als Trenner — in einem DN stehen welche.
+    if (Array.isArray(value)) {
+      value.filter((item) => item !== undefined && item !== null && item !== '').forEach((item) => {
+        query.append(key, String(item));
+      });
+    } else if (value !== undefined && value !== null && value !== '') {
       query.set(key, String(value));
     }
   }

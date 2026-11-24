@@ -232,6 +232,14 @@ await step('Fehlende Agents und OU-Navigation', async () => {
   assert.ok(!missing.includes('NB-001'));
   const units = (await api.get('/api/devices/organizational-units')).map((u) => u.dn);
   assert.ok(units.includes(NOTEBOOKS));
+
+  // Mehrere Einheiten zugleich: „oder“, jede samt Unterbaum.
+  const inUnits = async (...dns) => {
+    const query = dns.map((dn) => `ou=${encodeURIComponent(dn)}`).join('&');
+    return (await api.get(`/api/devices?${query}&limit=50`)).items.map((d) => d.hostname).sort();
+  };
+  assert.deepEqual(await inUnits(NOTEBOOKS, SERVER), ['NB-001', 'NB-002', 'SRV-001']);
+  assert.deepEqual(await inUnits(CLIENTS), (await inUnits(CLIENTS, NOTEBOOKS)), 'eine Untereinheit dazu aendert nichts');
 });
 
 await step('Server ausgeblendet: SRV-001 archiviert, danach wieder aktiv', async () => {

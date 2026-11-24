@@ -727,6 +727,8 @@ export interface AgentProblem {
   devices: number;
   occurrences: number;
   lastAt: string;
+  /** Entstand, während die Geräte offline waren — keine Störung, steht getrennt und zuletzt. */
+  offline: boolean;
   entries: { deviceId: string; hostname: string; lastAt: string; occurrences: number; message: string }[];
 }
 

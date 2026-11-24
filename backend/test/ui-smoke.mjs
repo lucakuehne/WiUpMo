@@ -136,6 +136,37 @@ await step('Geraeteliste', async () => {
   await capture(page, 'geraete');
 });
 
+await step('Geraeteliste: Mehrfachfilter, Zahlenfilter, nach dem Zurueck noch da', async () => {
+  await page.goto(`${base}/devices`);
+  await page.locator('table tbody tr').first().waitFor({ timeout: 15_000 });
+
+  // Zwei Update-Quellen zugleich; das Menue bleibt beim Ankreuzen offen.
+  await page.getByRole('button', { name: 'Update-Quelle', exact: true }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'WSUS' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'unbekannt' }).click();
+  await page.keyboard.press('Escape');
+  await page.waitForURL(/updateSource=wsus.*updateSource=unknown|updateSource=unknown.*updateSource=wsus/, { timeout: 10_000 });
+
+  // Tage als Zahl.
+  await page.getByLabel('Kein Neustart seit Tagen').fill('2');
+  await page.waitForURL(/notRebootedDays=2/, { timeout: 10_000 });
+  await page.locator('table tbody tr').first().waitFor({ timeout: 10_000 });
+  await capture(page, 'geraete-filter');
+
+  // Ein Geraet oeffnen und zurueck: Die Filter stehen noch.
+  await page.locator('table tbody tr').first().click();
+  await page.waitForURL(/\/devices\/[0-9a-f-]{36}/, { timeout: 10_000 });
+  await page.goBack();
+  await page.waitForURL(/notRebootedDays=2/, { timeout: 10_000 });
+  if ((await page.getByLabel('Kein Neustart seit Tagen').inputValue()) !== '2') {
+    throw new Error('der Zahlenfilter ist nach dem Zurueck weg');
+  }
+  if (!(await page.getByRole('button', { name: 'Update-Quelle', exact: true }).innerText()).includes('2')) {
+    throw new Error('die zwei Update-Quellen sind nach dem Zurueck weg');
+  }
+  await page.getByRole('button', { name: 'Zurücksetzen' }).click();
+});
+
 await step('Mehrfachauswahl in der Geraeteliste', async () => {
   await page.getByRole('checkbox', { name: 'Alle Geräte dieser Seite auswählen' }).click();
   await page.getByText(/\d+ ausgewählt/).waitFor({ timeout: 5_000 });
@@ -335,6 +366,8 @@ await step('Agents: Ausrollen mit Geraeten, Versionen, Stoerungen', async () => 
   await page.getByRole('tab', { name: 'Störungen' }).click();
   await page.waitForURL(/\/agents\/problems/);
   await page.getByText('Testeintrag aus dem Smoke-Test').first().waitFor({ timeout: 10_000 });
+  // Offline-Faelle aus smoke.mjs stehen getrennt, grau und zuletzt.
+  await page.getByText('Offline — weder Firmennetz noch VPN.').waitFor({ timeout: 10_000 });
   await capture(page, 'agents-stoerungen');
 
   // Ein altes Lesezeichen auf die Versionen in den Einstellungen findet hierher.

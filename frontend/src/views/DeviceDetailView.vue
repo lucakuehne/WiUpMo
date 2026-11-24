@@ -9,8 +9,10 @@ import {
   MonitorDown,
   Power,
   Trash2,
+  WifiOff,
 } from '@lucide/vue';
 import { computed, onMounted, ref } from 'vue';
+import { TRANSMISSION_FAILURE, isOfflineEntry } from '@/agent-log';
 import { useRouter } from 'vue-router';
 import { toast } from 'vue-sonner';
 import { del, get, post } from '@/api/client';
@@ -183,12 +185,11 @@ const latestCheckin = computed(() => device.value?.checkins[0] ?? null);
 /** Neueste zuerst — der Agent liefert sie in zeitlicher Reihenfolge. */
 const agentLogs = computed(() => [...(device.value?.agentDiagnostics?.recentLogs ?? [])].reverse());
 
-/**
- * So beginnt die Warnung des Agents, wenn er das Backend nicht erreicht
- * (AgentCycle.FlushAsync). Als Störung taugt sie nie: Der Check-in, der sie
- * mitbringt, ist selbst angekommen — die Verbindung steht also wieder.
- */
-const TRANSMISSION_FAILURE = 'Uebermittlung fehlgeschlagen';
+/** Im Agent-Protokoll grau statt als Warnung: offline entstanden, keine Störung. */
+const offlineLogs = computed(() => {
+  const entries = device.value?.agentDiagnostics?.recentLogs ?? [];
+  return new Set(entries.filter((entry) => isOfflineEntry(entry, entries)));
+});
 
 /**
  * Warnungen und Fehler aus dem jüngsten Durchlauf, älteste zuerst.
@@ -199,7 +200,7 @@ const TRANSMISSION_FAILURE = 'Uebermittlung fehlgeschlagen';
  * unmittelbar vor dem Erfassen, die Grenze liegt also genau dort. Agents vor
  * 0.6.0 kennen nur den jüngsten Eintrag.
  */
-const currentAgentProblems = computed<AgentLogEntry[]>(() => {
+const currentAgentEntries = computed<AgentLogEntry[]>(() => {
   const d = device.value?.agentDiagnostics;
   if (!d) {
     return [];
@@ -218,6 +219,19 @@ const currentAgentProblems = computed<AgentLogEntry[]>(() => {
       new Date(entry.at).getTime() > since && !entry.message.startsWith(TRANSMISSION_FAILURE),
   );
 });
+
+/**
+ * Die Störungen darunter. Was offline entstand — Update-Suche gescheitert,
+ * Backend im selben Durchlauf ebenfalls nicht erreichbar —, zählt nicht dazu;
+ * es steht als graue Zeile darunter.
+ */
+const currentAgentProblems = computed(() =>
+  currentAgentEntries.value.filter((entry) => !offlineLogs.value.has(entry)),
+);
+
+const currentOffline = computed(() =>
+  currentAgentEntries.value.filter((entry) => offlineLogs.value.has(entry)),
+);
 
 /**
  * Was am Agent nicht rund läuft, in Sätzen statt als Feldliste.
@@ -622,7 +636,7 @@ onMounted(load);
         unterwegs, Task da, kein neuer Fehler —,
         wäre der Kasten eine Zeile Bestätigung ohne Erkenntnis.
       -->
-      <Card v-if="agentIssues.length > 0" class="mb-4">
+      <Card v-if="agentIssues.length > 0 || currentOffline.length > 0" class="mb-4">
         <CardHeader>
           <CardTitle class="text-base">Agent-Zustand</CardTitle>
           <CardDescription>
@@ -635,6 +649,15 @@ onMounted(load);
             <li v-for="issue in agentIssues" :key="issue" class="flex items-start gap-2">
               <AlertTriangle class="text-warning mt-0.5 size-4 shrink-0" />
               <span>{{ issue }}</span>
+            </li>
+            <!-- Offline ist keine Störung: grau, ohne Warnzeichen. -->
+            <li v-if="currentOffline.length > 0" class="text-muted-foreground flex items-start gap-2">
+              <WifiOff class="mt-0.5 size-4 shrink-0" />
+              <span>
+                {{ formatRelative(currentOffline.at(-1)!.at) }}: offline — weder Firmennetz noch VPN;
+                Windows Update und Backend waren nicht erreichbar.
+                <template v-if="currentOffline.length > 1">({{ currentOffline.length }}-mal)</template>
+              </span>
             </li>
           </ul>
         </CardContent>
@@ -1194,10 +1217,23 @@ onMounted(load);
                   </TableCell>
                 </TableRow>
 
-                <TableRow v-for="(entry, index) in agentLogs" :key="`${entry.at}-${index}`">
+                <TableRow
+                  v-for="(entry, index) in agentLogs"
+                  :key="`${entry.at}-${index}`"
+                  :class="offlineLogs.has(entry) ? 'text-muted-foreground' : ''"
+                >
                   <TableCell>{{ formatDateTime(entry.at) }}</TableCell>
                   <TableCell>
                     <Badge
+                      v-if="offlineLogs.has(entry)"
+                      variant="outline"
+                      class="bg-muted text-muted-foreground border-transparent"
+                      title="Im selben Durchlauf war auch das Backend nicht erreichbar: weder Firmennetz noch VPN."
+                    >
+                      offline
+                    </Badge>
+                    <Badge
+                      v-else
                       variant="outline"
                       :class="
                         entry.level === 'error'

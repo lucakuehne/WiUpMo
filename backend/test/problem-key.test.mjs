@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { problemKey } from '../dist/src/agents/problem-key.js';
+import { isOfflineUpdateWarning, problemKey } from '../dist/src/agents/problem-key.js';
 
 test('Zahlen, Uhrzeiten und GUIDs fallen weg', () => {
   assert.equal(
@@ -28,4 +28,15 @@ test('Fehlercodes trennen die Stoerungen', () => {
     problemKey('Die Update-Suche ist gescheitert: 0x8024402C'),
   );
   assert.equal(problemKey('Fehler 0x8024402c'), 'Fehler 0x8024402C');
+});
+
+test('Offline: Update-Suche gescheitert, und im selben Durchlauf auch das Backend', () => {
+  const warnung = 'Update-Zustand nicht lesbar, Check-in ohne Update-Daten. \"Search: Fehler 0x80240438 der Windows-Update-API.\"';
+  const at = Date.parse('2026-11-20T08:00:00Z');
+  assert.equal(isOfflineUpdateWarning(warnung, at, [at + 400]), true, 'Uebermittlung gleich danach gescheitert');
+  assert.equal(isOfflineUpdateWarning(warnung, at, [at + 119_000]), true);
+  assert.equal(isOfflineUpdateWarning(warnung, at, []), false, 'Backend erreichbar, WSUS nicht: echte Stoerung');
+  assert.equal(isOfflineUpdateWarning(warnung, at, [at + 30 * 60_000]), false, 'spaeterer Durchlauf zaehlt nicht');
+  assert.equal(isOfflineUpdateWarning(warnung, at, [at - 1000]), false, 'frueherer Durchlauf zaehlt nicht');
+  assert.equal(isOfflineUpdateWarning('Neustart-Status nicht ueber WUApi ermittelbar', at, [at + 400]), false, 'nur die Update-Suche');
 });

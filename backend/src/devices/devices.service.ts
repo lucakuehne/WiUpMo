@@ -274,23 +274,23 @@ export class DevicesService {
       conditions.push(`d.status = ${params.add(query.status)}`);
     }
 
-    if (query.ou) {
-      // Der gewaehlte Bereich und alles darunter. Suffixvergleich statt LIKE:
-      // In einem DN koennen '%' und '_' vorkommen, ein Muster muesste sie erst
-      // maskieren.
-      const ou = params.add(query.ou);
-      conditions.push(
-        `(lower(d.ad_ou) = lower(${ou})
-          OR lower(right(d.ad_ou, length(${ou}) + 1)) = lower(',' || ${ou}))`,
-      );
+    if (query.ou?.length) {
+      // Jeder gewaehlte Bereich samt allem darunter, mehrere mit „oder“.
+      // Suffixvergleich statt LIKE: In einem DN koennen '%' und '_' vorkommen,
+      // ein Muster muesste sie erst maskieren.
+      const units = query.ou.map((dn) => {
+        const ou = params.add(dn);
+        return `lower(d.ad_ou) = lower(${ou}) OR lower(right(d.ad_ou, length(${ou}) + 1)) = lower(',' || ${ou})`;
+      });
+      conditions.push(`(${units.join(' OR ')})`);
     }
 
-    if (query.agentVersion) {
-      conditions.push(`d.agent_version = ${params.add(query.agentVersion)}`);
+    if (query.agentVersion?.length) {
+      conditions.push(`d.agent_version = ANY(${params.add(query.agentVersion)}::text[])`);
     }
 
-    if (query.updateSource) {
-      conditions.push(`c.update_source = ${params.add(query.updateSource)}`);
+    if (query.updateSource?.length) {
+      conditions.push(`c.update_source::text = ANY(${params.add(query.updateSource)}::text[])`);
     }
 
     if (query.staleDays !== undefined) {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ChevronDown, ChevronRight, RotateCw } from '@lucide/vue';
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { get } from '@/api/client';
 import type { AgentProblem } from '@/api/types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -53,11 +53,21 @@ async function load(): Promise<void> {
   }
 }
 
+/** Dieselbe Meldung kann als Störung und als offline vorkommen; zusammen sind sie eindeutig. */
+function groupId(problem: AgentProblem): string {
+  return `${problem.offline ? 'offline' : 'stoerung'}|${problem.key}`;
+}
+
 function toggle(problem: AgentProblem): void {
   const next = new Set(expanded.value);
-  if (!next.delete(problem.key)) next.add(problem.key);
+  const id = groupId(problem);
+  if (!next.delete(id)) next.add(id);
   expanded.value = next;
 }
+
+/** Die echten Störungen; die Offline-Gruppen kommen vom Backend zuletzt. */
+const problems = computed(() => rows.value.filter((problem) => !problem.offline));
+const firstOffline = computed(() => rows.value.find((problem) => problem.offline));
 
 function onRangeChange(value: unknown): void {
   hours.value = String(value);
@@ -123,19 +133,42 @@ onMounted(load);
             </TableCell>
           </TableRow>
 
-          <template v-for="problem in rows" :key="problem.key">
+          <TableRow v-else-if="problems.length === 0" class="hover:bg-transparent">
+            <TableCell :colspan="6" class="text-muted-foreground py-6 text-center">
+              Keine Störungen — nur Meldungen von Geräten, die offline waren.
+            </TableCell>
+          </TableRow>
+
+          <template v-for="problem in rows" :key="groupId(problem)">
+            <!-- Zwischenüberschrift vor der ersten Offline-Gruppe. -->
+            <TableRow v-if="problem === firstOffline" class="bg-muted/40 hover:bg-muted/40">
+              <TableCell :colspan="6" class="text-muted-foreground py-2 text-xs whitespace-normal">
+                <span class="font-medium">Offline — weder Firmennetz noch VPN.</span>
+                Die Update-Suche scheiterte, und im selben Durchlauf erreichte das Gerät auch das
+                Backend nicht. Keine Störung, sondern der Normalfall unterwegs; zählt deshalb nicht mit.
+              </TableCell>
+            </TableRow>
+
             <TableRow
               class="cursor-pointer"
-              :aria-expanded="expanded.has(problem.key)"
+              :class="problem.offline ? 'text-muted-foreground' : ''"
+              :aria-expanded="expanded.has(groupId(problem))"
               @click="toggle(problem)"
             >
               <TableCell>
-                <ChevronDown v-if="expanded.has(problem.key)" class="text-muted-foreground size-4" />
+                <ChevronDown v-if="expanded.has(groupId(problem))" class="text-muted-foreground size-4" />
                 <ChevronRight v-else class="text-muted-foreground size-4" />
               </TableCell>
               <TableCell>
                 <Badge
-                  v-if="problem.level === 'error'"
+                  v-if="problem.offline"
+                  variant="outline"
+                  class="bg-muted text-muted-foreground border-transparent"
+                >
+                  offline
+                </Badge>
+                <Badge
+                  v-else-if="problem.level === 'error'"
                   variant="outline"
                   class="bg-destructive/15 text-destructive border-destructive/30"
                 >
@@ -150,12 +183,14 @@ onMounted(load);
                 </Badge>
               </TableCell>
               <TableCell class="text-sm break-words whitespace-normal">{{ problem.message }}</TableCell>
-              <TableCell class="tabular text-right font-semibold">{{ problem.devices }}</TableCell>
+              <TableCell class="tabular text-right" :class="problem.offline ? '' : 'font-semibold'">
+                {{ problem.devices }}
+              </TableCell>
               <TableCell class="tabular text-right">{{ problem.occurrences }}</TableCell>
               <TableCell :title="formatDateTime(problem.lastAt)">{{ formatRelative(problem.lastAt) }}</TableCell>
             </TableRow>
 
-            <TableRow v-if="expanded.has(problem.key)" class="hover:bg-transparent">
+            <TableRow v-if="expanded.has(groupId(problem))" class="hover:bg-transparent">
               <TableCell :colspan="6" class="bg-muted/30 p-4">
                 <div class="rounded-md border bg-background">
                   <Table>

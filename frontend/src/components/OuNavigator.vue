@@ -2,23 +2,32 @@
 import { ChevronDown, ChevronRight, Network } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import type { DeviceOu } from '@/api/types';
+import { Checkbox } from '@/components/ui/checkbox';
 import { dnSegments, domainOfDn, splitDn } from '@/dn';
 
 /**
  * Navigation durch die Organisationseinheiten.
  *
- * Anders als der Auswahlbaum in den Einstellungen ([[OuPicker]]) wird hier
- * genau eine Einheit gewählt, und die Zahlen sind das Wesentliche: Sie zeigen,
- * wo überhaupt etwas zu sehen ist. Gezählt wird der ganze Unterbaum — die
+ * Ein Klick auf den Namen wählt genau diese Einheit, das Kästchen davor nimmt
+ * weitere dazu — der häufige Fall bleibt ein Klick, der seltenere ist
+ * trotzdem sichtbar. Die Zahlen sind das Wesentliche: Sie zeigen, wo
+ * überhaupt etwas zu sehen ist. Gezählt wird der ganze Unterbaum — die
  * Filterung tut dasselbe, und eine Zwischenebene mit „0", unter der hundert
  * Geräte liegen, wäre schlicht irreführend.
  */
 const props = defineProps<{
-  modelValue: string | null;
+  /** Gewählte Einheiten als DN; leer heisst: alle Geräte. */
+  modelValue: string[];
   units: DeviceOu[];
 }>();
 
-const emit = defineEmits<{ 'update:modelValue': [string | null] }>();
+const emit = defineEmits<{ 'update:modelValue': [string[]] }>();
+
+const chosen = computed(() => new Set(props.modelValue.map((dn) => dn.toLowerCase())));
+
+function isChosen(dn: string): boolean {
+  return chosen.value.has(dn.toLowerCase());
+}
 
 interface Node {
   dn: string;
@@ -137,9 +146,15 @@ const rows = computed<Row[]>(() => {
   return result;
 });
 
-/** Ein erneuter Klick auf die gewählte Einheit hebt die Einschränkung auf. */
+/** Nur diese Einheit; ein erneuter Klick auf die allein gewählte hebt die Einschränkung auf. */
 function select(dn: string): void {
-  emit('update:modelValue', props.modelValue === dn ? null : dn);
+  emit('update:modelValue', props.modelValue.length === 1 && isChosen(dn) ? [] : [dn]);
+}
+
+/** Über das Kästchen: dazu oder weg, die übrigen bleiben. */
+function toggle(dn: string, checked: boolean): void {
+  const rest = props.modelValue.filter((value) => value.toLowerCase() !== dn.toLowerCase());
+  emit('update:modelValue', checked ? [...rest, dn] : rest);
 }
 
 function toggleCollapse(dn: string): void {
@@ -167,9 +182,9 @@ function toggleCollapse(dn: string): void {
         type="button"
         class="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-sm"
         :class="
-          modelValue === null ? 'bg-accent text-accent-foreground font-medium' : 'hover:bg-accent/50'
+          modelValue.length === 0 ? 'bg-accent text-accent-foreground font-medium' : 'hover:bg-accent/50'
         "
-        @click="emit('update:modelValue', null)"
+        @click="emit('update:modelValue', [])"
       >
         <!--
           Bewusst ohne Zahl: Sie müsste die Geräte ohne Organisationseinheit
@@ -187,9 +202,7 @@ function toggleCollapse(dn: string): void {
         v-for="row in rows"
         :key="row.dn"
         class="flex items-center gap-1 rounded"
-        :class="
-          modelValue === row.dn ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
-        "
+        :class="isChosen(row.dn) ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'"
         :style="{ paddingLeft: `${row.depth * 0.85}rem` }"
       >
         <button
@@ -204,10 +217,17 @@ function toggleCollapse(dn: string): void {
         </button>
         <span v-else class="w-[1.375rem] shrink-0" />
 
+        <Checkbox
+          class="mr-1 size-3.5 shrink-0"
+          :aria-label="`${row.label} zur Auswahl nehmen`"
+          :model-value="isChosen(row.dn)"
+          @update:model-value="toggle(row.dn, $event === true)"
+        />
+
         <button
           type="button"
           class="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-left text-sm"
-          :class="modelValue === row.dn ? 'font-medium' : ''"
+          :class="isChosen(row.dn) ? 'font-medium' : ''"
           :title="row.dn"
           @click="select(row.dn)"
         >

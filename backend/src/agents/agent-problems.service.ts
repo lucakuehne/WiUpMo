@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AgentProblemDeviceDto, AgentProblemDto } from './agent-problems.dto.js';
-import { TRANSMISSION_FAILURE, problemKey } from './problem-key.js';
+import { TRANSMISSION_FAILURE, isOfflineUpdateWarning, problemKey } from './problem-key.js';
 
 interface LogRow {
   device_id: string;
@@ -50,15 +50,31 @@ export class AgentProblemsService {
 
     const problems = new Map<string, { problem: AgentProblemDto; byDevice: Map<string, AgentProblemDeviceDto> }>();
 
+    // Die gescheiterten Uebermittlungen je Geraet: Woran sich eine Warnung zur
+    // Update-Suche als „offline“ erkennen laesst.
+    const transmissionFailures = new Map<string, number[]>();
+    for (const row of rows) {
+      if (!row.message.startsWith(TRANSMISSION_FAILURE)) continue;
+      const list = transmissionFailures.get(row.device_id) ?? [];
+      list.push(row.at.getTime());
+      transmissionFailures.set(row.device_id, list);
+    }
+
     // Neueste zuerst: Was als Erstes eintrifft, ist je Gruppe und Geraet das Juengste.
     for (const row of rows) {
       if (row.message.startsWith(TRANSMISSION_FAILURE)) continue;
 
       const key = problemKey(row.message);
+      const offline = isOfflineUpdateWarning(
+        row.message,
+        row.at.getTime(),
+        transmissionFailures.get(row.device_id) ?? [],
+      );
+      const groupKey = `${offline ? 'offline' : 'stoerung'}|${key}`;
       const at = row.at.toISOString();
       const isError = row.level?.toLowerCase() === 'error';
 
-      let group = problems.get(key);
+      let group = problems.get(groupKey);
       if (!group) {
         group = {
           problem: {
@@ -68,11 +84,12 @@ export class AgentProblemsService {
             devices: 0,
             occurrences: 0,
             lastAt: at,
+            offline,
             entries: [],
           },
           byDevice: new Map(),
         };
-        problems.set(key, group);
+        problems.set(groupKey, group);
       }
 
       group.problem.occurrences++;
@@ -98,6 +115,12 @@ export class AgentProblemsService {
         devices: byDevice.size,
         entries: [...byDevice.values()],
       }))
-      .sort((a, b) => b.devices - a.devices || b.occurrences - a.occurrences || b.lastAt.localeCompare(a.lastAt));
+      .sort(
+        (a, b) =>
+          Number(a.offline) - Number(b.offline) ||
+          b.devices - a.devices ||
+          b.occurrences - a.occurrences ||
+          b.lastAt.localeCompare(a.lastAt),
+      );
   }
 }

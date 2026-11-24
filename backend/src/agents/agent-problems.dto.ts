@@ -43,6 +43,14 @@ export class AgentProblemDto {
   devices: number;
   occurrences: number;
   lastAt: string;
+
+  /**
+   * Entstand, waehrend die Geraete offline waren — die Update-Suche scheiterte,
+   * und im selben Durchlauf auch die Uebermittlung ans Backend. Keine Stoerung;
+   * diese Gruppen stehen getrennt und zuletzt.
+   */
+  offline: boolean;
+
   /** Die betroffenen Geraete, juengste Meldung zuerst. */
   entries: AgentProblemDeviceDto[];
 }

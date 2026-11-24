@@ -19,6 +19,15 @@ import { AgentUpdateJobState, DeviceStatus, UpdateSource } from '../../database/
 const toInt = () =>
   Transform(({ value }) => (value === undefined || value === '' ? undefined : Number(value)));
 
+/**
+ * Ein Wert oder mehrere: `?ou=a` und `?ou=a&ou=b` kommen beide als Liste an.
+ * Wiederholte Parameter statt Komma-Liste — in einem DN stehen Kommas.
+ */
+const toArray = () =>
+  Transform(({ value }) =>
+    value === undefined || value === '' ? undefined : (Array.isArray(value) ? value : [value]).filter((v) => v !== ''),
+  );
+
 const toBool = () =>
   Transform(({ value }) =>
     value === undefined || value === '' ? undefined : ['1', 'true', 'yes'].includes(String(value).toLowerCase()),
@@ -76,26 +85,37 @@ export class DeviceQueryDto {
   status?: DeviceStatus;
 
   /**
-   * Organisationseinheit als DN, einschliesslich aller darunterliegenden.
+   * Organisationseinheiten als DN, jeweils einschliesslich aller
+   * darunterliegenden; mehrere verknuepft mit „oder“.
    *
    * Der Unterbaum ist die einzig brauchbare Auslegung: Wer im Baum auf
    * `OU=Clients` klickt, meint die Notebooks und Arbeitsplaetze darunter mit —
    * direkt in einer Zwischenebene liegen selten Konten.
    */
-  @IsString()
-  @MaxLength(512)
+  @toArray()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  @MaxLength(512, { each: true })
   @IsOptional()
-  ou?: string;
+  ou?: string[];
 
-  /** Genau diese gemeldete Agent-Version. */
-  @IsString()
-  @MaxLength(32)
+  /** Genau diese gemeldeten Agent-Versionen, eine oder mehrere. */
+  @toArray()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  @MaxLength(32, { each: true })
   @IsOptional()
-  agentVersion?: string;
+  agentVersion?: string[];
 
-  @IsEnum(UpdateSource)
+  /** Eine oder mehrere Update-Quellen. */
+  @toArray()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsEnum(UpdateSource, { each: true })
   @IsOptional()
-  updateSource?: UpdateSource;
+  updateSource?: UpdateSource[];
 
   /** Nur Geraete, deren letzter Check-in laenger als N Tage zurueckliegt. */
   @toInt()

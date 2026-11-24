@@ -178,6 +178,15 @@ await step('Geraeteliste', async () => {
   assert.equal(item.pendingReboot, true);
   assert.equal(item.updateSource, 'wsus');
   assert.equal(item.agentVersion, AGENT_VERSION);
+
+  // Ein Wert wie bisher; mehrere als wiederholter Parameter, verknuepft mit „oder“.
+  const total = async (query) => (await api.get(`/api/devices?search=${HOST}&${query}`)).total;
+  assert.equal(await total('updateSource=wsus'), 1);
+  assert.equal(await total('updateSource=wsus&updateSource=microsoft_update'), 1);
+  assert.equal(await total('updateSource=microsoft_update'), 0);
+  assert.equal(await total(`agentVersion=0.0.1&agentVersion=${AGENT_VERSION}`), 1);
+  assert.equal(await total('agentVersion=0.0.1'), 0);
+  await api.request('GET', '/api/devices?updateSource=wsus&updateSource=kaputt', { expect: 400 });
 });
 
 await step('Geraetedetail mit Update-Zustaenden', async () => {
@@ -918,13 +927,42 @@ await step('Stoerungen der Agents, nach Meldung zusammengefasst', async () => {
 
   await api.request('GET', '/api/agent-problems?days=3', { expect: 400 });
 
+  // Offline: Die Update-Suche scheitert, und im selben Durchlauf auch die
+  // Uebermittlung — das Geraet war weder im Firmennetz noch im VPN. Steht
+  // getrennt und zuletzt. Ohne gescheiterte Uebermittlung bleibt es Stoerung.
+  const wuWarning = 'Update-Zustand nicht lesbar, Check-in ohne Update-Daten. "Search: Smoke-Offline 0x80240438."';
+  const ago = (seconds) => new Date(Date.now() - seconds * 1000).toISOString();
+  const withLogs = (hostInfoOf, recentLogs) => ({
+    ...snapshot({ hostInfo: hostInfoOf, collectedAt: minutesAgo(1) }),
+    diagnostics: { queuedSnapshots: 0, updaterTaskRegistered: true, recentLogs },
+  });
+  const offlineHost = host(`OFFLINE-${RUN}`);
+  const offlineDevice = await enroll(agent, enrollmentToken, offlineHost);
+  await checkin(agent, offlineDevice.token, withLogs(offlineHost, [
+    { at: ago(300), level: 'Warning', message: wuWarning },
+    { at: ago(299), level: 'Warning', message: 'Uebermittlung fehlgeschlagen, 1 Snapshots bleiben in der Warteschlange: Host unbekannt' },
+  ]));
+  const wsusHost = host(`WSUSWEG-${RUN}`);
+  const wsusDevice = await enroll(agent, enrollmentToken, wsusHost);
+  await checkin(agent, wsusDevice.token, withLogs(wsusHost, [{ at: ago(200), level: 'Warning', message: wuWarning }]));
+
+  const withOffline = await api.get('/api/agent-problems?hours=1');
+  const smokeOffline = withOffline.filter((p) => p.key.includes('Smoke-Offline'));
+  assert.deepEqual(
+    smokeOffline.map((p) => [p.offline, p.entries.map((e) => e.hostname)]),
+    [[false, [`WSUSWEG-${RUN}`]], [true, [`OFFLINE-${RUN}`]]],
+    'Stoerung zuerst, offline getrennt danach',
+  );
+  assert.ok(withOffline.findIndex((p) => p.offline) > withOffline.findLastIndex((p) => !p.offline), 'Offline zuletzt');
+
   // Die letzte Stunde: Die Testeintraege tragen den Zeitpunkt ihres Snapshots
   // und sind frisch, also dabei. 24 Stunden meinen dasselbe wie ein Tag.
   const lastHour = await api.get('/api/agent-problems?hours=1');
   assert.ok(lastHour.some((p) => p.key === 'Testeintrag aus dem Smoke-Test'), 'frischer Eintrag fehlt in der letzten Stunde');
+  const groupsOf = (list) => list.map((p) => `${p.offline}|${p.key}`).sort();
   assert.deepEqual(
-    (await api.get('/api/agent-problems?hours=24')).map((p) => p.key).sort(),
-    problems.map((p) => p.key).sort(),
+    groupsOf(await api.get('/api/agent-problems?hours=24')),
+    groupsOf(await api.get('/api/agent-problems?days=1')),
     'hours=24 und days=1 meinen dasselbe',
   );
   await api.request('GET', '/api/agent-problems?hours=2', { expect: 400 });
